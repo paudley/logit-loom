@@ -5,8 +5,8 @@
 ## Supported versions
 
 Logit Loom is pre-1.0. Security fixes are made on the latest published release
-and the default branch. Older alpha releases may require upgrading rather than
-receiving a backport.
+and the default branch. Older pre-1.0 releases may require upgrading rather
+than receiving a backport.
 
 ## Reporting a vulnerability
 

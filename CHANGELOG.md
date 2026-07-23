@@ -3,10 +3,12 @@
 # Changelog
 
 All notable changes to Logit Loom are documented here. The project follows
-[Semantic Versioning](https://semver.org/) once stable compatibility guarantees
-are introduced; alpha releases may change APIs between versions.
+[Semantic Versioning](https://semver.org/). Before `1.0.0`, minor releases may
+include breaking API changes.
 
 ## [Unreleased]
+
+## [0.1.0] - 2026-07-23
 
 ### Added
 
@@ -29,6 +31,9 @@ are introduced; alpha releases may change APIs between versions.
   boundary tests.
 - Validating `StateSnapshot` reconstruction and ownership APIs for
   application-defined checkpoint persistence.
+- A shared-family project logo, editable social card, rendered sharing image,
+  and public brand guidance.
+- Up-front README rationale and mechanically scoped use cases.
 
 ### Changed
 
@@ -73,4 +78,5 @@ are introduced; alpha releases may change APIs between versions.
 - Model and `LoRA` loading reject files whose content identity changes across
   the native load operation.
 
-[Unreleased]: https://github.com/paudley/logit-loom/commits/main
+[Unreleased]: https://github.com/paudley/logit-loom/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/paudley/logit-loom/releases/tag/v0.1.0

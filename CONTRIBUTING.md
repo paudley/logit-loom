@@ -62,7 +62,7 @@ documentation clearly identify an opt-in local-artifact requirement.
 
 ## Compatibility
 
-The API is currently alpha, but changes should still be deliberate. Do not
+The API is currently pre-1.0, but changes should still be deliberate. Do not
 silently reinterpret an existing serialized shape, digest domain, receipt, or
 checkpoint identity. Prefer an explicitly versioned replacement and note the
 change in `CHANGELOG.md`.

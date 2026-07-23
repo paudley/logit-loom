@@ -64,7 +64,7 @@ cargo publish -p CRATE_NAME --locked
 ```
 
 After all packages resolve from crates.io, create one signed tag such as
-`v0.1.0-alpha.1` from the exact published commit and create the GitHub release
+`v0.1.0` from the exact published commit and create the GitHub release
 from the matching changelog section.
 
 ## Verify

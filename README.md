@@ -142,9 +142,9 @@ cargo run -p logit-loom --example observe_tokens
 
 ## Status
 
-The API is an alpha and may change before `0.1.0`. The backend-neutral crates
-are intended to remain small. Native backend churn is isolated in adapter
-crates.
+The API is pre-1.0 and may change between minor releases. The backend-neutral
+crates are intended to remain small. Native backend churn is isolated in
+adapter crates.
 
 No model weights, generated output corpus, adapters, or control vectors are
 included. Native tests that execute a model are opt-in and must use an

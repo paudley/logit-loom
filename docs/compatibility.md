@@ -6,7 +6,7 @@
 
 The current minimum supported Rust version is 1.97.1, pinned in
 `rust-toolchain.toml`. All workspace crates use the same release version. The
-API is alpha and may change before a stable release.
+API is pre-1.0 and may change between minor releases.
 
 ## Contract bounds
 
