@@ -19,8 +19,8 @@ depends on both foundational crates.
 ```toml
 [dependencies]
 # Choose the smallest layer that provides the APIs you need.
-logit-loom-core = "=0.1.0"
-# logit-loom = "=0.1.0"
+logit-loom-core = "=0.1.1"
+# logit-loom = "=0.1.1"
 ```
 
 When using the adapter, depend directly on `logit-loom` for plan and callback
@@ -28,8 +28,8 @@ types and keep the workspace versions aligned and exact:
 
 ```toml
 [dependencies]
-logit-loom = "=0.1.0"
-logit-loom-llamacpp = { version = "=0.1.0", features = ["vulkan"] }
+logit-loom = "=0.1.1"
+logit-loom-llamacpp = { version = "=0.1.1", features = ["vulkan"] }
 ```
 
 ## Try backend-neutral mechanics

@@ -19,8 +19,8 @@ Only a maintainer publishes crates or creates GitHub releases.
    configured.
 7. Review the resolved dependency licenses and current security advisories for
    the exact `Cargo.lock`.
-8. Use a current, least-privilege crates.io credential and verify the intended
-   package owners before publication.
+8. Verify the intended package owners and trusted-publisher records before
+   publication.
 
 ## Validate
 
@@ -35,9 +35,10 @@ Inspect package lists for missing license/readme files, private paths, model
 artifacts, generated corpora, credentials, or unrelated internal references.
 The release check performs no model inference.
 
-The repository does not install a dependency-audit tool implicitly. Record the
-tool and advisory snapshot used for the release, and review any ignored or
-withdrawn advisory explicitly.
+The local release script does not install a dependency-audit tool implicitly.
+The hosted publishing workflow explicitly installs its pinned `cargo-audit`
+version. Record the tool and advisory snapshot used for the release, and review
+any ignored or withdrawn advisory explicitly.
 
 Dependent package verification may require the exact foundational version to
 exist on crates.io. Use `cargo publish --dry-run` again immediately before each
@@ -48,6 +49,26 @@ available package-content audit for dependent crates. `make package` performs
 full Cargo verification in publication order and is expected to succeed only
 once each exact dependency it needs is available from the registry.
 
+## Trusted publishing
+
+The first version of each crate must be published manually with a current,
+least-privilege crates.io credential. Subsequent coordinated releases use
+`.github/workflows/release-cargo.yaml` and
+[crates.io trusted publishing](https://crates.io/docs/trusted-publishing).
+Each of the three crate records must use this exact identity:
+
+| Field | Value |
+| --- | --- |
+| Repository owner | `paudley` |
+| Repository name | `logit-loom` |
+| Workflow filename | `release-cargo.yaml` |
+| Environment | none |
+
+The workflow has read-only repository access plus `id-token: write` only in
+the publishing job. The pinned crates.io authentication action exchanges the
+GitHub OIDC identity for a short-lived token and revokes it when the job
+finishes. Do not add a long-lived crates.io token to GitHub secrets.
+
 ## Publish order
 
 Publish and wait for crates.io indexing in this order:
@@ -56,16 +77,21 @@ Publish and wait for crates.io indexing in this order:
 2. `logit-loom`
 3. `logit-loom-llamacpp`
 
-For each crate:
+The workflow performs a dry run immediately before publishing each crate:
 
 ```sh
 cargo publish -p CRATE_NAME --locked --dry-run
 cargo publish -p CRATE_NAME --locked
 ```
 
-After all packages resolve from crates.io, create one signed tag such as
-`v0.1.0` from the exact published commit and create the GitHub release
-from the matching changelog section.
+Create one signed `vVERSION` tag from the exact release commit and push that
+tag. The tag must match the shared workspace version and a dated changelog
+heading; the workflow rejects mismatches, reruns the clean release gate and
+RustSec audit, then publishes in the order above.
+
+After all packages resolve from crates.io, create the GitHub release from the
+matching changelog section. A failed partially published release requires
+maintainer review; do not move or reuse its tag.
 
 ## Verify
 

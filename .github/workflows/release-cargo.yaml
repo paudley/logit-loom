@@ -1,0 +1,111 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+
+name: Publish crates
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-cargo
+  cancel-in-progress: false
+
+env:
+  CARGO_INCREMENTAL: "0"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  release-check:
+    name: Release checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install native build prerequisites
+        run: sudo apt-get update && sudo apt-get install -y cmake clang libclang-dev
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.97.1 --profile minimal --component clippy,rustfmt
+      - name: Verify tag and changelog
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_version="${GITHUB_REF_NAME#v}"
+          if [[ -z "${release_version}" || "${release_version}" == "${GITHUB_REF_NAME}" ]]; then
+            echo "release tag must have the form vVERSION" >&2
+            exit 1
+          fi
+
+          mapfile -t workspace_versions < <(
+            cargo metadata --locked --no-deps --format-version 1 |
+              jq -r '.packages[].version' |
+              sort -u
+          )
+          if [[ "${#workspace_versions[@]}" -ne 1 ]]; then
+            echo "workspace crates do not share one version" >&2
+            exit 1
+          fi
+          if [[ "${workspace_versions[0]}" != "${release_version}" ]]; then
+            echo "tag ${GITHUB_REF_NAME} does not match workspace version ${workspace_versions[0]}" >&2
+            exit 1
+          fi
+          if ! grep -Fq "## [${release_version}] -" CHANGELOG.md; then
+            echo "CHANGELOG.md has no ${release_version} release heading" >&2
+            exit 1
+          fi
+      - name: Run clean release gate
+        run: scripts/release-check.sh
+      - name: Inspect package contents
+        run: make package-list
+
+  dependency-audit:
+    name: RustSec advisory audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.97.1 --profile minimal
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --version 0.22.2 --locked
+      - name: Audit the exact lockfile
+        run: cargo audit --deny warnings
+
+  publish:
+    name: Publish coordinated crates
+    needs: [release-check, dependency-audit]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install native build prerequisites
+        run: sudo apt-get update && sudo apt-get install -y cmake clang libclang-dev
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.97.1 --profile minimal
+      - name: Authenticate to crates.io
+        id: crates_io
+        uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5
+      - name: Publish logit-loom-core
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.crates_io.outputs.token }}
+        run: |
+          cargo publish -p logit-loom-core --locked --dry-run
+          cargo publish -p logit-loom-core --locked
+      - name: Publish logit-loom
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.crates_io.outputs.token }}
+        run: |
+          cargo publish -p logit-loom --locked --dry-run
+          cargo publish -p logit-loom --locked
+      - name: Publish logit-loom-llamacpp
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.crates_io.outputs.token }}
+        run: |
+          cargo publish -p logit-loom-llamacpp --locked --dry-run
+          cargo publish -p logit-loom-llamacpp --locked

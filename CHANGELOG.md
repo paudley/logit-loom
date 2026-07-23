@@ -8,6 +8,19 @@ include breaking API changes.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-07-23
+
+### Added
+
+- Tag-gated, OIDC-authenticated publishing for the coordinated crates.io
+  workspace release.
+
+### Changed
+
+- Release validation now binds the release tag, shared workspace version, dated
+  changelog entry, clean repository checks, and exact-lockfile RustSec audit
+  before any crate is published.
+
 ## [0.1.0] - 2026-07-23
 
 ### Added
@@ -78,5 +91,6 @@ include breaking API changes.
 - Model and `LoRA` loading reject files whose content identity changes across
   the native load operation.
 
-[Unreleased]: https://github.com/paudley/logit-loom/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/paudley/logit-loom/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/paudley/logit-loom/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/paudley/logit-loom/releases/tag/v0.1.0

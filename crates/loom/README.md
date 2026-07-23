@@ -10,7 +10,7 @@ cooperative cancellation, and mechanical receipts. It does not load a model.
 
 ```toml
 [dependencies]
-logit-loom = "=0.1.0"
+logit-loom = "=0.1.1"
 ```
 
 ## Example

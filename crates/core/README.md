@@ -10,7 +10,7 @@ model runtime or native code.
 
 ```toml
 [dependencies]
-logit-loom-core = "=0.1.0"
+logit-loom-core = "=0.1.1"
 ```
 
 ## Example

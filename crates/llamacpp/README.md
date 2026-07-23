@@ -15,8 +15,8 @@ for the deployment explicitly:
 
 ```toml
 [dependencies]
-logit-loom = "=0.1.0"
-logit-loom-llamacpp = { version = "=0.1.0", features = ["vulkan"] }
+logit-loom = "=0.1.1"
+logit-loom-llamacpp = { version = "=0.1.1", features = ["vulkan"] }
 ```
 
 `ModelOptions::default` requires accelerator participation and does not retry a
