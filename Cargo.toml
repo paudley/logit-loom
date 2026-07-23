@@ -1,0 +1,46 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+
+[workspace]
+resolver = "3"
+members = [
+    "crates/core",
+    "crates/loom",
+    "crates/llamacpp",
+]
+
+[workspace.package]
+version = "0.1.0-alpha.1"
+edition = "2024"
+rust-version = "1.97.1"
+authors = ["Blackcat Informatics Inc."]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/paudley/logit-loom"
+homepage = "https://github.com/paudley/logit-loom"
+
+[workspace.dependencies]
+blake3 = "1.8.5"
+llama-cpp-4 = { version = "=0.4.2", default-features = false }
+logit-loom = { version = "=0.1.0-alpha.1", path = "crates/loom" }
+logit-loom-core = { version = "=0.1.0-alpha.1", path = "crates/core" }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.150"
+thiserror = "2.0.19"
+
+[workspace.lints.rust]
+missing_docs = "deny"
+unsafe_code = "deny"
+unused_qualifications = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "debuginfo"
+
+[profile.dev]
+debug = "line-tables-only"

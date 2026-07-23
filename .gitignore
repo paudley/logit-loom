@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+
+/target/
+/.cache/
+/.env
+/.env.*
+*.gguf
+*.safetensors
+*.bin
+*.log
+*.profraw
+*.profdata
+.DS_Store

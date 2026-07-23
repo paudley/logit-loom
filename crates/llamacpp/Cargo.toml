@@ -1,0 +1,43 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+
+[package]
+name = "logit-loom-llamacpp"
+description = "llama.cpp adapter for Logit Loom token-stream mechanics"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/logit-loom-llamacpp"
+readme = "README.md"
+keywords = ["llama", "llm", "logits", "inference", "steering"]
+categories = ["api-bindings", "external-ffi-bindings"]
+
+[features]
+default = []
+blas = ["llama-cpp-4/blas"]
+cuda = ["llama-cpp-4/cuda"]
+dynamic-link = ["llama-cpp-4/dynamic-link"]
+hip = ["llama-cpp-4/hip"]
+metal = ["llama-cpp-4/metal"]
+native-cpu = ["llama-cpp-4/native"]
+opencl = ["llama-cpp-4/opencl"]
+openmp = ["llama-cpp-4/openmp"]
+prebuilt = ["llama-cpp-4/prebuilt"]
+rpc = ["llama-cpp-4/rpc"]
+vulkan = ["llama-cpp-4/vulkan"]
+webgpu = ["llama-cpp-4/webgpu"]
+
+[dependencies]
+blake3.workspace = true
+llama-cpp-4.workspace = true
+logit-loom.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true
+
+[package.metadata.docs.rs]
+no-default-features = true

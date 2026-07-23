@@ -6,9 +6,8 @@ below **and** reserves the right to grant separate commercial/proprietary licens
 
 ## Open-source terms
 
-The entire repository — the Rust workspace, the Python, WebAssembly, and C bindings,
-documentation, the conformance vectors, and build tooling — is offered under your
-choice of either:
+The entire repository — the Rust workspace, examples, documentation, and build
+tooling — is offered under your choice of either:
 
 | License | Text |
 |---|---|

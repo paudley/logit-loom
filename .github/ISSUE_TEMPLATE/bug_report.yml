@@ -1,0 +1,62 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+
+name: Bug report
+description: Report incorrect mechanical behavior or a contract mismatch.
+title: "Bug: "
+body:
+  - type: dropdown
+    id: crate
+    attributes:
+      label: Affected crate
+      options:
+        - logit-loom-core
+        - logit-loom
+        - logit-loom-llamacpp
+        - Documentation or repository tooling
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      placeholder: 0.1.0-alpha.1 or a full commit ID
+    validations:
+      required: true
+  - type: textarea
+    id: contract
+    attributes:
+      label: Expected contract
+      description: Describe the ordering, bound, causal boundary, or failure behavior expected.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Use the smallest token sequence, candidate array, or code sample possible.
+      render: rust
+    validations:
+      required: true
+  - type: textarea
+    id: observed
+    attributes:
+      label: Observed behavior
+      description: Include the exact error and mechanical result. Do not include private prompts or model artifacts.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include Rust version, operating system, adapter feature, and device placement when relevant.
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Submission checks
+      options:
+        - label: This report contains no model weights, private prompts, credentials, or proprietary output corpus.
+          required: true
+        - label: This is not an undisclosed security vulnerability.
+          required: true

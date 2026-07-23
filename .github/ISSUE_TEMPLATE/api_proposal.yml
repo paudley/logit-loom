@@ -1,0 +1,43 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+
+name: API proposal
+description: Propose a generally useful token-stream primitive or contract change.
+title: "API: "
+body:
+  - type: textarea
+    id: mechanism
+    attributes:
+      label: Mechanical capability
+      description: Describe what the primitive does without making semantic efficacy claims.
+    validations:
+      required: true
+  - type: textarea
+    id: boundary
+    attributes:
+      label: Execution boundary
+      description: State ordering, causal timing, mutation, failure behavior, and resource bounds.
+    validations:
+      required: true
+  - type: textarea
+    id: portability
+    attributes:
+      label: Backend and compatibility impact
+      description: Identify native assumptions, serialized shape changes, digest domains, and feature requirements.
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Proposed validation
+      description: List focused contract tests and any opt-in model fixture needed.
+    validations:
+      required: true
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope checks
+      options:
+        - label: The proposal is a generally useful public primitive rather than downstream application logic.
+          required: true
+        - label: The proposal does not claim model quality, safety, truthfulness, or semantic efficacy.
+          required: true

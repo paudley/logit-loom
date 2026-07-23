@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+
+[package]
+name = "logit-loom"
+description = "Composable Rust token-stream transforms, observers, and receipts"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/logit-loom"
+readme = "README.md"
+keywords = ["llm", "logits", "tokens", "inference", "steering"]
+categories = ["algorithms", "api-bindings"]
+
+[dependencies]
+logit-loom-core.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true
