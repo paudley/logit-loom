@@ -1,5 +1,9 @@
 # Logit Loom
 
+<p align="center">
+  <img src="docs/logit-loom-logo.svg" alt="Logit Loom black cat holding a token-transform loom" width="260">
+</p>
+
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](LICENSING.md)
 [![CI](https://github.com/paudley/logit-loom/actions/workflows/ci.yml/badge.svg)](https://github.com/paudley/logit-loom/actions/workflows/ci.yml)
 
@@ -10,6 +14,38 @@ should say or think.
 
 The project is functionality-oriented. It makes no claim that a particular
 transform, sampler, adapter, or steering method improves model quality.
+
+## Why this exists
+
+Native inference backends expose useful low-level hooks, but applications still
+need their ordering, bounds, causal timing, ownership, and failure behavior to
+be explicit. Logit Loom puts a small, typed Rust boundary around those
+mechanics: backend-neutral contracts where possible, contained callback
+execution, and native details isolated in an adapter.
+
+## Use cases
+
+- **Compose custom decoding mechanics.** Run ordered full-vocabulary or bounded
+  sparse logit transforms before native sampling. Candidate changes commit only
+  when every stage succeeds, so an error or panic cannot leave a partial
+  write-back.
+- **Instrument generation at the causal boundary.** Observe arbitrary token
+  bytes only after native admission, then implement logging, counters,
+  cooperative stops, or application-specific control flow without assuming
+  that each token is valid UTF-8.
+- **Record mechanical provenance.** Serialize bounded plans and retain
+  content-bound receipts for configuration, lineage, and token-accounting
+  checks. Receipts describe what mechanics ran; they do not judge the generated
+  content.
+- **Keep tools independent of one model backend.** Build planning, transform,
+  and observation components against the foundational crates, then connect
+  them to llama.cpp through the adapter or supply another backend integration.
+- **Run resumable local inference workers.** Capture and restore opaque
+  llama.cpp state with model, backend-build, allocation, and token-history
+  identity checks rather than treating native state as a portable file format.
+- **Manage steering resources explicitly.** Scope caller-supplied LoRA adapters
+  or control vectors to one session and poison the session if cleanup fails,
+  avoiding silent continuation with uncertain native state.
 
 ## Crates
 
@@ -142,3 +178,6 @@ licensing. Report vulnerabilities privately as described in
 Logit Loom is available under your choice of the MIT License or Apache License
 2.0. Separate proprietary/commercial licensing is also available from
 Blackcat Informatics Inc. See [LICENSING.md](LICENSING.md).
+
+Project logo and social-sharing assets are documented in the
+[brand guide](docs/BRAND.md).

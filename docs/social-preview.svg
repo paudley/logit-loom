@@ -1,0 +1,97 @@
+<!-- SPDX-FileCopyrightText: 2026 Blackcat Informatics® Inc. <paudley@blackcatinformatics.ca> -->
+<!-- SPDX-License-Identifier: MIT OR Apache-2.0 -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640" width="1280" height="640" role="img" aria-labelledby="title desc">
+  <title id="title">Logit Loom social preview</title>
+  <desc id="desc">The Logit Loom black cat logo beside a concise description of its bounded Rust token-stream mechanics.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1280" y2="640" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#080b12"/>
+      <stop offset="0.58" stop-color="#101827"/>
+      <stop offset="1" stop-color="#18243a"/>
+    </linearGradient>
+    <radialGradient id="logo-field" cx="0.5" cy="0.48" r="0.65">
+      <stop offset="0" stop-color="#263754"/>
+      <stop offset="1" stop-color="#111827"/>
+    </radialGradient>
+    <linearGradient id="accent-rule" x1="548" y1="0" x2="1132" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ea4335"/>
+      <stop offset="0.33" stop-color="#4285f4"/>
+      <stop offset="0.66" stop-color="#fbbc05"/>
+      <stop offset="1" stop-color="#34a853"/>
+    </linearGradient>
+    <pattern id="loom-grid" width="48" height="48" patternUnits="userSpaceOnUse">
+      <path d="M0 24 H48 M24 0 V48" fill="none" stroke="#8da2c2" stroke-width="1" opacity="0.09"/>
+    </pattern>
+    <filter id="panel-shadow" x="-12%" y="-16%" width="124%" height="132%" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="18" stdDeviation="28" flood-color="#000000" flood-opacity="0.34"/>
+    </filter>
+    <style>
+      .label {
+        fill: #8fa6c7;
+        font-family: "DejaVu Sans", "Helvetica Neue", Arial, sans-serif;
+        font-size: 22px;
+        font-weight: 700;
+        letter-spacing: 3px;
+      }
+      .title {
+        fill: #ffffff;
+        font-family: "DejaVu Sans", "Helvetica Neue", Arial, sans-serif;
+        font-size: 104px;
+        font-weight: 700;
+        letter-spacing: -2px;
+      }
+      .tagline {
+        fill: #c9d6e8;
+        font-family: "DejaVu Sans", "Helvetica Neue", Arial, sans-serif;
+        font-size: 34px;
+        font-weight: 400;
+      }
+      .capability {
+        fill: #e5edf8;
+        font-family: "DejaVu Sans", "Helvetica Neue", Arial, sans-serif;
+        font-size: 27px;
+        font-weight: 400;
+      }
+      .mono {
+        fill: #8297b5;
+        font-family: "DejaVu Sans Mono", "SFMono-Regular", Consolas, monospace;
+        font-size: 20px;
+        font-weight: 400;
+      }
+    </style>
+  </defs>
+
+  <rect width="1280" height="640" fill="url(#background)"/>
+  <rect width="1280" height="640" fill="url(#loom-grid)"/>
+
+  <rect x="44" y="48" width="1192" height="544" rx="38" fill="#0d1421" fill-opacity="0.82" stroke="#293852" stroke-width="2" filter="url(#panel-shadow)"/>
+  <circle cx="276" cy="320" r="216" fill="url(#logo-field)" stroke="#31415d" stroke-width="2"/>
+  <image href="logit-loom-logo.svg" x="52" y="96" width="448" height="448" preserveAspectRatio="xMidYMid meet"/>
+
+  <text x="548" y="116" class="label">RUST TOKEN-STREAM TOOLKIT</text>
+  <text x="540" y="220" class="title">Logit Loom</text>
+  <text x="548" y="278" class="tagline">Bounded mechanics at the token boundary</text>
+  <rect x="548" y="308" width="584" height="7" rx="3.5" fill="url(#accent-rule)"/>
+
+  <g class="capability">
+    <circle cx="560" cy="365" r="9" fill="#ea4335"/>
+    <text x="582" y="375">ordered transforms</text>
+    <circle cx="890" cy="365" r="9" fill="#4285f4"/>
+    <text x="912" y="375">exact-byte observers</text>
+
+    <circle cx="560" cy="420" r="9" fill="#fbbc05"/>
+    <text x="582" y="430">bounded generation</text>
+    <circle cx="890" cy="420" r="9" fill="#34a853"/>
+    <text x="912" y="430">plans &amp; receipts</text>
+  </g>
+
+  <text x="548" y="490" class="mono">backend-neutral core · llama.cpp · MIT OR Apache-2.0</text>
+  <text x="548" y="535" class="mono">github.com/paudley/logit-loom</text>
+
+  <g>
+    <rect x="0" y="628" width="320" height="12" fill="#ea4335"/>
+    <rect x="320" y="628" width="320" height="12" fill="#4285f4"/>
+    <rect x="640" y="628" width="320" height="12" fill="#fbbc05"/>
+    <rect x="960" y="628" width="320" height="12" fill="#34a853"/>
+  </g>
+</svg>
