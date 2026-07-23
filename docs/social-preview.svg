@@ -2,7 +2,7 @@
 <!-- SPDX-License-Identifier: MIT OR Apache-2.0 -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640" width="1280" height="640" role="img" aria-labelledby="title desc">
   <title id="title">Logit Loom social preview</title>
-  <desc id="desc">The Logit Loom black cat logo beside a concise description of its bounded Rust token-stream mechanics.</desc>
+  <desc id="desc">The Logit Loom black cat logo beside the title, the tagline Be your own Dr. Frankenstein, and a concise list of Rust token-stream mechanics.</desc>
   <defs>
     <linearGradient id="background" x1="0" y1="0" x2="1280" y2="640" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#080b12"/>
@@ -41,10 +41,10 @@
         letter-spacing: -2px;
       }
       .tagline {
-        fill: #c9d6e8;
-        font-family: "DejaVu Sans", "Helvetica Neue", Arial, sans-serif;
-        font-size: 34px;
-        font-weight: 400;
+	fill: #d8e5f5;
+	font-family: "DejaVu Sans", "Helvetica Neue", Arial, sans-serif;
+	font-size: 38px;
+	font-weight: 700;
       }
       .capability {
         fill: #e5edf8;
@@ -70,7 +70,7 @@
 
   <text x="548" y="116" class="label">RUST TOKEN-STREAM TOOLKIT</text>
   <text x="540" y="220" class="title">Logit Loom</text>
-  <text x="548" y="278" class="tagline">Bounded mechanics at the token boundary</text>
+  <text x="548" y="278" class="tagline">Be your own Dr. Frankenstein!</text>
   <rect x="548" y="308" width="584" height="7" rx="3.5" fill="url(#accent-rule)"/>
 
   <g class="capability">
