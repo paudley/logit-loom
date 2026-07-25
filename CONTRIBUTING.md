@@ -37,6 +37,7 @@ Use a backend feature explicitly when building an application, for example:
 
 ```sh
 cargo check -p logit-loom-llamacpp --features vulkan
+cargo check -p logit-loom-runtime --features vulkan
 ```
 
 Backend features should generally be selected one deployment at a time. See

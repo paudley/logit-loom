@@ -19,6 +19,10 @@ It intentionally makes no model-quality or research-efficacy claims.
 | Checkpoint capture/restore | `StateSnapshot` | Reconstruction/accounting unit tests; native capture/restore is opt-in |
 | Scoped `LoRA` | `LoraScope` | Type/API compilation; model/adapter execution is opt-in |
 | Scoped control vectors | `ControlVectorScope` | Dimension/lifecycle code and type/API compilation; model execution is opt-in |
+| Higher-level request and control construction | `GenerationRequest`, `PipelineBuilder`, `ObserversBuilder` | Model-free bounds, identity, transform, observer, and exact-byte tests |
+| Higher-level one-shot and stateful workflows | `Loom`, `LoomSession` | Complete type/API compilation and doctests; model execution is opt-in |
+| Typed higher-level steering scopes | `LoraSession`, `ControlVectorSession` | Type/API compilation; resource execution is opt-in |
+| End-to-end mechanical experiment runbooks | Five `logit-loom-runtime` examples and JSON reports | Complete type/API compilation; caller-run model and LoRA execution is opt-in |
 
 ## Validation vocabulary
 

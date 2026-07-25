@@ -34,6 +34,7 @@ fi
 cargo package -p logit-loom-core "${package_flags[@]}"
 cargo package -p logit-loom "${package_flags[@]}" --list >/dev/null
 cargo package -p logit-loom-llamacpp "${package_flags[@]}" --list >/dev/null
+cargo package -p logit-loom-runtime "${package_flags[@]}" --list >/dev/null
 
 if rg -n --hidden --glob '!target/**' --glob '!.git/**' \
     --glob '!scripts/release-check.sh' \

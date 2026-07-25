@@ -554,7 +554,7 @@ checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
 
 [[package]]
 name = "logit-loom"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "logit-loom-core",
  "thiserror",
@@ -562,7 +562,7 @@ dependencies = [
 
 [[package]]
 name = "logit-loom-core"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "blake3",
  "serde",
@@ -572,11 +572,22 @@ dependencies = [
 
 [[package]]
 name = "logit-loom-llamacpp"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "blake3",
  "llama-cpp-4",
  "logit-loom",
+ "thiserror",
+]
+
+[[package]]
+name = "logit-loom-runtime"
+version = "0.2.0"
+dependencies = [
+ "logit-loom",
+ "logit-loom-llamacpp",
+ "serde",
+ "serde_json",
  "thiserror",
 ]
 

@@ -1,0 +1,46 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+
+[package]
+name = "logit-loom-runtime"
+description = "Explicit high-level local runtime for Logit Loom and llama.cpp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/logit-loom-runtime"
+readme = "README.md"
+keywords = ["llm", "llama", "logits", "inference", "runtime"]
+categories = ["api-bindings", "development-tools"]
+
+[features]
+default = []
+blas = ["logit-loom-llamacpp/blas"]
+cuda = ["logit-loom-llamacpp/cuda"]
+dynamic-link = ["logit-loom-llamacpp/dynamic-link"]
+hip = ["logit-loom-llamacpp/hip"]
+metal = ["logit-loom-llamacpp/metal"]
+native-cpu = ["logit-loom-llamacpp/native-cpu"]
+opencl = ["logit-loom-llamacpp/opencl"]
+openmp = ["logit-loom-llamacpp/openmp"]
+prebuilt = ["logit-loom-llamacpp/prebuilt"]
+rpc = ["logit-loom-llamacpp/rpc"]
+vulkan = ["logit-loom-llamacpp/vulkan"]
+webgpu = ["logit-loom-llamacpp/webgpu"]
+
+[dependencies]
+logit-loom.workspace = true
+logit-loom-llamacpp.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true
+
+[package.metadata.docs.rs]
+no-default-features = true

@@ -21,11 +21,13 @@ package:
 	cargo package -p logit-loom-core --locked
 	cargo package -p logit-loom --locked
 	cargo package -p logit-loom-llamacpp --locked
+	cargo package -p logit-loom-runtime --locked
 
 package-list:
 	cargo package -p logit-loom-core --allow-dirty --list
 	cargo package -p logit-loom --allow-dirty --list
 	cargo package -p logit-loom-llamacpp --allow-dirty --list
+	cargo package -p logit-loom-runtime --allow-dirty --list
 
 release-check:
 	scripts/release-check.sh

@@ -51,11 +51,11 @@ once each exact dependency it needs is available from the registry.
 
 ## Trusted publishing
 
-The first version of each crate must be published manually with a current,
+The first version of a new crate must be published manually with a current,
 least-privilege crates.io credential. Subsequent coordinated releases use
 `.github/workflows/release-cargo.yaml` and
 [crates.io trusted publishing](https://crates.io/docs/trusted-publishing).
-Each of the three crate records must use this exact identity:
+Every trusted-publisher crate record must use this exact identity:
 
 | Field | Value |
 | --- | --- |
@@ -69,6 +69,14 @@ the publishing job. The pinned crates.io authentication action exchanges the
 GitHub OIDC identity for a short-lived token and revokes it when the job
 finishes. Do not add a long-lived crates.io token to GitHub secrets.
 
+The initial `logit-loom-runtime` publication is a bootstrap exception. Publish
+it manually only after the exact coordinated versions of
+`logit-loom-core`, `logit-loom`, and `logit-loom-llamacpp` have been published
+and indexed. Then create its trusted-publisher record with the identity above
+and add the fourth publish step to the workflow in a separately reviewed
+change. Until both actions are complete, the workflow intentionally publishes
+only the three already-configured crates.
+
 ## Publish order
 
 Publish and wait for crates.io indexing in this order:
@@ -76,6 +84,7 @@ Publish and wait for crates.io indexing in this order:
 1. `logit-loom-core`
 2. `logit-loom`
 3. `logit-loom-llamacpp`
+4. `logit-loom-runtime`
 
 The workflow performs a dry run immediately before publishing each crate:
 
@@ -87,7 +96,12 @@ cargo publish -p CRATE_NAME --locked
 Create one signed `vVERSION` tag from the exact release commit and push that
 tag. The tag must match the shared workspace version and a dated changelog
 heading; the workflow rejects mismatches, reruns the clean release gate and
-RustSec audit, then publishes in the order above.
+RustSec audit, then publishes its configured prefix of the order above.
+
+For the first release containing `logit-loom-runtime`, wait for the workflow's
+three packages to be indexed, then run both the runtime dry run and manual
+publication from the same tagged checkout. Do not manually publish the runtime
+from an untagged or modified tree.
 
 After all packages resolve from crates.io, create the GitHub release from the
 matching changelog section. A failed partially published release requires

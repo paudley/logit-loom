@@ -9,18 +9,20 @@ None of the ordinary examples download or execute a model.
 
 | Need | Crate |
 | --- | --- |
+| Explicit higher-level local model loading and generation | `logit-loom-runtime` |
 | Serializable token, sampler, steering, checkpoint, and receipt contracts | `logit-loom-core` |
 | Safe transform pipelines, observers, and cancellation | `logit-loom` |
 | A causal llama.cpp session and native sampler adapter | `logit-loom-llamacpp` |
 
 The `logit-loom` crate re-exports the core contracts. The llama.cpp adapter
-depends on both foundational crates.
+depends on both foundational crates. The runtime crate composes all three and
+re-exports the common caller-facing types.
 
 ```toml
 [dependencies]
 # Choose the smallest layer that provides the APIs you need.
-logit-loom-core = "=0.1.1"
-# logit-loom = "=0.1.1"
+logit-loom-core = "=0.2.0"
+# logit-loom = "=0.2.0"
 ```
 
 When using the adapter, depend directly on `logit-loom` for plan and callback
@@ -28,8 +30,16 @@ types and keep the workspace versions aligned and exact:
 
 ```toml
 [dependencies]
-logit-loom = "=0.1.1"
-logit-loom-llamacpp = { version = "=0.1.1", features = ["vulkan"] }
+logit-loom = "=0.2.0"
+logit-loom-llamacpp = { version = "=0.2.0", features = ["vulkan"] }
+```
+
+For the higher-level local workflow, select the native backend through the
+runtime crate:
+
+```toml
+[dependencies]
+logit-loom-runtime = { version = "=0.2.0", features = ["vulkan"] }
 ```
 
 ## Try backend-neutral mechanics
@@ -40,6 +50,7 @@ The in-memory examples exercise real public APIs without loading a model:
 cargo run -p logit-loom-core --example generation_plan
 cargo run -p logit-loom --example token_bias
 cargo run -p logit-loom --example observe_tokens
+cargo run -p logit-loom-runtime --example mechanics
 ```
 
 A transform call follows this lifecycle:
@@ -83,7 +94,36 @@ Receipts use the same pattern. Their identities establish exact mechanics and
 lineage; they are not signatures and do not establish output quality,
 truthfulness, or fitness for a workload.
 
-## Use llama.cpp explicitly
+## Use the higher-level local runtime
+
+`Loom::load` owns one process runtime and one caller-supplied local model.
+`Loom::complete` creates a fresh session for one exact prompt replacement and
+bounded generation call. `Loom::session` exposes separate replace, append,
+generate, checkpoint, and steering operations when causal state must persist.
+
+The façade does not select a chat template or retry rejected accelerator
+placement as CPU-only inference. Generation output remains exact bytes, and
+custom transform or observer callbacks require a caller-defined stable
+implementation digest.
+
+```sh
+cargo run -p logit-loom-runtime --example generate \
+  --features vulkan -- /path/to/model.gguf "Prompt"
+
+cargo run -p logit-loom-runtime --example branch \
+  --features vulkan -- /path/to/model.gguf "Branch from here:"
+```
+
+The [mechanical experiment runbooks](runbooks/README.md) turn five specific
+runtime questions into complete commands, JSON evidence reports, success
+criteria, variations, and failure diagnosis. Model execution remains opt-in
+and uses only caller-supplied local artifacts.
+
+See the [runtime interface guide](runtime-interface.md) for ownership,
+ordering, automatic identities, checkpoints, steering, and the lower-level
+escape hatch.
+
+## Use the llama.cpp adapter directly
 
 The adapter forwards backend features without enabling one by default. A live
 example requires a caller-supplied local GGUF and an explicitly selected
@@ -110,4 +150,8 @@ not treat it as a portable file format.
   compilation, and opt-in model execution.
 - [Compatibility](compatibility.md) covers Rust, native features, checkpoints,
   and artifact assumptions.
+- [Runtime interface](runtime-interface.md) documents the higher-level local
+  workflow and its explicit boundaries.
+- [Mechanical experiment runbooks](runbooks/README.md) provide five opt-in
+  model-backed workflows with structured evidence reports.
 - [Contributing](../CONTRIBUTING.md) lists the complete validation workflow.

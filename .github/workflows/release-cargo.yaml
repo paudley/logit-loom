@@ -75,7 +75,9 @@ jobs:
         run: cargo audit --deny warnings
 
   publish:
-    name: Publish coordinated crates
+    # logit-loom-runtime is intentionally absent until its first manual
+    # publication and trusted-publisher record exist. See docs/releasing.md.
+    name: Publish configured crates
     needs: [release-check, dependency-audit]
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -109,3 +111,6 @@ jobs:
         run: |
           cargo publish -p logit-loom-llamacpp --locked --dry-run
           cargo publish -p logit-loom-llamacpp --locked
+      - name: Report runtime bootstrap requirement
+        run: |
+          echo "::notice::logit-loom-runtime is not published by this workflow; follow docs/releasing.md"

@@ -8,6 +8,11 @@ The current minimum supported Rust version is 1.97.1, pinned in
 `rust-toolchain.toml`. All workspace crates use the same release version. The
 API is pre-1.0 and may change between minor releases.
 
+`logit-loom-runtime` is a convenience layer over the other three crates, not a
+separate compatibility authority. Its `LoomSession` preserves the adapter's
+single-owner lifetime and checkpoint rules. Applications needing independent
+native runtime/model ownership should use `logit-loom-llamacpp` directly.
+
 ## Contract bounds
 
 Serialized plans expose their collection and byte limits as public constants.
@@ -25,6 +30,12 @@ monitor accounting from the terminal `complete` and `stopped` states.
 Checkpoint metadata uses `checkpoint-receipt-v2`, whose backend identity binds
 the exact session allocation contract as well as the adapter build.
 
+The higher-level built-in helper domains are
+`runtime-rank-bias-v1`, `runtime-token-bias-v1`, and
+`runtime-cancellation-observer-v1`. A change to the corresponding built-in
+mechanics or normalized configuration shape requires a new domain. Custom
+transforms and observers retain caller-defined implementation identities.
+
 `logit-loom-llamacpp` pins `llama-cpp-4` exactly to version 0.4.2. A binding
 upgrade is a reviewed compatibility change: compile the complete workspace,
 inspect changed native semantics, rerun opt-in model fixtures, and update this
@@ -33,7 +44,7 @@ document and `CHANGELOG.md`.
 ## Native build features
 
 The adapter forwards these `llama-cpp-4` features without selecting one by
-default:
+default. `logit-loom-runtime` forwards the same feature names to the adapter:
 
 | Logit Loom feature | Native backend or build mode |
 | --- | --- |

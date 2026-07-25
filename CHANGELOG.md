@@ -8,6 +8,30 @@ include breaking API changes.
 
 ## [Unreleased]
 
+### Added
+
+- `logit-loom-runtime`, an explicit higher-level local llama.cpp façade for
+  model loading, exact text replacement/append, bounded one-shot and stateful
+  generation, checkpoints, and typed steering scopes.
+- Bounded pipeline and observer builders with versioned automatic identities
+  for first-party rank bias, token bias, and cooperative cancellation.
+- Runtime examples for model-free mechanics, local generation, and
+  compatibility-checked checkpoint branching.
+- Five end-to-end mechanical experiment runbooks with compiled runtime
+  examples, structured JSON reports, success criteria, variations, and failure
+  diagnosis for checkpoints, transforms, exact bytes, stopping, cancellation,
+  and scoped `LoRA`.
+- A higher-level interface guide covering ownership, ordering, identities,
+  exact bytes, concurrency boundaries, checkpoints, steering, and low-level
+  escape hatches.
+
+### Changed
+
+- Prepared all workspace crates and exact internal dependencies for the
+  coordinated `0.2.0` release.
+- Root, crate, capability, architecture, compatibility, getting-started, and
+  release documentation now describe the four-crate workspace.
+
 ## [0.1.1] - 2026-07-23
 
 ### Added

@@ -6,10 +6,11 @@ members = [
     "crates/core",
     "crates/loom",
     "crates/llamacpp",
+    "crates/runtime",
 ]
 
 [workspace.package]
-version = "0.1.1"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.97.1"
 authors = ["Blackcat Informatics Inc."]
@@ -20,8 +21,9 @@ homepage = "https://github.com/paudley/logit-loom"
 [workspace.dependencies]
 blake3 = "1.8.5"
 llama-cpp-4 = { version = "=0.4.2", default-features = false }
-logit-loom = { version = "=0.1.1", path = "crates/loom" }
-logit-loom-core = { version = "=0.1.1", path = "crates/core" }
+logit-loom = { version = "=0.2.0", path = "crates/loom" }
+logit-loom-core = { version = "=0.2.0", path = "crates/core" }
+logit-loom-llamacpp = { version = "=0.2.0", path = "crates/llamacpp" }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.150"
 thiserror = "2.0.19"

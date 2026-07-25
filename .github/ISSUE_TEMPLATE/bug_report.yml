@@ -12,6 +12,7 @@ body:
         - logit-loom-core
         - logit-loom
         - logit-loom-llamacpp
+        - logit-loom-runtime
         - Documentation or repository tooling
     validations:
       required: true
@@ -19,7 +20,7 @@ body:
     id: version
     attributes:
       label: Version or commit
-      placeholder: 0.1.0-alpha.1 or a full commit ID
+      placeholder: 0.2.0 or a full commit ID
     validations:
       required: true
   - type: textarea

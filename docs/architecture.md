@@ -7,16 +7,41 @@ from a fast-moving model backend.
 
 ```text
 application
-  ├─ plans, token IDs, receipts ─────────────── logit-loom-core
-  ├─ transforms, observers, cancellation ───── logit-loom
-  └─ model, session, native sampling/state ──── logit-loom-llamacpp
-                                                   │
-                                                   └─ llama-cpp-4 → llama.cpp
+  ├─ explicit local workflow ──────────────── logit-loom-runtime
+  ├─ plans, token IDs, receipts ───────────── logit-loom-core
+  ├─ transforms, observers, cancellation ─── logit-loom
+  └─ model, session, native sampling/state ── logit-loom-llamacpp
+
+logit-loom-runtime
+  ├─ logit-loom
+  └─ logit-loom-llamacpp → llama-cpp-4 → llama.cpp
 ```
 
 This split lets another backend consume `logit-loom-core` and `logit-loom`
 without importing llama.cpp types. Native ownership and compatibility churn
 remain in the adapter.
+
+## Runtime façade
+
+`logit-loom-runtime` composes one loaded model, the native runtime, borrowing
+sessions, generation plans, transforms, observers, checkpoints, and steering
+scopes. It adds no new sampling or native state semantics. The lower-layer
+ordering, callback containment, causal accounting, poisoning, and
+compatibility checks remain authoritative.
+
+One-shot completion creates a fresh session and performs exact-text replacement
+followed by one bounded generation call. Stateful sessions expose replacement
+and append as different methods. Tokenization flags, allocation options,
+device policy, controls, bytes, and mechanical identities stay visible.
+
+Pipelines and observers are mutable borrowed controls for one synchronous
+generation call. Their `GenerationPlan` remains owned and serializable; callback
+objects and native handles are deliberately not serialized. First-party façade
+helpers assign versioned configuration-bound implementation identities.
+Arbitrary callbacks require a caller-defined `Digest`.
+
+The façade does not manage chat messages, templates, asynchronous execution, or
+workers. Those are downstream application concerns.
 
 ## Candidate and sampling sequence
 

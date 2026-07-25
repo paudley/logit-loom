@@ -24,6 +24,8 @@ what a model may think, generate, or explore.
 - `crates/core/`: backend-neutral, serializable plans and receipts.
 - `crates/loom/`: safe Rust transform and observation runtime.
 - `crates/llamacpp/`: llama.cpp integration through `llama-cpp-4`.
+- `crates/runtime/`: explicit higher-level local workflow over the three lower
+  crates.
 - `docs/`: architecture, capabilities, compatibility, and release policy.
 - `scripts/`: deterministic repository checks.
 - `.github/`: continuous integration and contribution templates.
