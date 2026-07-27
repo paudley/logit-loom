@@ -11,38 +11,26 @@ than silently weakening replay identity.
 Source:
 [`krea2_latent_transplant.rs`](../../crates/diffusion-sdcpp/examples/krea2_latent_transplant.rs)
 
-## 1. Review and acquire the gated profile
-
-First review the upstream
-[Krea 2 Community License](https://huggingface.co/krea/Krea-2-Turbo) on a
-trusted interactive device and complete any required upstream access flow.
-Only after the operator has made that decision should the explicit local
-acknowledgement be supplied:
+## 1. Acquire the pinned execution profile
 
 ```sh
 MODEL_STORE=/path/to/model-store
 cargo run --quiet -p logit-loom-xtask -- models fetch krea-2-turbo \
-  --dir "$MODEL_STORE" \
-  --accept-license
+  --dir "$MODEL_STORE"
 cargo run --quiet -p logit-loom-xtask -- models verify \
   krea-2-turbo --dir "$MODEL_STORE"
 ```
 
-`--accept-license` records operator intent for this command. It does not accept
-terms on the operator's behalf, bypass upstream access controls, or alter the
-license.
-
 Select the exact catalogued components:
 
 ```sh
-LICENSE="$MODEL_STORE/krea-2-turbo/license/LICENSE.pdf"
 DIFFUSION="$MODEL_STORE/krea-2-turbo/diffusion/TURBO/Krea-2-Turbo-Q6_K.gguf"
 ENCODER="$MODEL_STORE/krea-2-turbo/text-encoder/Qwen3VL-4B-Instruct-Q4_K_M.gguf"
 VAE="$MODEL_STORE/krea-2-turbo/vae/split_files/vae/wan_2.1_vae.safetensors"
 ```
 
-The adapter verifies the gated license artifact and every selected model
-component before and after native context loading.
+The adapter verifies every selected execution component before and after native
+context loading. Legal documents, if present upstream, are not runtime inputs.
 
 At this revision Krea is first-class with passed mechanical acceptance. The
 example resolves that status from the packaged catalog. A future artifact,
@@ -86,7 +74,7 @@ OUT=/path/to/krea2-latent-transplant-output
 
 cargo run --quiet -p logit-loom-diffusion-sdcpp \
   --example krea2_latent_transplant -- \
-  "$LIB" "$LICENSE" "$DIFFUSION" "$ENCODER" "$VAE" \
+  "$LIB" "$DIFFUSION" "$ENCODER" "$VAE" \
   "$BACKEND" 8 "$OUT" \
   "a clockwork cat beside a small brass loom" \
   | tee krea2-latent-transplant.json
@@ -138,8 +126,6 @@ memory values from catalog byte counts or combine the three timing series.
 
 ## Failure diagnosis
 
-- **Gated license missing:** stop and complete the upstream review/access flow;
-  do not fabricate or substitute the exact catalogued PDF.
 - **Artifact mismatch:** rerun
   `cargo run --quiet -p logit-loom-xtask -- models verify` and keep the
   catalog revision fixed.

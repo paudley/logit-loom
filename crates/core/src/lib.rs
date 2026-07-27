@@ -3,6 +3,7 @@
 #![doc = include_str!("../README.md")]
 #![forbid(unsafe_code)]
 
+mod audio;
 mod digest;
 mod error;
 mod generation;
@@ -10,9 +11,13 @@ mod observe;
 mod sampling;
 mod state;
 mod steering;
+mod text_mechanics;
 mod token;
 mod transform;
 
+pub use audio::{
+    AudioPrefillPlanV1, AudioPrefillReceiptV1, MAX_AUDIO_FRAMES, MAX_AUDIO_SAMPLE_RATE_HZ,
+};
 pub use digest::Digest;
 pub use error::CoreError;
 pub use generation::{GenerationFinish, GenerationReceipt};
@@ -25,6 +30,9 @@ pub use sampling::{
 };
 pub use state::CheckpointReceipt;
 pub use steering::{ControlVectorSpec, LoraSpec, SteeringAction, SteeringKind, SteeringReceipt};
+pub use text_mechanics::{
+    MAX_SPECULATIVE_TOKENS, MAX_TEXT_MECHANICS_LORAS, TextMechanicsPlanV1, TextMechanicsReceiptV1,
+};
 pub use token::{CandidateMode, MAX_SPARSE_CANDIDATES, TokenId};
 pub use transform::{
     CallbackFailure, CallbackPhase, MAX_PIPELINE_STAGES, MAX_RETAINED_FAILURE_BYTES,

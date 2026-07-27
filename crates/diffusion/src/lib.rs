@@ -7,6 +7,7 @@ mod contract;
 mod error;
 mod execution;
 mod execution_v2;
+mod execution_v3;
 mod observer;
 mod pipeline;
 
@@ -31,6 +32,7 @@ pub use execution_v2::{
     ImageOutputReceiptV2, ImageOutputRoute, ImageOutputSource, ImageValueSource,
     MAX_IMAGE_COMPOSITE_STAGES, MAX_IMAGE_GRAPH_SCRATCH_BYTES, mask_blend_rgb8,
 };
+pub use execution_v3::{ImageExecutionPlanV3, ImageExecutionReceiptV3, ImageOutputReceiptV3};
 pub use observer::{ObserverReceipt, ObserverSet, StepObserver};
 pub use pipeline::{ChannelBias, Intervention, Pipeline};
 

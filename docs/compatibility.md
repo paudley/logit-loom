@@ -122,7 +122,7 @@ operators, and multiple native inference operations require another reviewed
 adapter contract; a lowerer must reject them instead of approximating them.
 
 Safe contract version `4` does not change companion ABI v1 or image extension
-v2. It adds a public `ImageExecutionPlanV2` lowering that combines advanced
+v2. It adds a public `ImageExecutionPlanV3` lowering that combines advanced
 image inputs and fixed `LoRA` bindings with the existing full-state callback,
 then performs versioned checkpoint routing, bounded deterministic RGB8
 compositing, explicit output routing, and cleanup accounting in Rust. The

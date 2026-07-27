@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "identity_domain": "logit-loom-model-acquisition-report-v1",
-  "catalog_sha256": "5beaf0742618e09200fa81deb680ec89b13375ae6f405fa63257d55fbadc6ade",
+  "catalog_sha256": "ea7793ef6159f71bb38ef6bb30b422bce9c6fc1ec79ed6263e0d6e881675a54e",
   "recorded_at_utc": "2026-07-26T03:13:39Z",
   "hf_cli_version": "1.4.1",
   "filesystem_available_bytes": 46403313664,
@@ -10,24 +10,13 @@
       "profile_id": "qwen3-0.6b-q8-0",
       "method": "hf-fetch",
       "status": "verified",
-      "catalog_artifact_bytes": 639458232,
-      "verified_artifact_bytes": 639458232,
-      "measured_profile_storage_bytes": 639458458,
+      "catalog_artifact_bytes": 639446688,
+      "verified_artifact_bytes": 639446688,
+      "measured_profile_storage_bytes": 639446914,
       "verified_artifacts": [
         {
           "catalog_domain": "logit-loom-model-catalog-v1",
-          "catalog_sha256": "5beaf0742618e09200fa81deb680ec89b13375ae6f405fa63257d55fbadc6ade",
-          "profile_id": "qwen3-0.6b-q8-0",
-          "source_id": "qwen3-gguf",
-          "repository": "Qwen/Qwen3-0.6B-GGUF",
-          "revision": "23749fefcc72300e3a2ad315e1317431b06b590a",
-          "artifact_path": "LICENSE",
-          "bytes": 11544,
-          "sha256": null
-        },
-        {
-          "catalog_domain": "logit-loom-model-catalog-v1",
-          "catalog_sha256": "5beaf0742618e09200fa81deb680ec89b13375ae6f405fa63257d55fbadc6ade",
+          "catalog_sha256": "ea7793ef6159f71bb38ef6bb30b422bce9c6fc1ec79ed6263e0d6e881675a54e",
           "profile_id": "qwen3-0.6b-q8-0",
           "source_id": "qwen3-gguf",
           "repository": "Qwen/Qwen3-0.6B-GGUF",
@@ -49,7 +38,7 @@
       "verified_artifacts": [
         {
           "catalog_domain": "logit-loom-model-catalog-v1",
-          "catalog_sha256": "5beaf0742618e09200fa81deb680ec89b13375ae6f405fa63257d55fbadc6ade",
+          "catalog_sha256": "ea7793ef6159f71bb38ef6bb30b422bce9c6fc1ec79ed6263e0d6e881675a54e",
           "profile_id": "minit2i-b16",
           "source_id": "minit2i",
           "repository": "MiniT2I/MiniT2I",
@@ -60,7 +49,7 @@
         },
         {
           "catalog_domain": "logit-loom-model-catalog-v1",
-          "catalog_sha256": "5beaf0742618e09200fa81deb680ec89b13375ae6f405fa63257d55fbadc6ade",
+          "catalog_sha256": "ea7793ef6159f71bb38ef6bb30b422bce9c6fc1ec79ed6263e0d6e881675a54e",
           "profile_id": "minit2i-b16",
           "source_id": "minit2i",
           "repository": "MiniT2I/MiniT2I",
@@ -71,7 +60,7 @@
         },
         {
           "catalog_domain": "logit-loom-model-catalog-v1",
-          "catalog_sha256": "5beaf0742618e09200fa81deb680ec89b13375ae6f405fa63257d55fbadc6ade",
+          "catalog_sha256": "ea7793ef6159f71bb38ef6bb30b422bce9c6fc1ec79ed6263e0d6e881675a54e",
           "profile_id": "minit2i-b16",
           "source_id": "minit2i",
           "repository": "MiniT2I/MiniT2I",
@@ -82,7 +71,7 @@
         },
         {
           "catalog_domain": "logit-loom-model-catalog-v1",
-          "catalog_sha256": "5beaf0742618e09200fa81deb680ec89b13375ae6f405fa63257d55fbadc6ade",
+          "catalog_sha256": "ea7793ef6159f71bb38ef6bb30b422bce9c6fc1ec79ed6263e0d6e881675a54e",
           "profile_id": "minit2i-b16",
           "source_id": "minit2i",
           "repository": "MiniT2I/MiniT2I",
@@ -93,7 +82,7 @@
         },
         {
           "catalog_domain": "logit-loom-model-catalog-v1",
-          "catalog_sha256": "5beaf0742618e09200fa81deb680ec89b13375ae6f405fa63257d55fbadc6ade",
+          "catalog_sha256": "ea7793ef6159f71bb38ef6bb30b422bce9c6fc1ec79ed6263e0d6e881675a54e",
           "profile_id": "minit2i-b16",
           "source_id": "flan-t5-large",
           "repository": "google/flan-t5-large",
@@ -104,7 +93,7 @@
         },
         {
           "catalog_domain": "logit-loom-model-catalog-v1",
-          "catalog_sha256": "5beaf0742618e09200fa81deb680ec89b13375ae6f405fa63257d55fbadc6ade",
+          "catalog_sha256": "ea7793ef6159f71bb38ef6bb30b422bce9c6fc1ec79ed6263e0d6e881675a54e",
           "profile_id": "minit2i-b16",
           "source_id": "flan-t5-large",
           "repository": "google/flan-t5-large",
@@ -115,7 +104,7 @@
         },
         {
           "catalog_domain": "logit-loom-model-catalog-v1",
-          "catalog_sha256": "5beaf0742618e09200fa81deb680ec89b13375ae6f405fa63257d55fbadc6ade",
+          "catalog_sha256": "ea7793ef6159f71bb38ef6bb30b422bce9c6fc1ec79ed6263e0d6e881675a54e",
           "profile_id": "minit2i-b16",
           "source_id": "flan-t5-large",
           "repository": "google/flan-t5-large",
@@ -126,7 +115,7 @@
         },
         {
           "catalog_domain": "logit-loom-model-catalog-v1",
-          "catalog_sha256": "5beaf0742618e09200fa81deb680ec89b13375ae6f405fa63257d55fbadc6ade",
+          "catalog_sha256": "ea7793ef6159f71bb38ef6bb30b422bce9c6fc1ec79ed6263e0d6e881675a54e",
           "profile_id": "minit2i-b16",
           "source_id": "flan-t5-large",
           "repository": "google/flan-t5-large",
@@ -137,7 +126,7 @@
         },
         {
           "catalog_domain": "logit-loom-model-catalog-v1",
-          "catalog_sha256": "5beaf0742618e09200fa81deb680ec89b13375ae6f405fa63257d55fbadc6ade",
+          "catalog_sha256": "ea7793ef6159f71bb38ef6bb30b422bce9c6fc1ec79ed6263e0d6e881675a54e",
           "profile_id": "minit2i-b16",
           "source_id": "flan-t5-large",
           "repository": "google/flan-t5-large",
@@ -148,7 +137,7 @@
         },
         {
           "catalog_domain": "logit-loom-model-catalog-v1",
-          "catalog_sha256": "5beaf0742618e09200fa81deb680ec89b13375ae6f405fa63257d55fbadc6ade",
+          "catalog_sha256": "ea7793ef6159f71bb38ef6bb30b422bce9c6fc1ec79ed6263e0d6e881675a54e",
           "profile_id": "minit2i-b16",
           "source_id": "flan-t5-large",
           "repository": "google/flan-t5-large",
@@ -159,7 +148,7 @@
         },
         {
           "catalog_domain": "logit-loom-model-catalog-v1",
-          "catalog_sha256": "5beaf0742618e09200fa81deb680ec89b13375ae6f405fa63257d55fbadc6ade",
+          "catalog_sha256": "ea7793ef6159f71bb38ef6bb30b422bce9c6fc1ec79ed6263e0d6e881675a54e",
           "profile_id": "minit2i-b16",
           "source_id": "flan-t5-large",
           "repository": "google/flan-t5-large",
@@ -175,24 +164,13 @@
       "profile_id": "krea-2-turbo",
       "method": "mixed",
       "status": "verified",
-      "catalog_artifact_bytes": 13272916709,
-      "verified_artifact_bytes": 13272916709,
+      "catalog_artifact_bytes": 13272778998,
+      "verified_artifact_bytes": 13272778998,
       "measured_profile_storage_bytes": null,
       "verified_artifacts": [
         {
           "catalog_domain": "logit-loom-model-catalog-v1",
-          "catalog_sha256": "5beaf0742618e09200fa81deb680ec89b13375ae6f405fa63257d55fbadc6ade",
-          "profile_id": "krea-2-turbo",
-          "source_id": "krea-license",
-          "repository": "krea/Krea-2-Turbo",
-          "revision": "98e0fe118d17c9e3547fbb2e25acdbae2cadf7c7",
-          "artifact_path": "LICENSE.pdf",
-          "bytes": 137711,
-          "sha256": "b82a2805162bde714a4eb27b9063c4fc3345d08a30be055134a6160e5430ba74"
-        },
-        {
-          "catalog_domain": "logit-loom-model-catalog-v1",
-          "catalog_sha256": "5beaf0742618e09200fa81deb680ec89b13375ae6f405fa63257d55fbadc6ade",
+          "catalog_sha256": "ea7793ef6159f71bb38ef6bb30b422bce9c6fc1ec79ed6263e0d6e881675a54e",
           "profile_id": "krea-2-turbo",
           "source_id": "krea-2-turbo-q6-k",
           "repository": "realrebelai/KREA-2_GGUFs",
@@ -203,7 +181,7 @@
         },
         {
           "catalog_domain": "logit-loom-model-catalog-v1",
-          "catalog_sha256": "5beaf0742618e09200fa81deb680ec89b13375ae6f405fa63257d55fbadc6ade",
+          "catalog_sha256": "ea7793ef6159f71bb38ef6bb30b422bce9c6fc1ec79ed6263e0d6e881675a54e",
           "profile_id": "krea-2-turbo",
           "source_id": "qwen3-vl-text-encoder",
           "repository": "Qwen/Qwen3-VL-4B-Instruct-GGUF",
@@ -214,7 +192,7 @@
         },
         {
           "catalog_domain": "logit-loom-model-catalog-v1",
-          "catalog_sha256": "5beaf0742618e09200fa81deb680ec89b13375ae6f405fa63257d55fbadc6ade",
+          "catalog_sha256": "ea7793ef6159f71bb38ef6bb30b422bce9c6fc1ec79ed6263e0d6e881675a54e",
           "profile_id": "krea-2-turbo",
           "source_id": "wan-2.1-vae",
           "repository": "Comfy-Org/Wan_2.1_ComfyUI_repackaged",

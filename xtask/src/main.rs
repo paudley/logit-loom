@@ -22,7 +22,7 @@ const USAGE: &str = "\
 usage:
   cargo run --quiet -p logit-loom-xtask -- models check
   cargo run --quiet -p logit-loom-xtask -- models list
-  cargo run --quiet -p logit-loom-xtask -- models fetch <profile> --dir <path> [--dry-run] [--accept-license]
+  cargo run --quiet -p logit-loom-xtask -- models fetch <profile> --dir <path> [--dry-run]
   cargo run --quiet -p logit-loom-xtask -- models verify <profile> --dir <path>
   cargo run --quiet -p logit-loom-xtask -- models verify-artifact <profile> <source> <artifact> --path <file>
 ";
@@ -77,12 +77,7 @@ fn run_models(args: &[String]) -> Result<(), Error> {
             let options = parse_fetch_options(&args[1..])?;
             let catalog = Catalog::embedded()?;
             let profile = find_profile(&catalog, &options.profile)?;
-            fetch_profile(
-                profile,
-                &options.destination,
-                options.accept_license,
-                options.dry_run,
-            )?;
+            fetch_profile(profile, &options.destination, options.dry_run)?;
             if options.dry_run {
                 println!("dry run complete; no directories were created and `hf` was not invoked");
             } else {
@@ -224,7 +219,6 @@ fn find_profile<'a>(catalog: &'a Catalog, id: &str) -> Result<&'a Profile, Error
 struct FetchOptions {
     profile: String,
     destination: PathBuf,
-    accept_license: bool,
     dry_run: bool,
 }
 
@@ -239,7 +233,6 @@ fn parse_fetch_options(args: &[String]) -> Result<FetchOptions, Error> {
     }
 
     let mut destination = None;
-    let mut accept_license = false;
     let mut dry_run = false;
     let mut index = 1;
     while index < args.len() {
@@ -254,7 +247,6 @@ fn parse_fetch_options(args: &[String]) -> Result<FetchOptions, Error> {
                 };
                 destination = Some(PathBuf::from(path));
             }
-            "--accept-license" if !accept_license => accept_license = true,
             "--dry-run" if !dry_run => dry_run = true,
             option => {
                 return Err(Error::Usage(format!(
@@ -271,7 +263,6 @@ fn parse_fetch_options(args: &[String]) -> Result<FetchOptions, Error> {
     Ok(FetchOptions {
         profile: profile.clone(),
         destination,
-        accept_license,
         dry_run,
     })
 }
@@ -430,7 +421,6 @@ mod tests {
         assert_eq!(options.profile, "minit2i-b16");
         assert_eq!(options.destination, destination);
         assert!(options.dry_run);
-        assert!(!options.accept_license);
     }
 
     #[test]

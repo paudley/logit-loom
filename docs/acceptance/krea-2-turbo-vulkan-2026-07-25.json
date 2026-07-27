@@ -6,16 +6,8 @@
   "adapter": "logit-loom-diffusion-sdcpp-0.2.0",
   "experiment": "krea2-latent-transplant-v1",
   "status": "passed",
-  "catalog_sha256": "5beaf0742618e09200fa81deb680ec89b13375ae6f405fa63257d55fbadc6ade",
+  "catalog_sha256": "ea7793ef6159f71bb38ef6bb30b422bce9c6fc1ec79ed6263e0d6e881675a54e",
   "artifacts": [
-    {
-      "source_id": "krea-license",
-      "repository": "krea/Krea-2-Turbo",
-      "revision": "98e0fe118d17c9e3547fbb2e25acdbae2cadf7c7",
-      "artifact_path": "LICENSE.pdf",
-      "bytes": 137711,
-      "sha256": "b82a2805162bde714a4eb27b9063c4fc3345d08a30be055134a6160e5430ba74"
-    },
     {
       "source_id": "krea-2-turbo-q6-k",
       "repository": "realrebelai/KREA-2_GGUFs",

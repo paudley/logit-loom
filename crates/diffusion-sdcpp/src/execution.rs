@@ -7,8 +7,8 @@ use std::path::PathBuf;
 use logit_loom_diffusion::{
     ControlFlow, DiffusionPlan, Digest, ImageBufferBinding, ImageBufferLayout, ImageBufferRole,
     ImageCheckpointPlan, ImageCleanupDisposition, ImageCleanupPolicy, ImageCompositeOperation,
-    ImageExecutionPlan, ImageExecutionPlanV2, ImageExecutionReceiptV2, ImageOperation,
-    ImageOutputReceiptV2, ImageOutputSource, ImageTerminal, ImageValueSource, Intervention,
+    ImageExecutionPlan, ImageExecutionPlanV3, ImageExecutionReceiptV3, ImageOperation,
+    ImageOutputReceiptV3, ImageOutputSource, ImageTerminal, ImageValueSource, Intervention,
     InterventionSpec, ObservationKind, ObservationRequest, OperatorInvocation, Pipeline,
     SeedSelection, StepContext, StepSelector, TensorSelector, mask_blend_rgb8,
 };
@@ -236,11 +236,11 @@ impl<R> ImagePlanExecutor<R> {
 impl<R: ArtifactPathResolver> ImagePlanExecutor<R> {
     fn execute_inner(
         &mut self,
-        plan: &ImageExecutionPlanV2,
+        plan: &ImageExecutionPlanV3,
         inputs: &[InputBuffer<'_>],
         outputs: &mut [OutputBuffer<'_>],
         cancellation: &dyn CancellationProbe,
-    ) -> Result<ImageExecutionReceiptV2> {
+    ) -> Result<ImageExecutionReceiptV3> {
         plan.validate().map_err(logit_loom_diffusion::Error::from)?;
         self.validate_bindings(plan)?;
         validate_bound_inputs(&plan.primary, inputs)?;
@@ -251,7 +251,7 @@ impl<R: ArtifactPathResolver> ImagePlanExecutor<R> {
         let plan_digest = plan.digest().map_err(logit_loom_diffusion::Error::from)?;
         let session_epoch = self.runtime.session_epoch();
         if cancellation.is_cancelled() {
-            let receipt = ImageExecutionReceiptV2 {
+            let receipt = ImageExecutionReceiptV3 {
                 plan: plan_digest,
                 backend: bindings.backend,
                 profile: bindings.profile,
@@ -341,11 +341,11 @@ impl<R: ArtifactPathResolver> ImagePlanExecutor<R> {
 
     fn finish_execution(
         &mut self,
-        plan: &ImageExecutionPlanV2,
+        plan: &ImageExecutionPlanV3,
         inputs: &[InputBuffer<'_>],
         outputs: &mut [OutputBuffer<'_>],
         mut execution: CompletedExecution,
-    ) -> Result<ImageExecutionReceiptV2> {
+    ) -> Result<ImageExecutionReceiptV3> {
         let cleanup = match plan.cleanup {
             ImageCleanupPolicy::RetainSession => ImageCleanupDisposition::Retained,
             ImageCleanupPolicy::ClearSession => {
@@ -363,7 +363,7 @@ impl<R: ArtifactPathResolver> ImagePlanExecutor<R> {
                 .checkpoint_identities
                 .push(Digest::of_bytes("sdcpp-checkpoint-envelope-v1", checkpoint));
         }
-        let receipt = ImageExecutionReceiptV2 {
+        let receipt = ImageExecutionReceiptV3 {
             plan: execution.plan_digest,
             backend: execution.backend,
             profile: execution.profile,
@@ -391,7 +391,7 @@ impl<R: ArtifactPathResolver> ImagePlanExecutor<R> {
         Ok(receipt)
     }
 
-    fn validate_bindings(&self, plan: &ImageExecutionPlanV2) -> Result<()> {
+    fn validate_bindings(&self, plan: &ImageExecutionPlanV3) -> Result<()> {
         let bindings = self.runtime.execution_bindings()?;
         if plan.primary.profile != bindings.profile
             || plan.primary.load != bindings.load
@@ -414,7 +414,7 @@ struct CompletedExecution {
     checkpoint_envelope: Option<Vec<u8>>,
     checkpoint_identities: Vec<Digest>,
     observation_identities: Vec<Digest>,
-    output_receipts: Vec<ImageOutputReceiptV2>,
+    output_receipts: Vec<ImageOutputReceiptV3>,
     primary_receipt: Digest,
     plan_digest: Digest,
     backend: Digest,
@@ -425,8 +425,8 @@ struct CompletedExecution {
 }
 
 impl<R: ArtifactPathResolver> LocalExecutor for ImagePlanExecutor<R> {
-    type Plan = ImageExecutionPlanV2;
-    type Receipt = ImageExecutionReceiptV2;
+    type Plan = ImageExecutionPlanV3;
+    type Receipt = ImageExecutionReceiptV3;
     type Error = Error;
 
     fn state(&self) -> ExecutorState {
@@ -497,7 +497,7 @@ struct PlanProgram<'a> {
 
 impl<'a> PlanProgram<'a> {
     fn new(
-        plan: &ImageExecutionPlanV2,
+        plan: &ImageExecutionPlanV3,
         cancellation: &'a dyn CancellationProbe,
         restore: Option<DiffusionCheckpoint>,
         backend: Digest,
@@ -935,7 +935,7 @@ fn validate_bound_inputs(plan: &ImageExecutionPlan, inputs: &[InputBuffer<'_>]) 
     Ok(())
 }
 
-fn validate_bound_outputs(plan: &ImageExecutionPlanV2, outputs: &[OutputBuffer<'_>]) -> Result<()> {
+fn validate_bound_outputs(plan: &ImageExecutionPlanV3, outputs: &[OutputBuffer<'_>]) -> Result<()> {
     if outputs.len() != plan.outputs.len() {
         return Err(Error::Invalid(
             "whole-image outputs must match declared route order and count".to_owned(),
@@ -1118,7 +1118,7 @@ fn input_for_slot_with_binding<'p, 'a>(
 }
 
 fn execute_composites(
-    plan: &ImageExecutionPlanV2,
+    plan: &ImageExecutionPlanV3,
     inputs: &[InputBuffer<'_>],
     primary: &[u8],
 ) -> Result<(
@@ -1150,7 +1150,7 @@ fn execute_composites(
 }
 
 fn resolve_image<'a>(
-    plan: &ImageExecutionPlanV2,
+    plan: &ImageExecutionPlanV3,
     inputs: &'a [InputBuffer<'a>],
     primary: &'a [u8],
     composites: &'a [Vec<u8>],
@@ -1169,13 +1169,13 @@ fn resolve_image<'a>(
 }
 
 fn preflight_route_payloads(
-    plan: &ImageExecutionPlanV2,
+    plan: &ImageExecutionPlanV3,
     inputs: &[InputBuffer<'_>],
     outputs: &[OutputBuffer<'_>],
     primary: &[u8],
     composites: &[Vec<u8>],
     checkpoint: Option<&[u8]>,
-) -> Result<Vec<ImageOutputReceiptV2>> {
+) -> Result<Vec<ImageOutputReceiptV3>> {
     let available = available_route_count(plan, checkpoint)?;
     let mut receipts = Vec::with_capacity(available);
     for (index, (route, output)) in plan.outputs.iter().zip(outputs).take(available).enumerate() {
@@ -1195,7 +1195,7 @@ fn preflight_route_payloads(
                 "image output route {index} must fill its exact allocation"
             )));
         }
-        receipts.push(ImageOutputReceiptV2 {
+        receipts.push(ImageOutputReceiptV3 {
             route: u16::try_from(index)
                 .map_err(|_| Error::Invalid("output route exceeds u16".to_owned()))?,
             allocation: route.buffer.identity.clone(),
@@ -1208,7 +1208,7 @@ fn preflight_route_payloads(
 }
 
 fn write_routes(
-    plan: &ImageExecutionPlanV2,
+    plan: &ImageExecutionPlanV3,
     inputs: &[InputBuffer<'_>],
     outputs: &mut [OutputBuffer<'_>],
     primary: &[u8],
@@ -1226,7 +1226,7 @@ fn write_routes(
     Ok(())
 }
 
-fn available_route_count(plan: &ImageExecutionPlanV2, checkpoint: Option<&[u8]>) -> Result<usize> {
+fn available_route_count(plan: &ImageExecutionPlanV3, checkpoint: Option<&[u8]>) -> Result<usize> {
     if checkpoint.is_some() || plan.checkpoint.capture_after_step.is_none() {
         return Ok(plan.outputs.len());
     }
@@ -1244,7 +1244,7 @@ fn available_route_count(plan: &ImageExecutionPlanV2, checkpoint: Option<&[u8]>)
 }
 
 fn route_payload<'a>(
-    plan: &ImageExecutionPlanV2,
+    plan: &ImageExecutionPlanV3,
     inputs: &'a [InputBuffer<'a>],
     primary: &'a [u8],
     composites: &'a [Vec<u8>],
@@ -1322,7 +1322,7 @@ mod tests {
         plan: &DiffusionPlan,
         checkpoint: ImageCheckpointPlan,
         observations: Vec<ObservationRequest>,
-    ) -> ImageExecutionPlanV2 {
+    ) -> ImageExecutionPlanV3 {
         let mut inputs = vec![ImageBufferBinding {
             slot: 0,
             role: ImageBufferRole::PositiveConditioning,
@@ -1370,7 +1370,7 @@ mod tests {
                 layout: ImageBufferLayout::Opaque,
             });
         }
-        ImageExecutionPlanV2 {
+        ImageExecutionPlanV3 {
             primary: ImageExecutionPlan {
                 profile: Digest::of_bytes("profile", b"one"),
                 load: Digest::of_bytes("load", b"one"),

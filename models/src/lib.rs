@@ -179,8 +179,6 @@ pub struct Profile {
     acceptance_status: AcceptanceStatus,
     adapter_target: AdapterTarget,
     requires_accelerator: bool,
-    requires_license_acceptance: bool,
-    acceptance_url: Option<String>,
     remote_code_policy: RemoteCodePolicy,
     notes: String,
     sources: Vec<Source>,
@@ -225,16 +223,6 @@ impl Profile {
     /// Returns whether model-backed execution requires accelerator placement.
     pub const fn requires_accelerator(&self) -> bool {
         self.requires_accelerator
-    }
-
-    /// Returns whether acquisition requires prior upstream license acceptance.
-    pub const fn requires_license_acceptance(&self) -> bool {
-        self.requires_license_acceptance
-    }
-
-    /// Returns the upstream acceptance page, when one is required.
-    pub fn acceptance_url(&self) -> Option<&str> {
-        self.acceptance_url.as_deref()
     }
 
     /// Returns the policy for executable code supplied by a model repository.
@@ -451,8 +439,6 @@ pub struct Source {
     repository: String,
     revision: String,
     local_subdir: String,
-    gated: bool,
-    license: License,
     files: Vec<ArtifactFile>,
 }
 
@@ -477,39 +463,9 @@ impl Source {
         &self.local_subdir
     }
 
-    /// Returns whether the upstream repository is gated.
-    pub const fn gated(&self) -> bool {
-        self.gated
-    }
-
-    /// Returns the upstream artifact license record.
-    pub const fn license(&self) -> &License {
-        &self.license
-    }
-
     /// Returns exact files in declared order.
     pub fn files(&self) -> &[ArtifactFile] {
         &self.files
-    }
-}
-
-/// Upstream license metadata for one source.
-#[derive(Clone, Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct License {
-    identifier: String,
-    url: String,
-}
-
-impl License {
-    /// Returns the SPDX identifier or upstream license name.
-    pub fn identifier(&self) -> &str {
-        &self.identifier
-    }
-
-    /// Returns the exact upstream license URL.
-    pub fn url(&self) -> &str {
-        &self.url
     }
 }
 
@@ -677,7 +633,6 @@ fn validate_profile(profile: &Profile) -> Result<(), CatalogError> {
 
     let mut source_ids = HashSet::new();
     let mut local_subdirs = HashSet::new();
-    let mut has_gated_source = false;
     let mut total_bytes = 0_u64;
     for source in &profile.sources {
         if !source_ids.insert(source.id.as_str()) {
@@ -692,7 +647,6 @@ fn validate_profile(profile: &Profile) -> Result<(), CatalogError> {
                 profile.id, source.local_subdir
             ));
         }
-        has_gated_source |= source.gated;
         total_bytes = total_bytes
             .checked_add(validate_source(&profile.id, source)?)
             .ok_or_else(|| {
@@ -705,31 +659,6 @@ fn validate_profile(profile: &Profile) -> Result<(), CatalogError> {
             profile.id
         ));
     }
-    if has_gated_source != profile.requires_license_acceptance {
-        return invalid(format!(
-            "profile {:?} must make license acceptance match its gated sources",
-            profile.id
-        ));
-    }
-    match (
-        profile.requires_license_acceptance,
-        profile.acceptance_url.as_deref(),
-    ) {
-        (true, Some(url)) => validate_https_url("acceptance_url", url)?,
-        (true, None) => {
-            return invalid(format!(
-                "profile {:?} requires an acceptance_url",
-                profile.id
-            ));
-        }
-        (false, None) => {}
-        (false, Some(_)) => {
-            return invalid(format!(
-                "profile {:?} has an acceptance_url but does not require acceptance",
-                profile.id
-            ));
-        }
-    }
     Ok(())
 }
 
@@ -738,8 +667,6 @@ fn validate_source(profile_id: &str, source: &Source) -> Result<u64, CatalogErro
     validate_repository(&source.repository)?;
     validate_revision(&source.revision)?;
     validate_slug("local_subdir", &source.local_subdir)?;
-    validate_text("license identifier", &source.license.identifier)?;
-    validate_https_url("license URL", &source.license.url)?;
     if source.files.is_empty() || source.files.len() > MAX_FILES_PER_SOURCE {
         return invalid(format!(
             "source {:?} in profile {profile_id:?} must contain between 1 and \
@@ -867,16 +794,6 @@ fn validate_sha256(path: &str, value: &str) -> Result<(), CatalogError> {
     Ok(())
 }
 
-fn validate_https_url(label: &str, value: &str) -> Result<(), CatalogError> {
-    if value.len() > MAX_TEXT_BYTES
-        || !value.starts_with("https://")
-        || value.bytes().any(|byte| byte.is_ascii_whitespace())
-    {
-        return invalid(format!("{label} must be a bounded HTTPS URL"));
-    }
-    Ok(())
-}
-
 fn is_weight_file(path: &str) -> bool {
     let path = path.to_ascii_lowercase();
     WEIGHT_SUFFIXES.iter().any(|suffix| path.ends_with(suffix))
@@ -948,7 +865,7 @@ mod tests {
     #[test]
     fn parent_path_is_rejected() {
         let mut catalog = Catalog::embedded().expect("fixture should load");
-        catalog.profiles[0].sources[0].files[0].path = "../LICENSE".to_owned();
+        catalog.profiles[0].sources[0].files[0].path = "../model.gguf".to_owned();
         assert!(matches!(
             catalog.validate(),
             Err(CatalogError::Invalid(message)) if message.contains("relative path")
@@ -958,7 +875,7 @@ mod tests {
     #[test]
     fn weight_without_digest_is_rejected() {
         let mut catalog = Catalog::embedded().expect("fixture should load");
-        catalog.profiles[0].sources[0].files[1].sha256 = None;
+        catalog.profiles[0].sources[0].files[0].sha256 = None;
         assert!(matches!(
             catalog.validate(),
             Err(CatalogError::Invalid(message)) if message.contains("requires a SHA-256")

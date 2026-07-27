@@ -17,11 +17,6 @@ const HASH_BUFFER_BYTES: usize = 1024 * 1024;
 
 #[derive(Debug, Error)]
 pub(crate) enum AcquireError {
-    #[error(
-        "profile {profile:?} requires prior acceptance of its upstream terms at {url}; \
-         after accepting them there, repeat with --accept-license"
-    )]
-    LicenseAcceptanceRequired { profile: String, url: String },
     #[error("failed to create model directory {path}: {source}")]
     CreateDirectory { path: PathBuf, source: io::Error },
     #[error("failed to invoke the `hf` CLI: {0}")]
@@ -51,18 +46,8 @@ pub(crate) enum AcquireError {
 pub(crate) fn fetch_profile(
     profile: &Profile,
     destination: &Path,
-    accept_license: bool,
     dry_run: bool,
 ) -> Result<(), AcquireError> {
-    if !dry_run && profile.requires_license_acceptance() && !accept_license {
-        return Err(AcquireError::LicenseAcceptanceRequired {
-            profile: profile.id().to_owned(),
-            url: profile
-                .acceptance_url()
-                .map_or_else(|| "<missing acceptance URL>".to_owned(), str::to_owned),
-        });
-    }
-
     let profile_root = destination.join(profile.id());
     for source in profile.sources() {
         let source_root = profile_root.join(source.local_subdir());

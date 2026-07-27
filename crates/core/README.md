@@ -5,8 +5,8 @@
 Serializable, backend-neutral contracts for bounded token-stream mechanics.
 
 This crate defines token identifiers, candidate exposure, sampling plans,
-steering descriptors, checkpoints, and mechanical receipts. It contains no
-model runtime or native code.
+steering descriptors, checkpoints, bounded audio-prefill contracts, and
+mechanical receipts. It contains no model runtime or native code.
 
 ```toml
 [dependencies]
@@ -48,6 +48,10 @@ interpretation is a compatibility change.
 ## Boundaries
 
 - Token pieces are arbitrary bytes, not necessarily standalone UTF-8.
+- `AudioPrefillPlanV1` binds one projector identity, its declared sample rate,
+  and a bounded caller-owned normalized mono PCM slice. Its receipt binds only
+  a caller-provided audio identity and causal accounting; it never serializes
+  PCM bytes.
 - Public collections and native strings have documented bounds.
 - Receipts record mechanics and causal lineage, not model quality or semantic
   correctness.

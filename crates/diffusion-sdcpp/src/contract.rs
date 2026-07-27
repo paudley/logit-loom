@@ -106,7 +106,7 @@ pub enum ProfileArtifacts {
         /// FLAN-T5-Large `model.safetensors`.
         text_encoder: PathBuf,
     },
-    /// Krea diffusion GGUF, Qwen3-VL GGUF, Wan VAE, and gated license.
+    /// Krea diffusion GGUF, Qwen3-VL GGUF, and Wan VAE.
     Krea2 {
         /// `Krea-2-Turbo-Q6_K.gguf`.
         diffusion_model: PathBuf,
@@ -114,8 +114,6 @@ pub enum ProfileArtifacts {
         text_encoder: PathBuf,
         /// `wan_2.1_vae.safetensors`.
         vae: PathBuf,
-        /// Official gated `LICENSE.pdf`.
-        license: PathBuf,
     },
 }
 
@@ -133,13 +131,11 @@ impl ProfileArtifacts {
         diffusion_model: impl Into<PathBuf>,
         text_encoder: impl Into<PathBuf>,
         vae: impl Into<PathBuf>,
-        license: impl Into<PathBuf>,
     ) -> Self {
         Self::Krea2 {
             diffusion_model: diffusion_model.into(),
             text_encoder: text_encoder.into(),
             vae: vae.into(),
-            license: license.into(),
         }
     }
 
@@ -647,7 +643,7 @@ pub struct NativeRuntimeReceipt {
 }
 
 /// Exact identities required when constructing a backend-neutral
-/// [`logit_loom_diffusion::ImageExecutionPlanV2`] and validating its backend
+/// [`logit_loom_diffusion::ImageExecutionPlanV3`] and validating its backend
 /// receipt lineage.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

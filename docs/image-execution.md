@@ -13,7 +13,7 @@ semantic evaluation.
   allocations, cooperative cancellation, explicit lifecycle state, cleanup
   receipts, and failure dispositions.
 - `logit-loom-diffusion` preserves version-one whole-image plans and receipts
-  and adds `ImageExecutionPlanV2`/`ImageExecutionReceiptV2` under new digest
+  and adds `ImageExecutionPlanV3`/`ImageExecutionReceiptV3` under new digest
   domains. Version two binds checkpoint restore/capture, an ordered
   deterministic compositing graph, explicit output routes, and request-scope
   cleanup.
@@ -28,7 +28,7 @@ contract failure.
 
 ## Whole-plan order
 
-For an accepted `ImageExecutionPlanV2`, the stable-diffusion.cpp executor
+For an accepted `ImageExecutionPlanV3`, the stable-diffusion.cpp executor
 performs these mechanics in order:
 
 1. Validate the complete graph, resident profile/load/RNG/placement identities,
@@ -81,7 +81,7 @@ adapter contract v4, and provides the following exact subset:
 | Compositing | Up to 32 ordered tight-RGB8 integer mask blends within a 512 MiB aggregate internal scratch bound |
 | Output | Explicit tight-RGB8 image routes and at most one final captured-checkpoint route into caller-owned storage; an unreached cancellation boundary leaves that final allocation uninitialized |
 | Cleanup | Explicit retain or confirmed clear disposition before output initialization |
-| Direct VAE | Bounded Krea encode/decode remains available through `Sdcpp`, outside `ImageExecutionPlanV2` |
+| Direct VAE | Bounded Krea encode/decode remains available through `Sdcpp`, outside `ImageExecutionPlanV3` |
 
 Every requested `LoRA` must match and participate in at least one model tensor
 before native success is reported. The companion clears the request-local

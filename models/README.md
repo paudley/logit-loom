@@ -58,9 +58,9 @@ The retained acquisition report in
 uses a bounded, versioned Rust contract. It records the `hf` CLI version,
 available filesystem bytes, catalog and verified artifact bytes, and exact
 path-free receipts. All three profiles are fully verified there. Krea uses the
-`mixed` acquisition method because its exact official license bytes and its
-three runtime components were verified across a repository fetch and a
-caller-managed model store rather than one shared directory.
+`mixed` acquisition method because its three runtime components were verified
+across a repository fetch and a caller-managed model store rather than one
+shared directory.
 
 Artifacts are placed under `<destination>/<profile>/<source>/`. For example,
 the text GGUF is:
@@ -69,25 +69,19 @@ the text GGUF is:
 <destination>/qwen3-0.6b-q8-0/model/Qwen3-0.6B-Q8_0.gguf
 ```
 
-Krea 2 Turbo is gated and uses the upstream Krea 2 Community License. Read and
-accept those terms on the
-[model page](https://huggingface.co/krea/Krea-2-Turbo), authenticate `hf`, and
-then acknowledge that prior action locally:
+Krea 2 Turbo acquisition verifies only the declared executable artifacts:
 
 ```sh
 cargo run --quiet -p logit-loom-xtask -- models fetch krea-2-turbo \
-  --dir /path/to/model-store \
-  --accept-license
+  --dir /path/to/model-store
 ```
-
-The flag does not accept upstream terms on the user's behalf.
 
 The advanced profile uses a pinned `Q6_K` diffusion GGUF, a pinned `Q4_K_M`
 Qwen3-VL text encoder, and the pinned Wan 2.1 VAE expected by the maintained
-stable-diffusion.cpp integration. The exact Krea license PDF is verified as a
-separate required artifact. Quantization changes storage and runtime mechanics;
-this catalog does not make a quality comparison with the original Diffusers
-weights.
+stable-diffusion.cpp integration. Upstream legal documents may be retained as
+inert source content; they are not catalogued artifacts, runtime inputs, or
+acceptance gates. Quantization changes storage and runtime mechanics; this
+catalog does not make a quality comparison with the original Diffusers weights.
 
 ## Trust and execution boundary
 

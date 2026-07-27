@@ -6,7 +6,7 @@
   "adapter": "logit-loom-llamacpp-0.2.0",
   "experiment": "qwen-profile-replay-v1",
   "status": "passed",
-  "catalog_sha256": "5beaf0742618e09200fa81deb680ec89b13375ae6f405fa63257d55fbadc6ade",
+  "catalog_sha256": "ea7793ef6159f71bb38ef6bb30b422bce9c6fc1ec79ed6263e0d6e881675a54e",
   "artifacts": [
     {
       "source_id": "qwen3-gguf",

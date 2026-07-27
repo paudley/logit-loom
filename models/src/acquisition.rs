@@ -229,8 +229,6 @@ pub struct PendingArtifact {
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum PendingReason {
-    /// The operator did not assert acceptance of upstream gated terms.
-    GatedTermsNotAcknowledged,
     /// The exact artifact was not present in the selected caller store.
     ArtifactNotPresent,
 }
@@ -303,7 +301,7 @@ fn validate_profile(
                 acquisition.profile_id, pending.source_id, pending.artifact_path
             ));
         }
-        let (source, _) = profile
+        let _ = profile
             .find_artifact(&pending.source_id, &pending.artifact_path)
             .ok_or_else(|| {
                 AcquisitionReportError::Invalid(format!(
@@ -311,12 +309,6 @@ fn validate_profile(
                     acquisition.profile_id, pending.source_id, pending.artifact_path
                 ))
             })?;
-        if pending.reason == PendingReason::GatedTermsNotAcknowledged && !source.gated() {
-            return invalid(format!(
-                "profile {:?} marks an ungated artifact as awaiting terms",
-                acquisition.profile_id
-            ));
-        }
     }
     if identities.len() != profile.file_count() {
         return invalid(format!(

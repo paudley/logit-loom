@@ -207,9 +207,7 @@ impl Sdcpp {
     /// Verifies exact artifacts, loads the companion library, requires the
     /// requested accelerator devices, and creates one native context.
     ///
-    /// The method never downloads an artifact or retries on CPU. Krea loading
-    /// also requires the exact official gated license artifact selected by the
-    /// caller; obtaining that file remains a separate upstream/legal action.
+    /// The method never downloads an artifact or retries on CPU.
     ///
     /// # Errors
     ///
@@ -1826,14 +1824,7 @@ fn verify_profile_artifacts(
             diffusion_model,
             text_encoder,
             vae,
-            license,
         } => {
-            receipts.push(
-                profile
-                    .verify_artifact(&catalog_sha256, "krea-license", "LICENSE.pdf", license)?
-                    .receipt()
-                    .clone(),
-            );
             receipts.push(
                 profile
                     .verify_artifact(

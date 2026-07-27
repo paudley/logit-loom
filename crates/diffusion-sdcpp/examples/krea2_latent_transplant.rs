@@ -23,7 +23,6 @@ const MAXIMUM_DELTA: f32 = 0.50;
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut arguments = std::env::args_os().skip(1);
     let library = next(&mut arguments)?;
-    let license = next(&mut arguments)?;
     let diffusion_model = next(&mut arguments)?;
     let text_encoder = next(&mut arguments)?;
     let vae = next(&mut arguments)?;
@@ -35,7 +34,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err(usage().into());
     }
 
-    let artifacts = ProfileArtifacts::krea2(diffusion_model, text_encoder, vae, license);
+    let artifacts = ProfileArtifacts::krea2(diffusion_model, text_encoder, vae);
     let options = SdcppOptions::new(backend.clone(), backend, threads)?;
     let mut runtime = Sdcpp::load(library, &artifacts, options)?;
     let request = ImageRequest::linear_euler(prompt, WIDTH, HEIGHT, SEED, CFG_SCALE, STEPS)?;
@@ -134,6 +133,6 @@ fn next_utf8(
 }
 
 fn usage() -> &'static str {
-    "usage: krea2_latent_transplant COMPANION_LIBRARY LICENSE_PDF \
-     DIFFUSION_MODEL TEXT_ENCODER VAE BACKEND THREADS OUTPUT_DIRECTORY PROMPT"
+    "usage: krea2_latent_transplant COMPANION_LIBRARY DIFFUSION_MODEL \
+     TEXT_ENCODER VAE BACKEND THREADS OUTPUT_DIRECTORY PROMPT"
 }

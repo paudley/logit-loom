@@ -43,7 +43,7 @@ intentionally explicit:
   native generation call.
 
 `ImagePlanExecutor` implements the single-owner
-`LocalExecutor<ImageExecutionPlanV2>` boundary. It validates resident
+`LocalExecutor<ImageExecutionPlanV3>` boundary. It validates resident
 profile/load/RNG/placement identities and every borrowed buffer before native
 entry; restores or captures an authenticated checkpoint at the declared
 post-Euler boundary before installed scheduler-state operators; records
