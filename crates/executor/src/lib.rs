@@ -8,6 +8,16 @@ use std::fmt::Debug;
 use logit_loom_core::{CoreError, Digest};
 use serde::{Deserialize, Serialize};
 
+mod whole;
+
+pub use whole::{
+    ClassifiedWholeGenerationError, DurabilityReceipt, MAX_WHOLE_GENERATION_EVIDENCE,
+    MAX_WHOLE_GENERATION_EVIDENCE_BYTES, MAX_WHOLE_GENERATION_INPUT_BYTES,
+    MAX_WHOLE_GENERATION_OUTPUT_BYTES, PendingGeneration, WholeGenerationBackend,
+    WholeGenerationCommitReceipt, WholeGenerationEvidence, WholeGenerationFailure,
+    WholeGenerationOutput, WholeGenerationReceipt, WholeGenerationRequest,
+};
+
 /// Maximum bytes in a buffer media-type label.
 pub const MAX_MEDIA_TYPE_BYTES: usize = 128;
 /// Maximum buffers presented to one local execution.
