@@ -35,7 +35,8 @@ The safe public adapter relies on all of the following conditions:
    arrays, schedules, and callback state outlive the synchronous native call.
    Rust validates their public lengths, geometry, pointer/count relationships,
    finite controls, and C-string constraints before passing their borrowed
-   pointers.
+   pointers. The combined advanced-program path retains both the image-v2
+   request storage and full-state callback owner for that same call.
 9. A successful VAE encode returns one native-owned tensor allocation. Rust
    validates its ABI, pointer, rank, shape, element count, finite values, and
    public tensor bound before copying. `sd_loom_free_tensor_v2` releases it
@@ -60,7 +61,9 @@ Model-free tests exercise malformed ranks and byte counts, callback error and
 panic containment, no write-back after failed mutation, complete successful
 write-back, invalid native timing, exact profile shapes, checkpoint mismatch,
 advanced-image geometry, bounded VAE tensors, image copying, failure
-dispositions, and compile-fail `Send`/`Sync` assertions. The public
+dispositions, authenticated checkpoint envelopes, stale-backend rejection,
+post-observation cancellation, whole-plan receipt lineage, and compile-fail
+`Send`/`Sync` assertions. The public
 `probe_companion` path checks both symbol sets, companion ABI, commit, library
 bytes, and device-report handling against a caller-built companion without
 loading a model.

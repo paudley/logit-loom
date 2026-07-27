@@ -98,7 +98,7 @@ accelerated runtime.
 The image adapter dynamically loads companion ABI version `1` and requires
 whole-image extension version `2`, built from
 `stable-diffusion.cpp@ea4e566ccffa10f853ecc3f29e74b1820bc91beb`. The safe
-Rust adapter contract is version `3`. The exact ABI, extension, commit,
+Rust adapter contract is version `4`. The exact ABI, extension, commit,
 required symbol set, and shared-library bytes are checked before model context
 creation. A library carrying only the earlier step-v1 symbols is incompatible
 with this adapter version. Updating the upstream revision, companion layout,
@@ -118,8 +118,15 @@ negative conditioning and references, fixed request-local LoRA bindings,
 direct VAE tensors, and explicit native session cleanup. It supports only one
 fixed scale for each LoRA during a complete request. Per-step scale schedules,
 model-specific target selectors, PNG encoding, arbitrary model-block
-operators, and multi-operation graphs require another reviewed adapter
-contract; a lowerer must reject them instead of approximating them.
+operators, and multiple native inference operations require another reviewed
+adapter contract; a lowerer must reject them instead of approximating them.
+
+Safe contract version `4` does not change companion ABI v1 or image extension
+v2. It adds a public `ImageExecutionPlanV2` lowering that combines advanced
+image inputs and fixed `LoRA` bindings with the existing full-state callback,
+then performs versioned checkpoint routing, bounded deterministic RGB8
+compositing, explicit output routing, and cleanup accounting in Rust. The
+version-one image plan and receipt domains remain unchanged.
 
 The companion is prepared explicitly for `vulkan`, `hip`, `cuda`, or `metal`.
 This is independent of the llama.cpp Cargo feature selection. A model-free

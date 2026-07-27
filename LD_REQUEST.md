@@ -19,6 +19,39 @@ model selections, generated artifacts, and semantic evaluation private.
 Logit Loom is asked to own the generally useful, mechanically testable
 inference surfaces described below.
 
+### Production-consumer return review — 2026-07-27
+
+A production consumer accepts immutable Logit Loom commit
+`984ef6832c0d8032e0325f31a1d1cf5634ecd58c` (tree
+`b3c15493b48cdff65b5503c99dbf4ee1c41a9716`) as the reproducible public
+substrate for its fixed-stack Krea Turbo baseline. The consumer vendors that
+exact tree, verifies a complete file/mode/extra-path manifest, links the
+stable-diffusion.cpp adapter inside its admitted worker, and does not start or
+wrap an external daemon.
+
+That immutable return does not yet close these requested public mechanics:
+
+1. One public, single-owner executor must consume a complete
+   `ImageExecutionPlan` or a versioned successor, execute its ordered graph in
+   one session, and return one whole-plan receipt. It must cover transactional
+   checkpoint restore, intervention, compositing, output routing,
+   cancellation, and cleanup disposition instead of requiring the consumer to
+   privately sequence public primitives.
+2. The complete advertised option set needs hostile-input, cancellation,
+   rollback, stale-handle, partial-cleanup, and receipt-lineage tests. Until
+   then the consumer advertises only its narrower fixed-stack baseline; the
+   broader image-program feature remains hidden.
+3. The tokenizer crate still needs the pinned Gigatoken-derived SIMD BPE
+   kernel, vector-free exact/threshold count paths, reusable output sinks, and
+   a caller-sized dedicated pool. The consumer will not activate an alternate
+   method from the current utility primitives alone.
+4. Krea 2 Raw remains a separately identified future profile and must not be
+   inferred from Turbo mechanics or receipts.
+
+Please land these as immutable public revisions with no worker process,
+listener, daemonization, CPU model execution, retry, or fallback. The consumer
+will replace its vendored snapshot only after reviewing that exact return.
+
 ## Required outcome
 
 Publish a Rust-first, policy-neutral image-inference surface that can:

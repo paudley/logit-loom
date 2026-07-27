@@ -160,7 +160,9 @@ used by local workers.
 plus image extension version 2 for the exact catalogued MiniT2I and Krea
 component layouts. The caller builds the pinned native companion, supplies
 every artifact path, selects an exact non-CPU backend, and chooses the prompt,
-seed, shape, guidance, and custom Euler schedule.
+seed, shape, guidance, and custom Euler schedule. `ImagePlanExecutor` lowers
+the supported `ImageExecutionPlanV2` subset through one resident owner; see
+the support matrix before constructing operators, routes, or checkpoints.
 
 ```toml
 [dependencies]

@@ -5,17 +5,24 @@ revision = "0d9765fa7312af7534535e6315a5c49d74807b2a"
 repository = "https://github.com/marcelroed/gigatoken"
 license = "MIT"
 observed = "2026-07-26"
-disposition = "design-derived-safe-reimplementation"
+disposition = "mit-derived-safe-reimplementation"
 included = [
   "flat ragged batch and stable row-count direction",
   "short-span cache direction",
   "parallel work partitioning direction",
+  "ranked BPE linked-list and heap merge mechanics",
+  "packed rank-plus-position short-merge minimum scan",
 ]
 excluded = [
-  "unsafe SIMD and nightly portable_simd",
+  "upstream unsafe intrinsics, unchecked indexing, prefetching, and huge-page hints",
   "PyO3 and NumPy bindings",
   "Arrow and Parquet integration",
   "Hugging Face Hub and network acquisition",
   "ambient Rayon pools",
   "unbounded caches and scratch",
+  "upstream tokenizer loading and model-specific pretokenizers",
 ]
+source_files = ["src/bpe/mod.rs"]
+local_files = ["src/bpe.rs", "src/pool.rs", "src/sink.rs"]
+safe_simd_dependency = "wide 0.7.33"
+safe_simd_dependency_license = "Zlib OR Apache-2.0 OR MIT"

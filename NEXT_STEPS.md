@@ -261,19 +261,31 @@ acceptance lane and retains the old report as lineage.
 
 ### Phase 6 — downstream bulk-tokenizer return
 
-Status: **open; identity/cache/chunk/batch primitives exist locally, but the
-SIMD BPE kernel and dedicated pool are not delivered**
+Status: **open; the safe ranked-BPE kernel, direct sinks/counting, dedicated
+pool, and oracle framework now pass model-free tests, while exact
+model-specific adapters and retained engine-oracle qualification remain open**
 
-- [ ] Record the exact Gigatoken `0.9.0`
+- [x] Record the exact Gigatoken `0.9.0`
   `0d9765fa7312af7534535e6315a5c49d74807b2a` import manifest and MIT notice.
-- [ ] Land the pinned Rust SIMD BPE path with exact token-ID, special-token,
-  normalization, Unicode, offset, and reconstruction parity against supplied
-  engine oracles.
-- [ ] Provide vector-free exact/threshold count and same-pass chunk planning.
-- [ ] Provide a bounded caller-sized pool with no global Rayon state, helper
+- [x] Add a safe ranked BPE kernel derived from that revision, with an exactly
+  pinned `wide` 0.7.33 packed short-span scan, deterministic heap path,
+  reusable scratch, exact source-byte offsets, split version-two identities,
+  and a deliberately narrow identity-normalized whole-span byte adapter.
+- [x] Provide exact/inclusive-threshold counting without materializing the
+  complete output token-ID vector, plus reusable vector and caller-sized
+  token-ID/offset sinks.
+- [x] Provide a bounded caller-sized pool with no global Rayon state, helper
   process, network surface, Python, retry, or model fallback.
-- [ ] Retain bounded collision-checked pretoken cache and reusable scratch
+- [x] Retain bounded collision-checked pretoken cache and reusable scratch
   capacity under exact identity and byte ceilings.
+- [x] Add bounded, content-free differential receipts that compare exact token
+  IDs and source offsets against caller-supplied engine oracles.
+- [ ] Implement exact target-model normalizer, pretokenizer, configured
+  special-token, added-token, and boundary behavior; qualify multilingual,
+  pathological, offset, and reconstruction cases against the supplied engine
+  oracle.
+- [ ] Integrate same-pass token-aware chunk planning where the exact target
+  tokenizer permits it.
 - [ ] Exercise whole/partitioned execution, every qualified batch/task shape,
   cold/warm cache, cancellation, eviction, multilingual/pathological inputs,
   and hostile bounds.

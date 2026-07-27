@@ -11,12 +11,24 @@ post-step observers. A pipeline copies one finite `f32` state, applies stages
 in declared order, and commits to the caller's slice only after every stage
 succeeds. Callback errors and panics are contained before commit.
 
-The crate also defines `ImageExecutionPlan` and `ImageExecutionReceipt` for a
-worker-local whole-image boundary. These contracts bind exact buffer
-identities and layouts, operation, output format, placement, seed policy,
-schedule, ordered `LoRA` mechanics, installed tensor operators, observations,
-and terminal position. They contain no paths, transport, queue, or native
-handles. An adapter must reject plan mechanics it cannot implement exactly.
+The crate also defines two compatible generations of worker-local whole-image
+contracts:
+
+- `ImageExecutionPlan` and `ImageExecutionReceipt` preserve the version-one
+  operation, buffer, placement, seed, schedule, `LoRA`, operator,
+  observation, and terminal-position domains.
+- `ImageExecutionPlanV2` and `ImageExecutionReceiptV2` add transactional
+  checkpoint restore/capture, an ordered deterministic compositing graph,
+  explicit caller-owned output routes, and request-scope cleanup disposition
+  under new identity domains.
+
+Version two currently defines one bounded RGB8 diffusion primary followed by
+zero or more exact integer `MaskBlend` stages. It validates the complete graph,
+all references, aggregate retained-image scratch, checkpoint consumption, and
+output allocations before execution. `mask_blend_rgb8` validates every length
+before its first write. These contracts contain no paths, transport, queue, or
+native handles. An adapter must reject plan mechanics it cannot implement
+exactly.
 
 The crate owns no tensor runtime and performs no model inference. An adapter
 must prove that its native state has the reported shape, dtype, device,

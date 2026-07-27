@@ -28,7 +28,8 @@ latency for every completed step. These non-deterministic deployment
 measurements are separate from mechanical receipts and do not affect replay or
 content identities.
 
-Two execution paths are intentionally distinct:
+The safe Rust adapter contract is version 4. Its native-facing paths are
+intentionally explicit:
 
 - The full-state path copies each post-Euler host `f32` tensor for
   transactional interventions, observations, and checkpoints.
@@ -37,6 +38,20 @@ Two execution paths are intentionally distinct:
   image-to-image, inpaint, outpaint, ordered reference images, negative
   conditioning, and fixed request-local `LoRA` stacks, then writes one RGB8
   image directly to caller-owned storage or a synchronous sink.
+- `generate_advanced_program_to` combines the advanced image inputs and fixed
+  request-local `LoRA` stack with the full-state step program in the same
+  native generation call.
+
+`ImagePlanExecutor` implements the single-owner
+`LocalExecutor<ImageExecutionPlanV2>` boundary. It validates resident
+profile/load/RNG/placement identities and every borrowed buffer before native
+entry; restores or captures an authenticated checkpoint at the declared
+post-Euler boundary before installed scheduler-state operators; records
+digest/statistics observations after those operators; and observes
+cancellation after that same boundary. It then runs the ordered deterministic
+RGB8 mask-blend graph, preflights every route, performs the requested
+retain/clear cleanup, and only then initializes caller-owned outputs. A cleanup
+failure therefore cannot leave a partially initialized routed output.
 
 Image-v2 success confirms that every requested `LoRA` participated in at least
 one native model tensor. The native stack is cleared before reusable returns;
@@ -44,11 +59,18 @@ uncertain cleanup poisons the single-owner session. Direct bounded Krea VAE
 encode/decode exchanges finite native-layout tensors without making that
 layout portable to another profile or backend build.
 
-Per-step `LoRA` schedules, model-specific target selectors, PNG encoding,
-arbitrary model-block operators, and multi-operation graphs are not
-implemented by image ABI v2. A downstream lowerer must reject those mechanics
-instead of approximating them. The complete worker-local support matrix is in
+The whole-plan lowerer supports one native diffusion operation followed by
+bounded deterministic `MaskBlend` stages and explicit RGB8/checkpoint routes.
+Per-step `LoRA` schedules, arbitrary model-block or conditioning operators,
+snapshot observations, PNG/RGBA/tensor routes, multiple native inference
+operations, and version-two direct VAE execution are rejected before native
+entry instead of being approximated. The complete worker-local support matrix
+is in
 [`docs/image-execution.md`](https://github.com/paudley/logit-loom/blob/main/docs/image-execution.md).
+
+All whole-plan tests in the ordinary repository gate are model-free. Live
+execution of the version-two graph remains an opt-in acceptance lane over
+caller-supplied artifacts and an explicit non-CPU device.
 
 No model is downloaded or executed by tests, CI, package builds, or
 documentation builds. Build the caller-selected native library with

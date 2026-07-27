@@ -111,11 +111,20 @@ The lower-copy image-v2 path validates tightly packed source, mask, and
 reference bytes, applies a fixed request-local LoRA stack, verifies that each
 requested LoRA participated in at least one model tensor, and writes one RGB8
 image to caller-owned storage. It also exposes direct bounded Krea VAE
-encode/decode. Scheduled LoRA scales, model-block selectors, and arbitrary
-multi-operation image graphs remain representable in the backend-neutral plan
-but are rejected by this adapter until an exact native implementation exists.
-See [worker-local image execution](image-execution.md) for the support matrix
-and failure rules.
+encode/decode.
+
+Safe adapter contract v4 adds `ImagePlanExecutor`, which combines those
+advanced inputs with the transactional full-state callback in one native
+generation. Its version-two plan restores/captures an authenticated
+checkpoint before installed scheduler-state operators, observes and cancels
+after those operators, executes a bounded deterministic RGB8 mask-blend graph,
+preflights explicit output routes, accounts for retain/clear cleanup, and only
+then initializes caller-owned outputs. Scheduled LoRA scales, arbitrary
+model-block/conditioning operators, snapshots, multiple native inference
+operations, and version-two direct VAE remain rejected until an exact reviewed
+implementation exists. See
+[worker-local image execution](image-execution.md) for the support matrix and
+failure rules.
 
 `DiffusionCheckpoint` stores exact little-endian state bytes plus conservative
 lineage. Initial restore uses deterministic-prefix replay: rerun the exact

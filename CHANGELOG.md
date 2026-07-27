@@ -41,11 +41,15 @@ include breaking API changes.
 - `logit-loom-diffusion-sdcpp`, a safe adapter over companion ABI version 1 for
   an exact pinned stable-diffusion.cpp revision, with explicit accelerator
   placement and focused unsafe-boundary tests.
-- Stable-diffusion.cpp image ABI version 2 and safe adapter contract version 3,
+- Stable-diffusion.cpp image ABI version 2 and safe adapter contract version 4,
   with direct caller-owned RGB output, bounded source/mask/reference inputs,
   negative conditioning, fixed request-local LoRA stacks with verified tensor
   participation and cleanup, direct Krea VAE encode/decode, lifecycle epochs,
   and reuse-aware error classification.
+- Version-two whole-image plans and stable-diffusion.cpp lowering for
+  authenticated checkpoint envelopes, installed scheduler-state operators,
+  observations, exact post-step cancellation, bounded deterministic RGB8
+  compositing, explicit output routes, and cleanup disposition.
 - A reproducible native companion patch/build script, model-free ABI probe,
   complete MiniT2I and Krea checkpoint experiments, and an output-free
   model-acceptance report schema.
@@ -59,9 +63,10 @@ include breaking API changes.
 - A phased first-class model integration plan with separate text, compact
   image, advanced image, and release gates.
 - An unpublished partial `logit-loom-tokenizer` workspace crate containing
-  bounded identity, cancellation, batch/scatter, token-aware chunking, and
-  collision-checked cache primitives. Its SIMD BPE kernel and dedicated pool
-  remain open work.
+  versioned identities; a safe Gigatoken-derived ranked-BPE kernel with pinned
+  packed-SIMD mechanics; reusable direct/count sinks; a bounded caller-sized
+  pool; exact-oracle qualification receipts; cancellation; batch/scatter;
+  token-aware chunking; and collision-checked cache primitives.
 - A higher-level interface guide covering ownership, ordering, identities,
   exact bytes, concurrency boundaries, checkpoints, steering, and low-level
   escape hatches.

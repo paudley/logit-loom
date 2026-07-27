@@ -21,6 +21,10 @@ blake3.workspace = true
 logit-loom-core.workspace = true
 serde.workspace = true
 thiserror.workspace = true
+wide.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
 
 [lints]
 workspace = true

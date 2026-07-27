@@ -26,13 +26,14 @@ use serde::Serialize;
 use sha2::{Digest as _, Sha256};
 
 use crate::{
-    AdvancedGenerationOutput, AdvancedGenerationReceipt, AdvancedImageRequest, BoundaryControl,
-    BoundaryReceipt, COMPANION_ABI_VERSION, CompanionReceipt, ControlledGenerationOutput,
-    ControlledGenerationReceipt, Error, GenerationMeasurements, GenerationOutput,
-    GenerationReceipt, IMAGE_ABI_VERSION, ImageOutputSink, ImagePixels, ImageRequest,
-    NativeRuntimeReceipt, Profile, ProfileArtifacts, ProfileReceipt, Result, SdcppOptions,
-    StepProgram, StepReceipt, UPSTREAM_COMMIT, VaeImageOutput, VaeOperationReceipt, VaeTensor,
-    VaeTensorOutput,
+    ADAPTER_CONTRACT_VERSION, AdvancedGenerationOutput, AdvancedGenerationReceipt,
+    AdvancedImageRequest, AdvancedProgramGenerationOutput, AdvancedProgramGenerationReceipt,
+    BoundaryControl, BoundaryReceipt, COMPANION_ABI_VERSION, CompanionReceipt,
+    ControlledGenerationOutput, ControlledGenerationReceipt, Error, GenerationMeasurements,
+    GenerationOutput, GenerationReceipt, IMAGE_ABI_VERSION, ImageExecutionBindings,
+    ImageOutputSink, ImagePixels, ImageRequest, NativeRuntimeReceipt, Profile, ProfileArtifacts,
+    ProfileReceipt, Result, SdcppOptions, StepProgram, StepReceipt, UPSTREAM_COMMIT,
+    VaeImageOutput, VaeOperationReceipt, VaeTensor, VaeTensorOutput,
     contract::component_map,
     ffi::{
         self, ConditionTensor, ContextParams, ImageParams, ImageParamsV2, ImageViewV2, LoraV2,
@@ -319,6 +320,38 @@ impl Sdcpp {
         self.session_epoch
     }
 
+    /// Returns the exact safe-backend, profile, load, RNG, and placement
+    /// identities required by a backend-neutral whole-image plan for this
+    /// resident owner.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error only when deterministic identity encoding fails.
+    pub fn execution_bindings(&self) -> Result<ImageExecutionBindings> {
+        let backend = image_execution_backend_identity(&self.native_receipt)?;
+        let profile =
+            Digest::of_serializable("sdcpp-image-execution-profile-v1", &self.profile_receipt)
+                .map_err(logit_loom_diffusion::Error::from)?;
+        let load = Digest::of_serializable("sdcpp-image-execution-load-v1", &(&profile, &backend))
+            .map_err(logit_loom_diffusion::Error::from)?;
+        let placement = Digest::of_serializable(
+            "sdcpp-image-execution-placement-v1",
+            &(
+                &self.native_receipt.backend,
+                &self.native_receipt.params_backend,
+                &self.native_receipt.devices,
+            ),
+        )
+        .map_err(logit_loom_diffusion::Error::from)?;
+        Ok(ImageExecutionBindings {
+            backend,
+            profile,
+            load,
+            rng: rng_identity(&self.native_receipt, &self.profile_receipt)?,
+            placement,
+        })
+    }
+
     /// Runs one exact custom-sigma Euler generation.
     ///
     /// Native conditioning tensors are hashed before `StepProgram::begin`.
@@ -589,6 +622,144 @@ impl Sdcpp {
                 width,
                 height,
                 channels,
+            },
+            measurements: GenerationMeasurements {
+                step_latency_milliseconds: callbacks.step_latency_milliseconds,
+            },
+        })
+    }
+
+    /// Runs text-to-image, image-to-image, inpaint, or outpaint through image
+    /// ABI v2 with a full transactional scheduler-state program and writes one
+    /// RGB image to caller-owned storage.
+    ///
+    /// Unlike [`Self::generate_advanced_controlled_to`], this path copies each
+    /// post-Euler state into Rust, applies [`StepProgram::intervene`] and
+    /// [`StepProgram::observe`] transactionally, and records exact
+    /// scheduler-state lineage. Source, mask, reference, negative
+    /// conditioning, and fixed request-local `LoRA` mechanics remain part of
+    /// the same synchronous native request.
+    ///
+    /// # Errors
+    ///
+    /// Returns a request, binding, callback, native-output, scoped-cleanup,
+    /// sink, or accounting error.
+    pub fn generate_advanced_program_to(
+        &mut self,
+        request: &AdvancedImageRequest<'_>,
+        program: &mut dyn StepProgram,
+        sink: &mut dyn ImageOutputSink,
+    ) -> Result<AdvancedProgramGenerationOutput> {
+        self.run_operation(|runtime| {
+            runtime.generate_advanced_program_to_inner(request, program, sink)
+        })
+    }
+
+    fn generate_advanced_program_to_inner(
+        &mut self,
+        request: &AdvancedImageRequest<'_>,
+        program: &mut dyn StepProgram,
+        sink: &mut dyn ImageOutputSink,
+    ) -> Result<AdvancedProgramGenerationOutput> {
+        request.validate_for(self.profile)?;
+        let base = request.base();
+        let expected = expected_rgb_bytes(base)?;
+        if sink.expected_len() != expected {
+            return Err(Error::Invalid(format!(
+                "image ABI v2 output has {} bytes; expected {expected}",
+                sink.expected_len()
+            )));
+        }
+
+        let request_receipt = request.receipt()?;
+        let request_identity = request_receipt.digest()?;
+        let native_inputs = AdvancedNativeInputs::new(request)?;
+        let native_params = native_inputs.params(request);
+        let mut components = component_map(&self.profile_receipt, &self.native_receipt)?;
+        if components
+            .insert("image-request-v2".to_owned(), request_identity)
+            .is_some()
+        {
+            return Err(Error::Incompatible(
+                "runtime component map repeats image-request-v2".to_owned(),
+            ));
+        }
+        let program_identity = program.implementation().clone();
+        let mut callbacks = CallbackState::new_full(
+            self.profile,
+            &self.profile_receipt,
+            &self.native_receipt,
+            base,
+            components,
+            program,
+        )?;
+        let callback_pointer = (&raw mut callbacks).cast::<c_void>();
+        let mut image = std::ptr::null_mut();
+        // SAFETY: Every borrowed byte view and C string remains live for this
+        // synchronous call. Callback state is exclusively borrowed, and the
+        // exact v2 symbol validates all descriptors before reading them.
+        let status = unsafe {
+            self.api.generate_image_v2(
+                self.context.as_ptr(),
+                &native_params,
+                condition_callback,
+                callback_pointer,
+                step_callback,
+                &mut image,
+            )
+        };
+        if let Some(error) = callbacks.error.take() {
+            if !image.is_null() {
+                // SAFETY: A non-null result is one allocation transferred by
+                // this exact companion.
+                unsafe { self.api.free_images(image, 1) };
+            }
+            return Err(Error::Callback(error));
+        }
+        if !matches!(status, ffi::STATUS_OK | ffi::STATUS_STOPPED) {
+            if !image.is_null() {
+                // SAFETY: Same ownership rule as above.
+                unsafe { self.api.free_images(image, 1) };
+            }
+            return Err(native_status_error(status));
+        }
+        let image = NonNull::new(image)
+            .ok_or_else(|| Error::Native("native success returned a null image".to_owned()))?;
+        let image_guard = NativeImageGuard {
+            api: &self.api,
+            image,
+        };
+        let (bytes_written, width, height, channels, image_digest) =
+            write_image_to(image_guard.image.as_ptr(), base, sink)?;
+        let plan = callbacks
+            .plan
+            .take()
+            .ok_or_else(|| Error::Native("native generation produced no step plan".to_owned()))?;
+        if callbacks.steps.is_empty() {
+            return Err(Error::Native(
+                "native generation produced no post-Euler steps".to_owned(),
+            ));
+        }
+        Ok(AdvancedProgramGenerationOutput {
+            bytes_written,
+            receipt: AdvancedProgramGenerationReceipt {
+                request: request_receipt,
+                generation: GenerationReceipt {
+                    profile: self.profile_receipt.clone(),
+                    native: self.native_receipt.clone(),
+                    session_epoch: self.session_epoch,
+                    request: base.receipt()?,
+                    plan,
+                    program: program_identity,
+                    condition_tensors: callbacks.condition_tensors,
+                    condition_bytes: callbacks.condition_bytes,
+                    steps: callbacks.steps,
+                    stopped: status == ffi::STATUS_STOPPED,
+                    image: image_digest,
+                    width,
+                    height,
+                    channels,
+                },
             },
             measurements: GenerationMeasurements {
                 step_latency_milliseconds: callbacks.step_latency_milliseconds,
@@ -1334,16 +1505,7 @@ impl<'a> CallbackState<'a> {
             "sdcpp-conditioning-tensors-v1",
             self.condition_hasher.clone().finalize().as_bytes(),
         );
-        let rng = Digest::of_serializable(
-            "sdcpp-cpu-rng-v1",
-            &(
-                &self.native_receipt.identity,
-                "CPU_RNG",
-                "CPU_RNG",
-                self.profile_receipt,
-            ),
-        )
-        .map_err(logit_loom_diffusion::Error::from)?;
+        let rng = rng_identity(self.native_receipt, self.profile_receipt)?;
         let plan = DiffusionPlan::new(
             self.components.clone(),
             conditioning,
@@ -1746,6 +1908,31 @@ fn native_identity(
             flash_attention: options.flash_attention,
             diffusion_flash_attention: options.diffusion_flash_attention,
         },
+    )
+    .map_err(logit_loom_diffusion::Error::from)
+    .map_err(Into::into)
+}
+
+fn rng_identity(native: &NativeRuntimeReceipt, profile: &ProfileReceipt) -> Result<Digest> {
+    Digest::of_serializable(
+        "sdcpp-cpu-rng-v1",
+        &(&native.identity, "CPU_RNG", "CPU_RNG", profile),
+    )
+    .map_err(logit_loom_diffusion::Error::from)
+    .map_err(Into::into)
+}
+
+fn image_execution_backend_identity(native: &NativeRuntimeReceipt) -> Result<Digest> {
+    Digest::of_serializable(
+        "sdcpp-image-plan-backend-v1",
+        &(
+            &native.identity,
+            env!("CARGO_PKG_VERSION"),
+            ADAPTER_CONTRACT_VERSION,
+            std::env::consts::ARCH,
+            std::env::consts::OS,
+            cfg!(target_endian = "little"),
+        ),
     )
     .map_err(logit_loom_diffusion::Error::from)
     .map_err(Into::into)

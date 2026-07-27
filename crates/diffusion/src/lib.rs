@@ -6,6 +6,7 @@
 mod contract;
 mod error;
 mod execution;
+mod execution_v2;
 mod observer;
 mod pipeline;
 
@@ -23,6 +24,12 @@ pub use execution::{
     MAX_IMAGE_OPERATORS, MAX_OPERATOR_CONTROL_BYTES, MAX_SELECTOR_LABEL_BYTES, ObservationKind,
     ObservationRequest, OperatorInvocation, ScalePoint, ScaleSchedule, SeedSelection, StepSelector,
     TensorSelector,
+};
+pub use execution_v2::{
+    ImageCheckpointPlan, ImageCleanupDisposition, ImageCleanupPolicy, ImageCompositeOperation,
+    ImageCompositeReceipt, ImageCompositeStage, ImageExecutionPlanV2, ImageExecutionReceiptV2,
+    ImageOutputReceiptV2, ImageOutputRoute, ImageOutputSource, ImageValueSource,
+    MAX_IMAGE_COMPOSITE_STAGES, MAX_IMAGE_GRAPH_SCRATCH_BYTES, mask_blend_rgb8,
 };
 pub use observer::{ObserverReceipt, ObserverSet, StepObserver};
 pub use pipeline::{ChannelBias, Intervention, Pipeline};

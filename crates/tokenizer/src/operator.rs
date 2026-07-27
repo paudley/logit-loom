@@ -11,7 +11,7 @@ use logit_loom_core::{Digest, TokenId};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::{MAX_ROW_BYTES, MAX_TOKENS_PER_ROW};
+use crate::{CountingSink, MAX_ROW_BYTES, MAX_TOKENS_PER_ROW, SinkFlow, TokenOutputSink};
 
 /// Complete immutable identity of one text-to-token implementation.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -44,6 +44,79 @@ impl TokenizationIdentity {
     pub fn digest(&self) -> Result<Digest, TokenizationError> {
         Digest::of_serializable("tokenization-identity-v1", self)
             .map_err(|error| TokenizationError::Identity(error.to_string()))
+    }
+}
+
+/// Version-two immutable identity with separate normalizer, pretokenizer, and
+/// special-token contracts.
+///
+/// This successor does not reinterpret [`TokenizationIdentity`] or its
+/// `tokenization-identity-v1` domain.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TokenizationIdentityV2 {
+    /// Exact model artifact whose token IDs are projected.
+    pub model: Digest,
+    /// Exact tokenizer configuration artifact.
+    pub tokenizer: Digest,
+    /// Exact vocabulary table.
+    pub vocabulary: Digest,
+    /// Exact merge table.
+    pub merges: Digest,
+    /// Exact normalization contract.
+    pub normalizer: Digest,
+    /// Exact pretokenization contract.
+    pub pretokenizer: Digest,
+    /// Exact Unicode-data revision.
+    pub unicode: Digest,
+    /// Exact added-token table.
+    pub added_tokens: Digest,
+    /// Exact source-special-token recognition table.
+    pub special_tokens: Digest,
+    /// Exact linked implementation and kernel revision.
+    pub implementation: Digest,
+    /// Exact supported policy-schema contract.
+    pub policy_schema: Digest,
+}
+
+impl TokenizationIdentityV2 {
+    /// Derives the complete version-two identity.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error only if deterministic contract encoding fails.
+    pub fn digest(&self) -> Result<Digest, TokenizationError> {
+        Digest::of_serializable("tokenization-identity-v2", self)
+            .map_err(|error| TokenizationError::Identity(error.to_string()))
+    }
+
+    /// Derives a conservative legacy identity by folding every version-two
+    /// contract absent from the version-one shape into its normalizer field.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error only if deterministic contract encoding fails.
+    pub fn legacy_v1(&self) -> Result<TokenizationIdentity, TokenizationError> {
+        let combined = Digest::of_serializable(
+            "tokenization-v2-legacy-contract-v1",
+            &(
+                &self.normalizer,
+                &self.pretokenizer,
+                &self.special_tokens,
+                &self.policy_schema,
+            ),
+        )
+        .map_err(|error| TokenizationError::Identity(error.to_string()))?;
+        Ok(TokenizationIdentity {
+            model: self.model.clone(),
+            tokenizer: self.tokenizer.clone(),
+            vocabulary: self.vocabulary.clone(),
+            merges: self.merges.clone(),
+            normalizer: combined,
+            unicode: self.unicode.clone(),
+            added_tokens: self.added_tokens.clone(),
+            implementation: self.implementation.clone(),
+        })
     }
 }
 
@@ -206,6 +279,11 @@ pub trait ExactTokenizer: Send + Sync {
     /// Returns the exact immutable execution identity.
     fn identity(&self) -> &TokenizationIdentity;
 
+    /// Returns a version-two split identity when the backend can provide one.
+    fn identity_v2(&self) -> Option<&TokenizationIdentityV2> {
+        None
+    }
+
     /// Appends exact token IDs and source offsets into caller-owned scratch.
     ///
     /// Implementations must clear `output` before writing and must not retain
@@ -223,6 +301,37 @@ pub trait ExactTokenizer: Send + Sync {
         cancellation: &CancellationToken,
     ) -> Result<(), TokenizationError>;
 
+    /// Streams exact tokens into a caller-owned destination.
+    ///
+    /// The compatibility implementation materializes a temporary span vector.
+    /// A backend with reusable or vector-free mechanics should override this
+    /// method and stop as soon as the sink returns [`SinkFlow::Stop`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for malformed input, cancellation, bounds, backend
+    /// failure, or sink rejection.
+    fn tokenize_to_sink(
+        &self,
+        source: &[u8],
+        policy: &TokenizationPolicy,
+        sink: &mut dyn TokenOutputSink,
+        cancellation: &CancellationToken,
+    ) -> Result<bool, TokenizationError> {
+        validate_source(source)?;
+        cancellation.check()?;
+        let mut spans = Vec::new();
+        self.tokenize_into(source, policy, &mut spans, cancellation)?;
+        validate_spans(source.len(), &spans)?;
+        sink.begin()?;
+        for token in spans {
+            if sink.push(token)? == SinkFlow::Stop {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
     /// Counts tokens, optionally stopping after the inclusive threshold.
     ///
     /// # Errors
@@ -237,22 +346,12 @@ pub trait ExactTokenizer: Send + Sync {
     ) -> Result<CountResult, TokenizationError> {
         validate_source(source)?;
         cancellation.check()?;
-        let mut spans = Vec::new();
-        self.tokenize_into(source, policy, &mut spans, cancellation)?;
-        validate_spans(source.len(), &spans)?;
-        let count = u64::try_from(spans.len()).map_err(|_| TokenizationError::Bound {
-            field: "token count",
-            limit: MAX_TOKENS_PER_ROW,
-        })?;
-        if let Some(threshold) = policy.count_through
-            && count > threshold
-        {
-            return Ok(CountResult {
-                count: threshold.saturating_add(1),
-                complete: false,
-            });
+        let mut sink = CountingSink::new(policy.count_through);
+        let consumed = self.tokenize_to_sink(source, policy, &mut sink, cancellation)?;
+        if consumed {
+            sink.finish();
         }
-        Ok(CountResult::complete(count))
+        Ok(sink.result())
     }
 }
 

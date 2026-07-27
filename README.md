@@ -61,9 +61,9 @@ execution, and native details isolated in an adapter.
 | [`logit-loom-executor`](crates/executor) | Transport-neutral worker-local lifecycle, borrowed-buffer, cancellation, cleanup, and failure contracts. |
 | [`logit-loom`](crates/loom) | Safe transform pipelines, observer fan-out, cancellation, and first-party transforms. |
 | [`logit-loom-llamacpp`](crates/llamacpp) | llama.cpp model/session integration through `llama-cpp-4`. |
-| [`logit-loom-diffusion`](crates/diffusion) | Backend-neutral diffusion plans, checkpoints, transactional state interventions, and observers. |
-| [`logit-loom-diffusion-sdcpp`](crates/diffusion-sdcpp) | Safe adapter for the versioned stable-diffusion.cpp companion ABI. |
-| [`logit-loom-tokenizer`](crates/tokenizer) | Unpublished bounded identities, batching, chunking, cancellation, and cache primitives for the open bulk-tokenizer phase. |
+| [`logit-loom-diffusion`](crates/diffusion) | Backend-neutral diffusion plans, checkpoints, transactional state interventions, observations, and versioned whole-image graphs. |
+| [`logit-loom-diffusion-sdcpp`](crates/diffusion-sdcpp) | Safe single-owner adapter and whole-plan lowerer for the versioned stable-diffusion.cpp companion ABI. |
+| [`logit-loom-tokenizer`](crates/tokenizer) | Unpublished safe ranked-BPE, direct sink/count, dedicated-pool, batching, chunking, cancellation, cache, and oracle-qualification mechanics. |
 
 The backend-neutral crates contain no model runtime. Applications can use the
 token contracts with another text backend or the diffusion contracts with

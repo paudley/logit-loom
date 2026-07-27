@@ -569,6 +569,35 @@ pub struct AdvancedGenerationOutput {
     pub measurements: GenerationMeasurements,
 }
 
+/// Mechanical receipt for one image ABI v2 generation with full scheduler
+/// state accounting.
+///
+/// This is a distinct contract from [`AdvancedGenerationReceipt`]. The
+/// control-only receipt deliberately omits scheduler-state identities, while
+/// this receipt records the transactional [`crate::StepProgram`] lineage in
+/// its nested generation receipt.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdvancedProgramGenerationReceipt {
+    /// Exact source/mask/reference/LoRA request identity.
+    pub request: AdvancedImageRequestReceipt,
+    /// Exact conditioning, scheduler-state, program, backend, and image
+    /// lineage.
+    pub generation: crate::GenerationReceipt,
+}
+
+/// Image ABI v2 generation with a full scheduler-state program, written to
+/// caller-owned storage.
+#[derive(Clone, Debug)]
+pub struct AdvancedProgramGenerationOutput {
+    /// Number of initialized destination bytes.
+    pub bytes_written: usize,
+    /// Complete mechanical receipt.
+    pub receipt: AdvancedProgramGenerationReceipt,
+    /// Non-deterministic deployment measurements excluded from identities.
+    pub measurements: GenerationMeasurements,
+}
+
 /// Exact finite host tensor produced or consumed by direct VAE operations.
 #[derive(Clone, Debug)]
 pub struct VaeTensor {

@@ -2,6 +2,7 @@
 
 use std::{
     collections::BTreeMap,
+    mem::size_of,
     path::{Path, PathBuf},
 };
 
@@ -20,6 +21,17 @@ pub const MAX_PROMPT_BYTES: usize = 64 * 1024;
 pub const MAX_IMAGE_DIMENSION: u32 = 4_096;
 /// Maximum native backend label bytes.
 pub const MAX_BACKEND_LABEL_BYTES: usize = 128;
+/// Maximum serialized checkpoint-lineage bytes accepted by the adapter.
+pub const MAX_CHECKPOINT_RECEIPT_BYTES: usize = 64 * 1024;
+/// Maximum exact `f32` scheduler-state bytes in one checkpoint.
+pub const MAX_CHECKPOINT_STATE_BYTES: usize = 16 * 1024 * 1024 * size_of::<f32>();
+/// Maximum complete version-one checkpoint envelope bytes.
+pub const MAX_CHECKPOINT_ENVELOPE_BYTES: usize = CHECKPOINT_ENVELOPE_MAGIC.len()
+    + size_of::<u32>()
+    + MAX_CHECKPOINT_RECEIPT_BYTES
+    + MAX_CHECKPOINT_STATE_BYTES;
+
+const CHECKPOINT_ENVELOPE_MAGIC: &[u8; 8] = b"LLSDCP01";
 
 /// Exact catalogued image profile understood by the companion ABI.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -634,6 +646,24 @@ pub struct NativeRuntimeReceipt {
     pub identity: Digest,
 }
 
+/// Exact identities required when constructing a backend-neutral
+/// [`logit_loom_diffusion::ImageExecutionPlanV2`] and validating its backend
+/// receipt lineage.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ImageExecutionBindings {
+    /// Exact safe adapter plus native backend implementation.
+    pub backend: Digest,
+    /// Exact verified profile descriptor.
+    pub profile: Digest,
+    /// Exact resident model/runtime load.
+    pub load: Digest,
+    /// Exact native RNG implementation and state family.
+    pub rng: Digest,
+    /// Exact selected backend and parameter placement.
+    pub placement: Digest,
+}
+
 /// Accounting for one exact post-Euler callback.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -782,6 +812,86 @@ impl DiffusionCheckpoint {
         &self.state_le_bytes
     }
 
+    /// Encodes the authenticated receipt and exact state bytes as a versioned
+    /// adapter-local checkpoint envelope.
+    ///
+    /// The envelope is portable only across executions that pass
+    /// [`DiffusionCheckpointReceipt::validate_for`] and the adapter's exact
+    /// backend identity checks.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when deterministic receipt encoding or length
+    /// accounting fails.
+    pub fn to_envelope_bytes(&self) -> Result<Vec<u8>> {
+        let receipt = serde_json::to_vec(&self.receipt).map_err(|error| {
+            Error::Invalid(format!("checkpoint receipt encoding failed: {error}"))
+        })?;
+        if receipt.len() > MAX_CHECKPOINT_RECEIPT_BYTES {
+            return Err(Error::Invalid(format!(
+                "checkpoint receipt exceeds {MAX_CHECKPOINT_RECEIPT_BYTES} bytes"
+            )));
+        }
+        let receipt_len = u32::try_from(receipt.len())
+            .map_err(|_| Error::Invalid("checkpoint receipt length exceeds u32".to_owned()))?;
+        let capacity = CHECKPOINT_ENVELOPE_MAGIC
+            .len()
+            .checked_add(size_of::<u32>())
+            .and_then(|length| length.checked_add(receipt.len()))
+            .and_then(|length| length.checked_add(self.state_le_bytes.len()))
+            .ok_or_else(|| Error::Invalid("checkpoint envelope length overflowed".to_owned()))?;
+        let mut bytes = Vec::with_capacity(capacity);
+        bytes.extend_from_slice(CHECKPOINT_ENVELOPE_MAGIC);
+        bytes.extend_from_slice(&receipt_len.to_le_bytes());
+        bytes.extend_from_slice(&receipt);
+        bytes.extend_from_slice(&self.state_le_bytes);
+        Ok(bytes)
+    }
+
+    /// Reconstructs a checkpoint from a versioned adapter-local envelope.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for a wrong version, truncated or excessive receipt,
+    /// malformed lineage, or unauthenticated state bytes.
+    pub fn from_envelope_bytes(bytes: &[u8]) -> Result<Self> {
+        let header = CHECKPOINT_ENVELOPE_MAGIC.len() + size_of::<u32>();
+        if bytes.len() <= header
+            || bytes.len() > MAX_CHECKPOINT_ENVELOPE_BYTES
+            || &bytes[..CHECKPOINT_ENVELOPE_MAGIC.len()] != CHECKPOINT_ENVELOPE_MAGIC
+        {
+            return Err(Error::Invalid(
+                "checkpoint envelope magic or length differs".to_owned(),
+            ));
+        }
+        let length_offset = CHECKPOINT_ENVELOPE_MAGIC.len();
+        let receipt_len = u32::from_le_bytes([
+            bytes[length_offset],
+            bytes[length_offset + 1],
+            bytes[length_offset + 2],
+            bytes[length_offset + 3],
+        ]);
+        let receipt_len = usize::try_from(receipt_len)
+            .map_err(|_| Error::Invalid("checkpoint receipt length exceeds usize".to_owned()))?;
+        if receipt_len == 0 || receipt_len > MAX_CHECKPOINT_RECEIPT_BYTES {
+            return Err(Error::Invalid(
+                "checkpoint receipt length is outside its public bound".to_owned(),
+            ));
+        }
+        let receipt_end = header
+            .checked_add(receipt_len)
+            .ok_or_else(|| Error::Invalid("checkpoint envelope length overflowed".to_owned()))?;
+        let receipt_bytes = bytes
+            .get(header..receipt_end)
+            .ok_or_else(|| Error::Invalid("checkpoint receipt is truncated".to_owned()))?;
+        let state = bytes
+            .get(receipt_end..)
+            .ok_or_else(|| Error::Invalid("checkpoint state is truncated".to_owned()))?;
+        let receipt: DiffusionCheckpointReceipt = serde_json::from_slice(receipt_bytes)
+            .map_err(|error| Error::Invalid(format!("checkpoint receipt is malformed: {error}")))?;
+        Self::from_parts(receipt, state.to_vec())
+    }
+
     /// Reconstructs authenticated checkpoint parts.
     ///
     /// # Errors
@@ -791,9 +901,12 @@ impl DiffusionCheckpoint {
         receipt: DiffusionCheckpointReceipt,
         state_le_bytes: Vec<u8>,
     ) -> Result<Self> {
-        if state_le_bytes.is_empty() || !state_le_bytes.len().is_multiple_of(4) {
+        if state_le_bytes.is_empty()
+            || state_le_bytes.len() > MAX_CHECKPOINT_STATE_BYTES
+            || !state_le_bytes.len().is_multiple_of(4)
+        {
             return Err(Error::Invalid(
-                "checkpoint state must contain complete f32 bytes".to_owned(),
+                "checkpoint state must contain bounded complete f32 bytes".to_owned(),
             ));
         }
         let state = Digest::of_bytes("sdcpp-checkpoint-f32-le-v1", &state_le_bytes);
@@ -963,5 +1076,54 @@ mod tests {
         assert!(!json.contains("private prompt"));
         assert_eq!(receipt.cfg_scale_bits, 1.0_f32.to_bits());
         assert_eq!(receipt.seed, 7);
+    }
+
+    #[test]
+    fn checkpoint_envelope_round_trips_and_authenticates_state() {
+        let tensor = logit_loom_diffusion::TensorSpec::new(
+            vec![2],
+            logit_loom_diffusion::TensorDType::F32,
+            logit_loom_diffusion::TensorLayout::DimensionZeroFastest,
+            "host-f32:test",
+        )
+        .unwrap();
+        let schedule =
+            DiffusionSchedule::new(Digest::of_bytes("schedule", b"one"), vec![1.0, 0.0]).unwrap();
+        let mut components = BTreeMap::new();
+        components.insert("model".to_owned(), Digest::of_bytes("model", b"one"));
+        let plan = DiffusionPlan::new(
+            components,
+            Digest::of_bytes("conditioning", b"one"),
+            Digest::of_bytes("rng", b"one"),
+            7,
+            tensor,
+            schedule,
+        )
+        .unwrap();
+        let context = StepContext::for_plan(&plan, 0).unwrap();
+        let checkpoint = DiffusionCheckpoint::capture(
+            &plan,
+            &Digest::of_bytes("backend", b"one"),
+            &context,
+            &[1.0, 2.0],
+        )
+        .unwrap();
+        let encoded = checkpoint.to_envelope_bytes().unwrap();
+        let decoded = DiffusionCheckpoint::from_envelope_bytes(&encoded).unwrap();
+        assert_eq!(decoded.receipt(), checkpoint.receipt());
+        assert_eq!(decoded.state_bytes(), checkpoint.state_bytes());
+
+        let mut changed = encoded;
+        *changed.last_mut().unwrap() ^= 1;
+        assert!(DiffusionCheckpoint::from_envelope_bytes(&changed).is_err());
+
+        let mut excessive_receipt = checkpoint.to_envelope_bytes().unwrap();
+        let offset = CHECKPOINT_ENVELOPE_MAGIC.len();
+        excessive_receipt[offset..offset + size_of::<u32>()].copy_from_slice(
+            &u32::try_from(MAX_CHECKPOINT_RECEIPT_BYTES + 1)
+                .unwrap()
+                .to_le_bytes(),
+        );
+        assert!(DiffusionCheckpoint::from_envelope_bytes(&excessive_receipt).is_err());
     }
 }
