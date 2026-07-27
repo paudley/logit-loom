@@ -19,7 +19,8 @@ The crate provides:
 
 The whole-request contract adds:
 
-- exact input, plan, output, backend, and evidence identities;
+- exact input, selected plan authority, output, backend, and evidence
+  identities;
 - bounded owned request, output, and opaque evidence bytes;
 - cooperative cancellation with classified deadline and protocol failures;
   and
@@ -38,6 +39,11 @@ describe whether a resident executor may be reused. They do not authorize an
 automatic retry.
 
 Whole-request backends expose no token-step IPC, per-token transforms,
-observers, or checkpoints. A backend that cannot represent selected generation
-mechanics exactly must reject the request before execution. Dropping or
-aborting a pending result must not acknowledge successful completion.
+observers, or checkpoints. `WholeGenerationPlan::Exact` requires every
+selected generation mechanic to be represented exactly.
+`WholeGenerationPlan::ProviderOwned` carries only portable output, seed, and
+optional temperature/top-p semantics; the backend owns all omitted physical
+mechanics and must bind the selected backend and actual execution evidence into
+the terminal result. These authority modes are domain-separated and cannot be
+silently reinterpreted. Dropping or aborting a pending result must not
+acknowledge successful completion.

@@ -50,13 +50,94 @@ struct WholeGenerationRequestIdentity<'a> {
     maximum_output_bytes: u64,
 }
 
+/// Portable caller-selected sampler semantics for a provider-owned backend.
+///
+/// Physical sampler stages, candidate bounds, and implementation defaults are
+/// deliberately absent. When this value is omitted, the selected backend owns
+/// both temperature and nucleus defaults.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProviderOwnedSampler {
+    /// Caller-selected sampling temperature.
+    pub temperature: f32,
+    /// Caller-selected nucleus probability.
+    pub top_p: f32,
+}
+
+impl ProviderOwnedSampler {
+    fn validate(self) -> Result<(), CoreError> {
+        if !self.temperature.is_finite()
+            || !(0.0..=10.0).contains(&self.temperature)
+            || !self.top_p.is_finite()
+            || !(0.0..=1.0).contains(&self.top_p)
+        {
+            return Err(CoreError::invalid(
+                "provider-owned sampler",
+                "temperature or top-p is outside its finite public bound",
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// Portable generation semantics whose physical mechanics remain backend-owned.
+///
+/// A backend accepting this plan must bind its actual selected implementation
+/// and mechanics into terminal evidence. It must not reinterpret this value as
+/// an exact native [`GenerationPlan`].
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProviderOwnedGenerationPlan {
+    /// Maximum generated tokens.
+    pub max_tokens: u32,
+    /// Exact caller-selected seed.
+    pub seed: u32,
+    /// Optional caller-selected portable sampling semantics.
+    pub sampler: Option<ProviderOwnedSampler>,
+}
+
+impl ProviderOwnedGenerationPlan {
+    /// Validates bounded portable controls.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for a zero output budget or invalid sampler values.
+    pub fn validate(self) -> Result<(), CoreError> {
+        if self.max_tokens == 0 {
+            return Err(CoreError::invalid(
+                "provider-owned maximum tokens",
+                "must be greater than zero",
+            ));
+        }
+        if let Some(sampler) = self.sampler {
+            sampler.validate()?;
+        }
+        Ok(())
+    }
+
+    fn digest(self) -> Result<Digest, CoreError> {
+        Digest::of_serializable("whole-generation-provider-owned-plan-v1", &self)
+    }
+}
+
+/// Authority boundary selected by a whole-generation request.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "authority", content = "plan", rename_all = "kebab-case")]
+pub enum WholeGenerationPlan {
+    /// Every native generation mechanic is caller-selected.
+    Exact(GenerationPlan),
+    /// Only portable semantics are caller-selected; physical mechanics remain
+    /// with the selected backend.
+    ProviderOwned(ProviderOwnedGenerationPlan),
+}
+
 /// One validated, owned, backend-neutral generation request.
 #[derive(Clone, Debug)]
 pub struct WholeGenerationRequest {
     input_specification: BufferSpec,
     input_bytes: Vec<u8>,
     input_content: Digest,
-    generation_plan: GenerationPlan,
+    generation_plan: WholeGenerationPlan,
     generation_plan_identity: Digest,
     maximum_output_bytes: usize,
     identity: Digest,
@@ -75,8 +156,52 @@ impl WholeGenerationRequest {
         generation_plan: GenerationPlan,
         maximum_output_bytes: usize,
     ) -> Result<Self, CoreError> {
-        input_specification.validate()?;
         generation_plan.validate()?;
+        let generation_plan_identity = generation_plan.digest()?;
+        Self::build(
+            input_specification,
+            input_bytes,
+            WholeGenerationPlan::Exact(generation_plan),
+            generation_plan_identity,
+            maximum_output_bytes,
+            "whole-generation-request-v1",
+        )
+    }
+
+    /// Constructs a bounded request whose physical mechanics remain
+    /// provider-owned.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the buffer metadata, exact length, portable
+    /// generation controls, or input/output bounds are invalid.
+    pub fn new_provider_owned(
+        input_specification: BufferSpec,
+        input_bytes: Vec<u8>,
+        generation_plan: ProviderOwnedGenerationPlan,
+        maximum_output_bytes: usize,
+    ) -> Result<Self, CoreError> {
+        generation_plan.validate()?;
+        let generation_plan_identity = generation_plan.digest()?;
+        Self::build(
+            input_specification,
+            input_bytes,
+            WholeGenerationPlan::ProviderOwned(generation_plan),
+            generation_plan_identity,
+            maximum_output_bytes,
+            "whole-generation-request-v2",
+        )
+    }
+
+    fn build(
+        input_specification: BufferSpec,
+        input_bytes: Vec<u8>,
+        generation_plan: WholeGenerationPlan,
+        generation_plan_identity: Digest,
+        maximum_output_bytes: usize,
+        identity_domain: &'static str,
+    ) -> Result<Self, CoreError> {
+        input_specification.validate()?;
         if input_bytes.is_empty() || input_bytes.len() > MAX_WHOLE_GENERATION_INPUT_BYTES {
             return Err(CoreError::invalid(
                 "whole generation input",
@@ -98,11 +223,10 @@ impl WholeGenerationRequest {
             ));
         }
         let input_content = Digest::of_bytes("whole-generation-input-content-v1", &input_bytes);
-        let generation_plan_identity = generation_plan.digest()?;
         let maximum_output_bytes_u64 = u64::try_from(maximum_output_bytes)
             .map_err(|_| CoreError::invalid("whole generation output bound", "exceeds u64"))?;
         let identity = Digest::of_serializable(
-            "whole-generation-request-v1",
+            identity_domain,
             &WholeGenerationRequestIdentity {
                 input_specification: &input_specification,
                 input_content: &input_content,
@@ -141,8 +265,8 @@ impl WholeGenerationRequest {
         &self.input_content
     }
 
-    /// Returns the validated generation mechanics.
-    pub const fn generation_plan(&self) -> &GenerationPlan {
+    /// Returns the selected generation authority and validated plan.
+    pub const fn generation_plan(&self) -> &WholeGenerationPlan {
         &self.generation_plan
     }
 
@@ -461,13 +585,22 @@ mod tests {
         .unwrap()
     }
 
+    fn exact_plan(request: &WholeGenerationRequest) -> GenerationPlan {
+        match request.generation_plan() {
+            WholeGenerationPlan::Exact(plan) => plan.clone(),
+            WholeGenerationPlan::ProviderOwned(_) => {
+                panic!("fixture must retain exact generation mechanics")
+            }
+        }
+    }
+
     #[test]
     fn request_identity_binds_exact_bytes_plan_and_output_bound() {
         let original = request(b"{\"value\":1}");
         let changed = request(b"{\"value\":2}");
         assert_ne!(original.identity(), changed.identity());
 
-        let mut plan = original.generation_plan().clone();
+        let mut plan = exact_plan(&original);
         plan.max_tokens += 1;
         let changed_plan = WholeGenerationRequest::new(
             original.input_specification().clone(),
@@ -481,11 +614,67 @@ mod tests {
         let changed_bound = WholeGenerationRequest::new(
             original.input_specification().clone(),
             original.input_bytes().to_vec(),
-            original.generation_plan().clone(),
+            exact_plan(&original),
             original.maximum_output_bytes() + 1,
         )
         .unwrap();
         assert_ne!(original.identity(), changed_bound.identity());
+    }
+
+    #[test]
+    fn provider_owned_plan_is_distinct_and_binds_portable_controls() {
+        let input = b"input";
+        let specification = BufferSpec::new(
+            Digest::of_bytes("caller-input", input),
+            u64::try_from(input.len()).unwrap(),
+            "application/json",
+        )
+        .unwrap();
+        let plan = ProviderOwnedGenerationPlan {
+            max_tokens: 8,
+            seed: 7,
+            sampler: None,
+        };
+        let request = WholeGenerationRequest::new_provider_owned(
+            specification.clone(),
+            input.to_vec(),
+            plan,
+            128,
+        )
+        .unwrap();
+        assert_eq!(
+            request.generation_plan(),
+            &WholeGenerationPlan::ProviderOwned(plan)
+        );
+
+        let changed = WholeGenerationRequest::new_provider_owned(
+            specification,
+            input.to_vec(),
+            ProviderOwnedGenerationPlan {
+                max_tokens: 9,
+                ..plan
+            },
+            128,
+        )
+        .unwrap();
+        assert_ne!(request.identity(), changed.identity());
+        assert_ne!(
+            request.generation_plan_identity(),
+            changed.generation_plan_identity()
+        );
+
+        assert!(
+            WholeGenerationRequest::new_provider_owned(
+                request.input_specification().clone(),
+                input.to_vec(),
+                ProviderOwnedGenerationPlan {
+                    max_tokens: 0,
+                    ..plan
+                },
+                128,
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -497,13 +686,8 @@ mod tests {
         )
         .unwrap();
         assert!(
-            WholeGenerationRequest::new(
-                spec,
-                b"x".to_vec(),
-                request(b"x").generation_plan().clone(),
-                1,
-            )
-            .is_err()
+            WholeGenerationRequest::new(spec, b"x".to_vec(), exact_plan(&request(b"x")), 1,)
+                .is_err()
         );
         let oversized = vec![0_u8; MAX_WHOLE_GENERATION_INPUT_BYTES + 1];
         let oversized_spec = BufferSpec::new(
@@ -513,13 +697,8 @@ mod tests {
         )
         .unwrap();
         assert!(
-            WholeGenerationRequest::new(
-                oversized_spec,
-                oversized,
-                request(b"x").generation_plan().clone(),
-                1,
-            )
-            .is_err()
+            WholeGenerationRequest::new(oversized_spec, oversized, exact_plan(&request(b"x")), 1,)
+                .is_err()
         );
     }
 

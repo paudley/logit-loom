@@ -13,9 +13,10 @@ mod whole;
 pub use whole::{
     ClassifiedWholeGenerationError, DurabilityReceipt, MAX_WHOLE_GENERATION_EVIDENCE,
     MAX_WHOLE_GENERATION_EVIDENCE_BYTES, MAX_WHOLE_GENERATION_INPUT_BYTES,
-    MAX_WHOLE_GENERATION_OUTPUT_BYTES, PendingGeneration, WholeGenerationBackend,
-    WholeGenerationCommitReceipt, WholeGenerationEvidence, WholeGenerationFailure,
-    WholeGenerationOutput, WholeGenerationReceipt, WholeGenerationRequest,
+    MAX_WHOLE_GENERATION_OUTPUT_BYTES, PendingGeneration, ProviderOwnedGenerationPlan,
+    ProviderOwnedSampler, WholeGenerationBackend, WholeGenerationCommitReceipt,
+    WholeGenerationEvidence, WholeGenerationFailure, WholeGenerationOutput, WholeGenerationPlan,
+    WholeGenerationReceipt, WholeGenerationRequest,
 };
 
 /// Maximum bytes in a buffer media-type label.
