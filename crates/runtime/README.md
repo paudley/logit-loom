@@ -30,6 +30,12 @@ logs are preserved unless `NativeLogPolicy::Silence` is selected.
 that need several models under a separately managed runtime should use the
 lower-level adapter.
 
+`Loom::load_qwen3_small` adds exact byte-count and SHA-256 verification for the
+catalogued Qwen3 0.6B `Q8_0` GGUF. It still takes a caller path and
+`LoomOptions`; it does not choose tokenization, chat formatting, placement, or
+session allocation. `Loom::profile_artifact` returns a path-free verification
+receipt for profiled loads.
+
 ## One bounded completion
 
 The caller supplies a local GGUF, exact text, tokenization flags, and a nonzero

@@ -8,6 +8,10 @@ use logit_loom::Digest;
 use logit_loom_llamacpp::{
     LoraAdapter, Model, ModelOptions, Runtime, SessionOptions, Tokenization,
 };
+use logit_loom_models::{
+    ArtifactReceipt, Catalog, QWEN3_SMALL_ARTIFACT_PATH, QWEN3_SMALL_PROFILE_ID,
+    QWEN3_SMALL_SOURCE_ID,
+};
 
 use crate::{
     CompletionOutput, GenerationRequest, LoomSession, Result, session::admit_text,
@@ -43,6 +47,7 @@ pub struct Loom {
     model: Model,
     runtime: Runtime,
     options: LoomOptions,
+    profile_artifact: Option<ArtifactReceipt>,
 }
 
 impl std::fmt::Debug for Loom {
@@ -52,6 +57,7 @@ impl std::fmt::Debug for Loom {
             .field("model", &self.model)
             .field("runtime", &self.runtime.compatibility_label())
             .field("options", &self.options)
+            .field("profile_artifact", &self.profile_artifact)
             .finish()
     }
 }
@@ -67,6 +73,51 @@ impl Loom {
     /// Returns an initialization, I/O, native load, identity, or device-policy
     /// error.
     pub fn load(path: impl AsRef<Path>, options: LoomOptions) -> Result<Self> {
+        Self::load_inner(path.as_ref(), options, None)
+    }
+
+    /// Verifies and loads the catalogued Qwen3 0.6B `Q8_0` GGUF.
+    ///
+    /// The caller still selects the exact local path and every [`LoomOptions`]
+    /// placement and allocation field. This method does not format a chat
+    /// prompt, choose tokenization flags, allocate a session, or download
+    /// artifacts.
+    ///
+    /// # Errors
+    ///
+    /// Returns a catalog, size, SHA-256, initialization, native load, identity,
+    /// or device-policy error.
+    pub fn load_qwen3_small(path: impl AsRef<Path>, options: LoomOptions) -> Result<Self> {
+        let catalog = Catalog::embedded()?;
+        let catalog_sha256 = catalog.packaged_sha256();
+        let profile = catalog
+            .find_profile(QWEN3_SMALL_PROFILE_ID)
+            .ok_or_else(|| logit_loom_models::ArtifactError::Unknown {
+                profile: QWEN3_SMALL_PROFILE_ID.to_owned(),
+                source_id: QWEN3_SMALL_SOURCE_ID.to_owned(),
+                path: QWEN3_SMALL_ARTIFACT_PATH.to_owned(),
+            })?;
+        let verified = profile.verify_artifact(
+            &catalog_sha256,
+            QWEN3_SMALL_SOURCE_ID,
+            QWEN3_SMALL_ARTIFACT_PATH,
+            path,
+        )?;
+        let loaded = Self::load_inner(verified.path(), options, Some(verified.receipt().clone()))?;
+        profile.verify_artifact(
+            &catalog_sha256,
+            QWEN3_SMALL_SOURCE_ID,
+            QWEN3_SMALL_ARTIFACT_PATH,
+            verified.path(),
+        )?;
+        Ok(loaded)
+    }
+
+    fn load_inner(
+        path: &Path,
+        options: LoomOptions,
+        profile_artifact: Option<ArtifactReceipt>,
+    ) -> Result<Self> {
         let mut runtime = Runtime::initialize()?;
         if options.native_logs == NativeLogPolicy::Silence {
             runtime.silence_native_logs();
@@ -76,6 +127,7 @@ impl Loom {
             model,
             runtime,
             options,
+            profile_artifact,
         })
     }
 
@@ -102,6 +154,12 @@ impl Loom {
     /// Returns the readable native build label bound into checkpoints.
     pub fn backend_compatibility(&self) -> &str {
         self.runtime.compatibility_label()
+    }
+
+    /// Returns exact profile verification evidence when loaded through a
+    /// profile-specific constructor.
+    pub const fn profile_artifact(&self) -> Option<&ArtifactReceipt> {
+        self.profile_artifact.as_ref()
     }
 
     /// Returns the underlying loaded model.

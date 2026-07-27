@@ -25,6 +25,7 @@ pub use logit_loom_llamacpp::{
     MAX_TOKENIZATION_BYTES, ModelOptions, PrefillOutput, SessionOptions, StateSnapshot,
     Tokenization,
 };
+pub use logit_loom_models::ArtifactReceipt as ModelArtifactReceipt;
 
 /// Direct access to the lower-level crates when the façade is intentionally
 /// insufficient.

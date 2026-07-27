@@ -17,20 +17,77 @@ include breaking API changes.
   for first-party rank bias, token bias, and cooperative cancellation.
 - Runtime examples for model-free mechanics, local generation, and
   compatibility-checked checkpoint branching.
-- Five end-to-end mechanical experiment runbooks with compiled runtime
+- Eight end-to-end mechanical experiment runbooks with compiled text and image
   examples, structured JSON reports, success criteria, variations, and failure
   diagnosis for checkpoints, transforms, exact bytes, stopping, cancellation,
-  and scoped `LoRA`.
+  scoped `LoRA`, direct-RGB state, and latent state.
+- A bounded optional-model catalog and repository-local acquisition tooling for
+  exact, caller-fetched Qwen3 0.6B Q8_0, MiniT2I-B/16, and Krea 2 Turbo
+  artifacts, with pinned revisions, weight hashes, no-network dry runs, local
+  verification, and explicit gated-license acknowledgement.
+- A bounded path-free acquisition report recording exact verified artifacts
+  for Qwen, MiniT2I, and Krea across repository fetches and caller-managed
+  stores.
+- Exact Qwen profile loading with pre/post native artifact verification and a
+  deterministic checkpoint replay example.
+- `logit-loom-diffusion`, with backend-neutral tensor, schedule, plan,
+  checkpoint, transactional intervention, observer, and receipt contracts.
+- `logit-loom-executor`, with transport-neutral worker-local lifecycle,
+  exact borrowed-buffer, cancellation, cleanup-receipt, and classified-failure
+  contracts.
+- Serializable whole-image execution plans and receipts for exact
+  text-to-image, image-to-image, inpaint, outpaint, VAE, LoRA, installed
+  operator, observation, placement, and buffer mechanics.
+- `logit-loom-diffusion-sdcpp`, a safe adapter over companion ABI version 1 for
+  an exact pinned stable-diffusion.cpp revision, with explicit accelerator
+  placement and focused unsafe-boundary tests.
+- Stable-diffusion.cpp image ABI version 2 and safe adapter contract version 3,
+  with direct caller-owned RGB output, bounded source/mask/reference inputs,
+  negative conditioning, fixed request-local LoRA stacks with verified tensor
+  participation and cleanup, direct Krea VAE encode/decode, lifecycle epochs,
+  and reuse-aware error classification.
+- A reproducible native companion patch/build script, model-free ABI probe,
+  complete MiniT2I and Krea checkpoint experiments, and an output-free
+  model-acceptance report schema.
+- Native per-step denoiser-plus-Euler timing returned as non-deterministic
+  deployment measurements outside receipts and content identities.
+- Retained, output-free Vulkan acceptance reports for exact Qwen checkpoint
+  replay and MiniT2I and Krea unchanged/intervened checkpoint branches,
+  including Krea deployment timing and qualified memory observations.
+- First-class Qwen, MiniT2I, and Krea catalog status, with repository checks
+  requiring passed profiles to retain a matching passed acceptance report.
+- A phased first-class model integration plan with separate text, compact
+  image, advanced image, and release gates.
+- An unpublished partial `logit-loom-tokenizer` workspace crate containing
+  bounded identity, cancellation, batch/scatter, token-aware chunking, and
+  collision-checked cache primitives. Its SIMD BPE kernel and dedicated pool
+  remain open work.
 - A higher-level interface guide covering ownership, ordering, identities,
   exact bytes, concurrency boundaries, checkpoints, steering, and low-level
   escape hatches.
 
 ### Changed
 
-- Prepared all workspace crates and exact internal dependencies for the
-  coordinated `0.2.0` release.
+- Prepared the publishable workspace crates and exact internal dependencies
+  for the coordinated `0.2.0` release; the partial tokenizer crate remains
+  explicitly unpublished.
+- The stable-diffusion.cpp adapter now requires the image-v2 symbol set; a
+  companion carrying only the earlier step-v1 surface is rejected at load.
+- Stable-diffusion.cpp generation receipts now bind the exact session epoch
+  used by the operation; serialized experiment receipt identities advance to
+  `sdcpp-generation-receipt-v2`.
+- Checkpoint restore now reconstructs the next-token logit boundary after
+  loading llama.cpp causal-memory bytes; failed final-position removal or
+  re-decode poisons the session instead of sampling stale logits.
+- The stable-diffusion.cpp companion suppresses its fallback stdout progress
+  renderer so image examples preserve a single valid structured-report stream.
+- Diffusion component identifiers accept the catalog's bounded lowercase
+  dotted slugs, including `wan-2.1-vae`.
+- Model tooling and release checks invoke the unpublished workspace xtask
+  package explicitly and no longer depend on a caller-local Cargo alias.
 - Root, crate, capability, architecture, compatibility, getting-started, and
-  release documentation now describe the four-crate workspace.
+  release documentation now describe the expanded text, model-catalog, and
+  diffusion workspace.
 
 ## [0.1.1] - 2026-07-23
 

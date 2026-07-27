@@ -41,7 +41,7 @@ jobs:
 
           mapfile -t workspace_versions < <(
             cargo metadata --locked --no-deps --format-version 1 |
-              jq -r '.packages[].version' |
+              jq -r '.packages[] | select(.publish != []) | .version' |
               sort -u
           )
           if [[ "${#workspace_versions[@]}" -ne 1 ]]; then
@@ -75,8 +75,9 @@ jobs:
         run: cargo audit --deny warnings
 
   publish:
-    # logit-loom-runtime is intentionally absent until its first manual
-    # publication and trusted-publisher record exist. See docs/releasing.md.
+    # The five new 0.2 crates are intentionally absent until their first
+    # manual publications and trusted-publisher records exist.
+    # See docs/releasing.md.
     name: Publish configured crates
     needs: [release-check, dependency-audit]
     runs-on: ubuntu-latest
@@ -111,6 +112,6 @@ jobs:
         run: |
           cargo publish -p logit-loom-llamacpp --locked --dry-run
           cargo publish -p logit-loom-llamacpp --locked
-      - name: Report runtime bootstrap requirement
+      - name: Report expanded-workspace bootstrap requirement
         run: |
-          echo "::notice::logit-loom-runtime is not published by this workflow; follow docs/releasing.md"
+          echo "::notice::new 0.2 crates require the bootstrap sequence in docs/releasing.md"

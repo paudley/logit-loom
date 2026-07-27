@@ -71,7 +71,11 @@ poisons the session, and subsequent mutation returns `Error::Poisoned`.
 Applications may persist `StateSnapshot::into_parts` in their own container
 format and reconstruct it with `StateSnapshot::from_parts`. Reconstruction
 validates internal byte and token-lineage identities; restore additionally
-requires the original model and compatible backend build.
+requires the original model and compatible backend build. Because the pinned
+llama.cpp state format omits next-token logits, restore re-decodes the final
+recorded token at its exact position after restoring causal memory. A backend
+that cannot remove that one position is rejected, and a failed refresh poisons
+the session.
 
 See the [compatibility policy](https://github.com/paudley/logit-loom/blob/main/docs/compatibility.md)
 and [capability status](https://github.com/paudley/logit-loom/blob/main/docs/capabilities.md)

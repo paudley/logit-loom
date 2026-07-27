@@ -83,8 +83,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             zero_based_rank: u64::try_from(JOLTED_RANK)?,
             additive_bias: JOLT,
         },
-        baseline: baseline.into(),
-        jolted: jolted.into(),
+        baseline: baseline.try_into()?,
+        jolted: jolted.try_into()?,
         outputs_differ,
         transform: pipeline.receipt(),
     })

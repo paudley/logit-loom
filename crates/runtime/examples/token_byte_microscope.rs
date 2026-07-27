@@ -89,7 +89,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         admission: admission.into(),
         generation_plan,
         observed_tokens,
-        generation: generation.into(),
+        generation: generation.try_into()?,
         observers: observers.receipts(),
     })
 }

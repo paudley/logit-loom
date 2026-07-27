@@ -72,7 +72,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         stop_bytes_hex: support::encode_hex(&stop),
         stop_selected,
         output_ends_with_stop,
-        generation: generation.into(),
+        generation: generation.try_into()?,
     })
 }
 

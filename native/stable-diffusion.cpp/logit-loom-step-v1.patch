@@ -1,0 +1,508 @@
+diff --git include/stable-diffusion.h include/stable-diffusion.h
+index 890050a..1846b47 100644
+--- include/stable-diffusion.h
++++ include/stable-diffusion.h
+@@ -420,6 +420,87 @@ typedef void (*sd_progress_cb_t)(int step, int steps, float time, void* data);
+ typedef void (*sd_preview_cb_t)(int step, int frame_count, sd_image_t* frames, bool is_noisy, void* data);
+ typedef bool (*sd_graph_eval_callback_t)(struct ggml_tensor* t, bool ask, void* user_data);
+ 
++// Logit Loom companion ABI. This surface is maintained by the Logit Loom
++// patch and is not part of upstream stable-diffusion.cpp.
++#define SD_LOOM_ABI_VERSION 1
++
++enum sd_loom_profile_t {
++    SD_LOOM_PROFILE_MINIT2I_B16 = 1,
++    SD_LOOM_PROFILE_KREA2_TURBO = 2,
++};
++
++enum sd_loom_status_t {
++    SD_LOOM_STATUS_OK = 0,
++    SD_LOOM_STATUS_STOPPED = 1,
++    SD_LOOM_STATUS_INVALID_ARGUMENT = 2,
++    SD_LOOM_STATUS_UNSUPPORTED = 3,
++    SD_LOOM_STATUS_CALLBACK_ERROR = 4,
++    SD_LOOM_STATUS_NATIVE_ERROR = 5,
++};
++
++enum sd_loom_callback_result_t {
++    SD_LOOM_CALLBACK_CONTINUE = 0,
++    SD_LOOM_CALLBACK_STOP = 1,
++    SD_LOOM_CALLBACK_ERROR = 2,
++};
++
++enum sd_loom_tensor_dtype_t {
++    SD_LOOM_TENSOR_F32 = 1,
++    SD_LOOM_TENSOR_I32 = 2,
++};
++
++typedef struct {
++    uint32_t abi_version;
++    enum sd_loom_profile_t profile;
++    const char* diffusion_model_path;
++    const char* text_encoder_path;
++    const char* vae_path;
++    const char* backend;
++    const char* params_backend;
++    int n_threads;
++    bool enable_mmap;
++    bool flash_attn;
++    bool diffusion_flash_attn;
++} sd_loom_ctx_params_v1_t;
++
++typedef struct {
++    uint32_t abi_version;
++    const char* prompt;
++    int width;
++    int height;
++    int64_t seed;
++    float cfg_scale;
++    const float* sigmas;
++    size_t sigma_count;
++} sd_loom_image_params_v1_t;
++
++typedef struct {
++    uint32_t abi_version;
++    uint32_t step_index;
++    uint32_t step_count;
++    float sigma_from;
++    float sigma_to;
++    float* state;
++    size_t state_len;
++    const int64_t* shape;
++    size_t rank;
++    double elapsed_milliseconds;
++} sd_loom_step_v1_t;
++
++typedef int32_t (*sd_loom_step_cb_v1_t)(const sd_loom_step_v1_t* step, void* data);
++
++typedef struct {
++    uint32_t abi_version;
++    const char* label;
++    enum sd_loom_tensor_dtype_t dtype;
++    const void* data;
++    size_t bytes;
++    const int64_t* shape;
++    size_t rank;
++} sd_loom_condition_tensor_v1_t;
++
++typedef int32_t (*sd_loom_condition_cb_v1_t)(const sd_loom_condition_tensor_v1_t* tensor, void* data);
++
+ SD_API void sd_set_log_callback(sd_log_cb_t sd_log_cb, void* data);
+ SD_API void sd_set_progress_callback(sd_progress_cb_t cb, void* data);
+ SD_API void sd_set_preview_callback(sd_preview_cb_t cb, enum preview_t mode, int interval, bool denoised, bool noisy, void* data);
+@@ -565,6 +646,17 @@ SD_API void disable_imatrix_collection(void);
+ SD_API const char* sd_commit(void);
+ SD_API const char* sd_version(void);
+ 
++SD_API uint32_t sd_loom_abi_version(void);
++SD_API const char* sd_loom_upstream_commit(void);
++SD_API sd_ctx_t* sd_loom_new_ctx_v1(const sd_loom_ctx_params_v1_t* params);
++SD_API int32_t sd_loom_generate_image_v1(sd_ctx_t* sd_ctx,
++                                        const sd_loom_image_params_v1_t* params,
++                                        sd_loom_condition_cb_v1_t condition_callback,
++                                        void* condition_callback_data,
++                                        sd_loom_step_cb_v1_t callback,
++                                        void* callback_data,
++                                        sd_image_t** image_out);
++
+ // List available ggml backend devices, one `name<TAB>description` per line.
+ // The names are the device names accepted by the --backend / --params-backend
+ // assignment specs. Returns the number of bytes required, excluding the null
+diff --git src/runtime/denoiser.hpp src/runtime/denoiser.hpp
+index 115175b..fb5bbfb 100644
+--- src/runtime/denoiser.hpp
++++ src/runtime/denoiser.hpp
+@@ -3,6 +3,7 @@
+ 
+ #include <algorithm>
+ #include <cctype>
++#include <chrono>
+ #include <cmath>
+ #include <cstring>
+ #include <functional>
+@@ -15,6 +16,7 @@
+ #include "core/tensor.hpp"
+ #include "runtime/gits_noise.h"
+ #include "runtime/guidance.h"
++#include "stable-diffusion.h"
+ 
+ /*================================================= CompVisDenoiser ==================================================*/
+ 
+@@ -1556,9 +1558,13 @@ static sd::Tensor<float> sample_sefi_euler(SefiFlowDenoiser* sefi,
+ 
+ static sd::Tensor<float> sample_euler(denoise_cb_t model,
+                                       sd::Tensor<float> x,
+-                                      const std::vector<float>& sigmas) {
++                                      const std::vector<float>& sigmas,
++                                      sd_loom_step_cb_v1_t step_callback,
++                                      void* step_callback_data,
++                                      int32_t* step_callback_status) {
+     int steps = static_cast<int>(sigmas.size()) - 1;
+     for (int i = 0; i < steps; i++) {
++        auto step_started = std::chrono::steady_clock::now();
+         float sigma       = sigmas[i];
+         auto denoised_opt = model(x, sigma, i + 1);
+         if (denoised_opt.pred.empty()) {
+@@ -1567,6 +1573,36 @@ static sd::Tensor<float> sample_euler(denoise_cb_t model,
+         sd::Tensor<float> denoised = std::move(denoised_opt.pred);
+         sd::Tensor<float> d        = (x - denoised) / sigma;
+         x += d * (sigmas[i + 1] - sigma);
++        if (step_callback != nullptr) {
++            double elapsed_milliseconds =
++                std::chrono::duration<double, std::milli>(
++                    std::chrono::steady_clock::now() - step_started)
++                    .count();
++            sd_loom_step_v1_t step = {
++                SD_LOOM_ABI_VERSION,
++                static_cast<uint32_t>(i),
++                static_cast<uint32_t>(steps),
++                sigma,
++                sigmas[i + 1],
++                x.data(),
++                static_cast<size_t>(x.numel()),
++                x.shape().data(),
++                x.shape().size(),
++                elapsed_milliseconds,
++            };
++            int32_t callback_result = step_callback(&step, step_callback_data);
++            if (callback_result == SD_LOOM_CALLBACK_STOP) {
++                *step_callback_status = SD_LOOM_STATUS_STOPPED;
++                return x;
++            }
++            if (callback_result != SD_LOOM_CALLBACK_CONTINUE ||
++                std::any_of(x.values().begin(), x.values().end(), [](float value) {
++                    return !std::isfinite(value);
++                })) {
++                *step_callback_status = SD_LOOM_STATUS_CALLBACK_ERROR;
++                return {};
++            }
++        }
+     }
+     return x;
+ }
+@@ -2668,7 +2704,14 @@ static sd::Tensor<float> sample_k_diffusion(sample_method_t method,
+                                             float eta,
+                                             bool is_flow_denoiser,
+                                             const char* extra_sample_args,
+-                                            std::shared_ptr<Denoiser> denoiser_for_dispatch = nullptr) {
++                                            std::shared_ptr<Denoiser> denoiser_for_dispatch,
++                                            sd_loom_step_cb_v1_t step_callback,
++                                            void* step_callback_data,
++                                            int32_t* step_callback_status) {
++    if (step_callback != nullptr && method != EULER_SAMPLE_METHOD) {
++        *step_callback_status = SD_LOOM_STATUS_UNSUPPORTED;
++        return {};
++    }
+     if (denoiser_for_dispatch) {
+         if (auto sefi = std::dynamic_pointer_cast<SefiFlowDenoiser>(denoiser_for_dispatch)) {
+             return sample_sefi_euler(sefi.get(), model, std::move(x));
+@@ -2679,7 +2722,12 @@ static sd::Tensor<float> sample_k_diffusion(sample_method_t method,
+         case EULER_A_SAMPLE_METHOD:
+             return sample_euler_ancestral(model, std::move(x), sigmas, rng, is_flow_denoiser, eta);
+         case EULER_SAMPLE_METHOD:
+-            return sample_euler(model, std::move(x), sigmas);
++            return sample_euler(model,
++                                std::move(x),
++                                sigmas,
++                                step_callback,
++                                step_callback_data,
++                                step_callback_status);
+         case HEUN_SAMPLE_METHOD:
+             return sample_heun(model, std::move(x), sigmas);
+         case DPM2_SAMPLE_METHOD:
+diff --git src/stable-diffusion.cpp src/stable-diffusion.cpp
+index 0bddba2..6a8b17b 100644
+--- src/stable-diffusion.cpp
++++ src/stable-diffusion.cpp
+@@ -206,6 +206,11 @@ public:
+ 
+     std::shared_ptr<RNG> rng         = std::make_shared<PhiloxRNG>();
+     std::shared_ptr<RNG> sampler_rng = nullptr;
++    sd_loom_condition_cb_v1_t loom_condition_callback = nullptr;
++    void* loom_condition_callback_data                 = nullptr;
++    sd_loom_step_cb_v1_t loom_step_callback = nullptr;
++    void* loom_step_callback_data            = nullptr;
++    int32_t loom_step_status                  = SD_LOOM_STATUS_OK;
+     int n_threads                    = -1;
+     float default_flow_shift         = INFINITY;
+ 
+@@ -2693,7 +2698,18 @@ public:
+             return output;
+         };
+ 
+-        auto x0_opt = sample_k_diffusion(method, denoise, x_t, sigmas, sampler_rng, eta, is_flow_denoiser, extra_sample_args, denoiser);
++        auto x0_opt = sample_k_diffusion(method,
++                                         denoise,
++                                         x_t,
++                                         sigmas,
++                                         sampler_rng,
++                                         eta,
++                                         is_flow_denoiser,
++                                         extra_sample_args,
++                                         denoiser,
++                                         loom_step_callback,
++                                         loom_step_callback_data,
++                                         &loom_step_status);
+         if (x0_opt.empty()) {
+             LOG_ERROR("Diffusion model sampling failed");
+             if (control_net) {
+@@ -3643,6 +3659,69 @@ void free_sd_ctx(sd_ctx_t* sd_ctx) {
+     free(sd_ctx);
+ }
+ 
++uint32_t sd_loom_abi_version(void) {
++    return SD_LOOM_ABI_VERSION;
++}
++
++const char* sd_loom_upstream_commit(void) {
++    return "ea4e566ccffa10f853ecc3f29e74b1820bc91beb";
++}
++
++static bool sd_loom_nonempty(const char* value) {
++    return value != nullptr && value[0] != '\0';
++}
++
++static void sd_loom_discard_progress(int, int, float, void*) {
++}
++
++sd_ctx_t* sd_loom_new_ctx_v1(const sd_loom_ctx_params_v1_t* params) {
++    if (params == nullptr ||
++        params->abi_version != SD_LOOM_ABI_VERSION ||
++        !sd_loom_nonempty(params->diffusion_model_path) ||
++        !sd_loom_nonempty(params->text_encoder_path) ||
++        !sd_loom_nonempty(params->backend) ||
++        !sd_loom_nonempty(params->params_backend) ||
++        params->n_threads <= 0) {
++        return nullptr;
++    }
++
++    sd_ctx_params_t native_params;
++    sd_ctx_params_init(&native_params);
++    native_params.diffusion_model_path = params->diffusion_model_path;
++    native_params.backend              = params->backend;
++    native_params.params_backend       = params->params_backend;
++    native_params.n_threads            = params->n_threads;
++    native_params.enable_mmap          = params->enable_mmap;
++    native_params.flash_attn           = params->flash_attn;
++    native_params.diffusion_flash_attn = params->diffusion_flash_attn;
++    native_params.rng_type             = CPU_RNG;
++    native_params.sampler_rng_type     = CPU_RNG;
++
++    switch (params->profile) {
++        case SD_LOOM_PROFILE_MINIT2I_B16:
++            if (sd_loom_nonempty(params->vae_path)) {
++                return nullptr;
++            }
++            native_params.t5xxl_path = params->text_encoder_path;
++            native_params.prediction = MINIT2I_FLOW_PRED;
++            break;
++        case SD_LOOM_PROFILE_KREA2_TURBO:
++            if (!sd_loom_nonempty(params->vae_path)) {
++                return nullptr;
++            }
++            native_params.llm_path   = params->text_encoder_path;
++            native_params.vae_path   = params->vae_path;
++            native_params.vae_format = SD_VAE_FORMAT_WAN;
++            break;
++        default:
++            return nullptr;
++    }
++
++    // Preserve stdout for the embedding application's structured output.
++    sd_set_progress_callback(sd_loom_discard_progress, nullptr);
++    return new_sd_ctx(&native_params);
++}
++
+ SD_API void sd_cancel_generation(sd_ctx_t* sd_ctx, enum sd_cancel_mode_t mode) {
+     if (sd_ctx && sd_ctx->sd) {
+         if (mode < SD_CANCEL_ALL || mode > SD_CANCEL_RESET) {
+@@ -4480,6 +4559,70 @@ struct ImageGenerationEmbeds {
+     SDCondition img_uncond;
+ };
+ 
++template <typename T>
++static bool sd_loom_report_condition_tensor(sd_loom_condition_cb_v1_t callback,
++                                            void* callback_data,
++                                            const std::string& label,
++                                            sd_loom_tensor_dtype_t dtype,
++                                            const sd::Tensor<T>& tensor) {
++    sd_loom_condition_tensor_v1_t value = {
++        SD_LOOM_ABI_VERSION,
++        label.c_str(),
++        dtype,
++        tensor.empty() ? nullptr : tensor.data(),
++        static_cast<size_t>(tensor.numel()) * sizeof(T),
++        tensor.shape().empty() ? nullptr : tensor.shape().data(),
++        tensor.shape().size(),
++    };
++    return callback(&value, callback_data) == SD_LOOM_CALLBACK_CONTINUE;
++}
++
++static bool sd_loom_report_condition(sd_loom_condition_cb_v1_t callback,
++                                     void* callback_data,
++                                     const std::string& prefix,
++                                     const SDCondition& condition) {
++    if (!sd_loom_report_condition_tensor(callback, callback_data, prefix + ".c_crossattn", SD_LOOM_TENSOR_F32, condition.c_crossattn) ||
++        !sd_loom_report_condition_tensor(callback, callback_data, prefix + ".c_vector", SD_LOOM_TENSOR_F32, condition.c_vector) ||
++        !sd_loom_report_condition_tensor(callback, callback_data, prefix + ".c_concat", SD_LOOM_TENSOR_F32, condition.c_concat) ||
++        !sd_loom_report_condition_tensor(callback, callback_data, prefix + ".c_t5_ids", SD_LOOM_TENSOR_I32, condition.c_t5_ids) ||
++        !sd_loom_report_condition_tensor(callback, callback_data, prefix + ".c_t5_weights", SD_LOOM_TENSOR_F32, condition.c_t5_weights) ||
++        !sd_loom_report_condition_tensor(callback, callback_data, prefix + ".c_input_ids", SD_LOOM_TENSOR_I32, condition.c_input_ids) ||
++        !sd_loom_report_condition_tensor(callback, callback_data, prefix + ".c_position_ids", SD_LOOM_TENSOR_I32, condition.c_position_ids) ||
++        !sd_loom_report_condition_tensor(callback, callback_data, prefix + ".c_token_types", SD_LOOM_TENSOR_I32, condition.c_token_types) ||
++        !sd_loom_report_condition_tensor(callback, callback_data, prefix + ".c_vinput_mask", SD_LOOM_TENSOR_I32, condition.c_vinput_mask)) {
++        return false;
++    }
++    for (size_t index = 0; index < condition.c_image_embeds.size(); ++index) {
++        const auto& [image_index, tensor] = condition.c_image_embeds[index];
++        if (!sd_loom_report_condition_tensor(callback,
++                                             callback_data,
++                                             prefix + ".c_image_embeds." + std::to_string(index) + "." + std::to_string(image_index),
++                                             SD_LOOM_TENSOR_F32,
++                                             tensor)) {
++            return false;
++        }
++    }
++    for (size_t index = 0; index < condition.c_ref_images.size(); ++index) {
++        if (!sd_loom_report_condition_tensor(callback,
++                                             callback_data,
++                                             prefix + ".c_ref_images." + std::to_string(index),
++                                             SD_LOOM_TENSOR_F32,
++                                             condition.c_ref_images[index])) {
++            return false;
++        }
++    }
++    for (size_t index = 0; index < condition.extra_c_crossattns.size(); ++index) {
++        if (!sd_loom_report_condition_tensor(callback,
++                                             callback_data,
++                                             prefix + ".extra_c_crossattns." + std::to_string(index),
++                                             SD_LOOM_TENSOR_F32,
++                                             condition.extra_c_crossattns[index])) {
++            return false;
++        }
++    }
++    return true;
++}
++
+ struct ConditionerRunnerDoneOnExit {
+     Conditioner* conditioner = nullptr;
+     ~ConditionerRunnerDoneOnExit() {
+@@ -5337,6 +5480,22 @@ SD_API bool generate_image(sd_ctx_t* sd_ctx,
+         return false;
+     }
+     ImageGenerationEmbeds embeds = std::move(*embeds_opt);
++    if (sd_ctx->sd->loom_condition_callback != nullptr &&
++        (!sd_loom_report_condition(sd_ctx->sd->loom_condition_callback,
++                                   sd_ctx->sd->loom_condition_callback_data,
++                                   "cond",
++                                   embeds.cond) ||
++         !sd_loom_report_condition(sd_ctx->sd->loom_condition_callback,
++                                   sd_ctx->sd->loom_condition_callback_data,
++                                   "uncond",
++                                   embeds.uncond) ||
++         !sd_loom_report_condition(sd_ctx->sd->loom_condition_callback,
++                                   sd_ctx->sd->loom_condition_callback_data,
++                                   "img_uncond",
++                                   embeds.img_uncond))) {
++        sd_ctx->sd->loom_step_status = SD_LOOM_STATUS_CALLBACK_ERROR;
++        return false;
++    }
+ 
+     std::vector<sd::Tensor<float>> final_latents;
+     int64_t denoise_start = ggml_time_ms();
+@@ -5549,6 +5708,95 @@ SD_API bool generate_image(sd_ctx_t* sd_ctx,
+     return true;
+ }
+ 
++int32_t sd_loom_generate_image_v1(sd_ctx_t* sd_ctx,
++                                  const sd_loom_image_params_v1_t* params,
++                                  sd_loom_condition_cb_v1_t condition_callback,
++                                  void* condition_callback_data,
++                                  sd_loom_step_cb_v1_t callback,
++                                  void* callback_data,
++                                  sd_image_t** image_out) {
++    if (image_out != nullptr) {
++        *image_out = nullptr;
++    }
++    if (sd_ctx == nullptr ||
++        sd_ctx->sd == nullptr ||
++        params == nullptr ||
++        image_out == nullptr ||
++        condition_callback == nullptr ||
++        callback == nullptr ||
++        params->abi_version != SD_LOOM_ABI_VERSION ||
++        !sd_loom_nonempty(params->prompt) ||
++        params->width <= 0 ||
++        params->height <= 0 ||
++        params->width > 4096 ||
++        params->height > 4096 ||
++        !std::isfinite(params->cfg_scale) ||
++        params->cfg_scale < 0.f ||
++        params->cfg_scale > 64.f ||
++        params->sigmas == nullptr ||
++        params->sigma_count < 2 ||
++        params->sigma_count > 4097 ||
++        sd_ctx->sd->loom_condition_callback != nullptr ||
++        sd_ctx->sd->loom_step_callback != nullptr) {
++        return SD_LOOM_STATUS_INVALID_ARGUMENT;
++    }
++    for (size_t i = 0; i < params->sigma_count; ++i) {
++        float sigma = params->sigmas[i];
++        if (!std::isfinite(sigma) ||
++            sigma < 0.f ||
++            (i + 1 < params->sigma_count && sigma <= 0.f) ||
++            (i > 0 && params->sigmas[i - 1] < sigma)) {
++            return SD_LOOM_STATUS_INVALID_ARGUMENT;
++        }
++    }
++
++    sd_img_gen_params_t native_params;
++    sd_img_gen_params_init(&native_params);
++    native_params.prompt                                = params->prompt;
++    native_params.width                                 = params->width;
++    native_params.height                                = params->height;
++    native_params.seed                                  = params->seed;
++    native_params.sample_params.guidance.txt_cfg        = params->cfg_scale;
++    native_params.sample_params.sample_method           = EULER_SAMPLE_METHOD;
++    native_params.sample_params.sample_steps            = static_cast<int>(params->sigma_count - 1);
++    native_params.sample_params.custom_sigmas           = const_cast<float*>(params->sigmas);
++    native_params.sample_params.custom_sigmas_count     = static_cast<int>(params->sigma_count);
++
++    sd_ctx->sd->loom_condition_callback      = condition_callback;
++    sd_ctx->sd->loom_condition_callback_data = condition_callback_data;
++    sd_ctx->sd->loom_step_callback      = callback;
++    sd_ctx->sd->loom_step_callback_data = callback_data;
++    sd_ctx->sd->loom_step_status        = SD_LOOM_STATUS_OK;
++
++    sd_image_t* images = nullptr;
++    int image_count    = 0;
++    bool generated     = generate_image(sd_ctx, &native_params, &images, &image_count);
++    int32_t status     = sd_ctx->sd->loom_step_status;
++
++    sd_ctx->sd->loom_condition_callback      = nullptr;
++    sd_ctx->sd->loom_condition_callback_data = nullptr;
++    sd_ctx->sd->loom_step_callback      = nullptr;
++    sd_ctx->sd->loom_step_callback_data = nullptr;
++    sd_ctx->sd->loom_step_status        = SD_LOOM_STATUS_OK;
++
++    if (status == SD_LOOM_STATUS_CALLBACK_ERROR ||
++        status == SD_LOOM_STATUS_UNSUPPORTED) {
++        if (images != nullptr) {
++            free_sd_images(images, image_count);
++        }
++        return status;
++    }
++    if (!generated || images == nullptr || image_count != 1) {
++        if (images != nullptr) {
++            free_sd_images(images, image_count);
++        }
++        return SD_LOOM_STATUS_NATIVE_ERROR;
++    }
++
++    *image_out = images;
++    return status;
++}
++
+ static std::optional<ImageGenerationLatents> prepare_video_generation_latents(sd_ctx_t* sd_ctx,
+                                                                               const sd_vid_gen_params_t* sd_vid_gen_params,
+                                                                               GenerationRequest* request) {

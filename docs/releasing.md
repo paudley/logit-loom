@@ -69,22 +69,27 @@ the publishing job. The pinned crates.io authentication action exchanges the
 GitHub OIDC identity for a short-lived token and revokes it when the job
 finishes. Do not add a long-lived crates.io token to GitHub secrets.
 
-The initial `logit-loom-runtime` publication is a bootstrap exception. Publish
-it manually only after the exact coordinated versions of
-`logit-loom-core`, `logit-loom`, and `logit-loom-llamacpp` have been published
-and indexed. Then create its trusted-publisher record with the identity above
-and add the fourth publish step to the workflow in a separately reviewed
-change. Until both actions are complete, the workflow intentionally publishes
-only the three already-configured crates.
+The initial publications of `logit-loom-executor`, `logit-loom-models`,
+`logit-loom-diffusion`, `logit-loom-runtime`, and
+`logit-loom-diffusion-sdcpp` are bootstrap exceptions. Publish each manually
+from the exact release tag only after every dependency earlier in the order
+below is indexed. Then create its trusted-publisher record with the identity
+above and add its publish step to the workflow in a separately reviewed
+change. Until those actions are complete, the workflow intentionally
+publishes only the three already configured crates.
 
 ## Publish order
 
 Publish and wait for crates.io indexing in this order:
 
 1. `logit-loom-core`
-2. `logit-loom`
-3. `logit-loom-llamacpp`
-4. `logit-loom-runtime`
+2. `logit-loom-executor`
+3. `logit-loom-models`
+4. `logit-loom`
+5. `logit-loom-diffusion`
+6. `logit-loom-llamacpp`
+7. `logit-loom-runtime`
+8. `logit-loom-diffusion-sdcpp`
 
 The workflow performs a dry run immediately before publishing each crate:
 
@@ -98,10 +103,14 @@ tag. The tag must match the shared workspace version and a dated changelog
 heading; the workflow rejects mismatches, reruns the clean release gate and
 RustSec audit, then publishes its configured prefix of the order above.
 
-For the first release containing `logit-loom-runtime`, wait for the workflow's
-three packages to be indexed, then run both the runtime dry run and manual
-publication from the same tagged checkout. Do not manually publish the runtime
-from an untagged or modified tree.
+For the first expanded-workspace release, wait for the workflow's three
+packages to be indexed. From the same tagged checkout, manually publish
+`logit-loom-executor`, wait for it to index, then publish
+`logit-loom-models`. Publish `logit-loom-diffusion` after both foundational
+packages resolve, then publish `logit-loom-runtime` and
+`logit-loom-diffusion-sdcpp` after their respective dependencies resolve. Run
+the dry run immediately before each publication. Do not manually publish from
+an untagged or modified tree.
 
 After all packages resolve from crates.io, create the GitHub release from the
 matching changelog section. A failed partially published release requires
@@ -112,8 +121,11 @@ maintainer review; do not move or reuse its tag.
 - Query each crates.io package and docs.rs page.
 - In a fresh temporary project, resolve exact published versions without path
   overrides.
-- Compile the backend-neutral example.
-- Compile the adapter example with at least one supported accelerator feature.
+- Compile the token and diffusion backend-neutral examples.
+- Compile the llama.cpp adapter example with at least one supported
+  accelerator feature.
+- Build and probe the exact stable-diffusion.cpp companion separately; do not
+  run a model as part of the release gate.
 - Confirm the tagged commit's hosted CI and dependency-security checks are
   green.
 - Record any platform not validated in the release notes.

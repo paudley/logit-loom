@@ -11,4 +11,4 @@
 *.profraw
 *.profdata
 .DS_Store
-.playright-mcp
+/.playwright-mcp/

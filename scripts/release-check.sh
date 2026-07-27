@@ -20,6 +20,7 @@ if [[ "${allow_dirty}" == false ]] && [[ -n "$(git status --porcelain)" ]]; then
     exit 1
 fi
 
+cargo run --quiet --locked -p logit-loom-xtask -- models check
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --all-targets --locked
@@ -32,9 +33,13 @@ if [[ "${allow_dirty}" == true ]]; then
 fi
 
 cargo package -p logit-loom-core "${package_flags[@]}"
+cargo package -p logit-loom-executor "${package_flags[@]}" --list >/dev/null
+cargo package -p logit-loom-models "${package_flags[@]}"
 cargo package -p logit-loom "${package_flags[@]}" --list >/dev/null
+cargo package -p logit-loom-diffusion "${package_flags[@]}" --list >/dev/null
 cargo package -p logit-loom-llamacpp "${package_flags[@]}" --list >/dev/null
 cargo package -p logit-loom-runtime "${package_flags[@]}" --list >/dev/null
+cargo package -p logit-loom-diffusion-sdcpp "${package_flags[@]}" --list >/dev/null
 
 if rg -n --hidden --glob '!target/**' --glob '!.git/**' \
     --glob '!scripts/release-check.sh' \

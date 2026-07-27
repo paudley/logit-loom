@@ -100,7 +100,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         requested_break_after: break_after,
         callback_observations: callback_observations.get(),
         cancellation_requested: cancellation.is_cancelled(),
-        generation: generation.into(),
+        generation: generation.try_into()?,
         observers: observers.receipts(),
     })
 }

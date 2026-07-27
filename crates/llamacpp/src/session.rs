@@ -191,6 +191,17 @@ mod tests {
         assert_eq!(matching_stop(&stops, b"zabc"), Some(0));
         assert_eq!(matching_stop(&stops, b"zab"), None);
     }
+
+    #[test]
+    fn checkpoint_logit_refresh_targets_only_the_last_position() {
+        assert_eq!(checkpoint_logit_refresh_range(0).unwrap(), None);
+        assert_eq!(checkpoint_logit_refresh_range(1).unwrap(), Some((0, 1)));
+        assert_eq!(
+            checkpoint_logit_refresh_range(i32::MAX as u64).unwrap(),
+            Some((i32::MAX as u32 - 1, i32::MAX as u32))
+        );
+        assert!(checkpoint_logit_refresh_range(u64::MAX).is_err());
+    }
 }
 
 /// Result of one plain or controlled prefill call.
@@ -744,9 +755,49 @@ impl<'model> Session<'model> {
             self.record_poison(&error);
             return Err(error);
         }
+        if let Some(last_token) = snapshot.tokens.last().copied()
+            && let Err(error) =
+                self.refresh_logits_after_restore(last_token, snapshot.receipt.position)
+        {
+            self.record_poison(&error);
+            return Err(error);
+        }
         self.token_history.clone_from(&snapshot.tokens);
         self.position = snapshot.receipt.position;
         Ok(())
+    }
+
+    fn refresh_logits_after_restore(
+        &mut self,
+        last_token: TokenId,
+        position: u64,
+    ) -> Result<(), Error> {
+        let Some((last_position, end_position)) = checkpoint_logit_refresh_range(position)? else {
+            return Ok(());
+        };
+        let removed = self
+            .context
+            .clear_kv_cache_seq(Some(0), Some(last_position), Some(end_position))
+            .map_err(native)?;
+        if !removed {
+            return Err(Error::Incompatible(
+                "native memory cannot remove the final checkpoint position to refresh logits"
+                    .to_owned(),
+            ));
+        }
+
+        let native_position = i32::try_from(last_position)
+            .map_err(|_| Error::Incompatible("checkpoint position exceeds i32".to_owned()))?;
+        let mut batch = LlamaBatch::new(1, 1);
+        batch
+            .add(
+                LlamaToken::new(last_token.get()),
+                native_position,
+                &[0],
+                true,
+            )
+            .map_err(native)?;
+        self.context.decode(&mut batch).map_err(native)
     }
 
     fn decode_tokens(&mut self, tokens: &[TokenId]) -> Result<(), Error> {
@@ -817,6 +868,18 @@ impl<'model> Session<'model> {
 
 fn matching_stop(stops: &[Vec<u8>], output: &[u8]) -> Option<usize> {
     stops.iter().position(|stop| output.ends_with(stop))
+}
+
+fn checkpoint_logit_refresh_range(position: u64) -> Result<Option<(u32, u32)>, Error> {
+    let Some(last_position) = position.checked_sub(1) else {
+        return Ok(None);
+    };
+    let last_position = u32::try_from(last_position)
+        .map_err(|_| Error::Incompatible("checkpoint position exceeds u32".to_owned()))?;
+    let end_position = last_position
+        .checked_add(1)
+        .ok_or_else(|| Error::Incompatible("checkpoint position overflowed".to_owned()))?;
+    Ok(Some((last_position, end_position)))
 }
 
 fn session_compatibility_identity(runtime: &Digest, options: SessionOptions) -> Digest {

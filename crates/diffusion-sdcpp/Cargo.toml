@@ -1,0 +1,35 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+
+[package]
+name = "logit-loom-diffusion-sdcpp"
+description = "Safe stable-diffusion.cpp adapter for Logit Loom diffusion experiments"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/logit-loom-diffusion-sdcpp"
+readme = "README.md"
+keywords = ["diffusion", "inference", "image", "ffi", "experiment"]
+categories = ["api-bindings", "science"]
+
+[dependencies]
+blake3.workspace = true
+libloading.workspace = true
+logit-loom-diffusion.workspace = true
+logit-loom-executor.workspace = true
+logit-loom-models.workspace = true
+serde.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true
+
+[package.metadata.docs.rs]
+all-features = true

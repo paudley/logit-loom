@@ -8,9 +8,9 @@
 [![CI](https://github.com/paudley/logit-loom/actions/workflows/ci.yml/badge.svg)](https://github.com/paudley/logit-loom/actions/workflows/ci.yml)
 
 Logit Loom is a Rust toolkit for observing, transforming, steering, stopping,
-resuming, and accounting for token generation. It provides backend-neutral
-mechanical contracts and a llama.cpp adapter without prescribing what a model
-should say or think.
+resuming, and accounting for token and diffusion generation. It provides
+backend-neutral mechanical contracts plus llama.cpp and stable-diffusion.cpp
+adapters without prescribing what a model should say, think, or depict.
 
 The project is functionality-oriented. It makes no claim that a particular
 transform, sampler, adapter, or steering method improves model quality.
@@ -46,19 +46,28 @@ execution, and native details isolated in an adapter.
 - **Manage steering resources explicitly.** Scope caller-supplied LoRA adapters
   or control vectors to one session and poison the session if cleanup fails,
   avoiding silent continuation with uncertain native state.
+- **Build resident image workers without hiding their mechanics.** Bind exact
+  prompt, source, mask, reference, LoRA, tensor, schedule, placement, and
+  output-buffer identities to a serializable plan, then keep transport,
+  admission, and retry policy in the downstream application.
 
 ## Crates
 
 | Crate | Purpose |
 | --- | --- |
 | [`logit-loom-runtime`](crates/runtime) | Explicit higher-level model loading, exact text admission, generation, controls, checkpoints, and steering. |
+| [`logit-loom-models`](models) | Pinned optional model profiles and path-free artifact verification receipts. |
 | [`logit-loom-core`](crates/core) | Serializable token, sampling, steering, checkpoint, and receipt contracts. |
+| [`logit-loom-executor`](crates/executor) | Transport-neutral worker-local lifecycle, borrowed-buffer, cancellation, cleanup, and failure contracts. |
 | [`logit-loom`](crates/loom) | Safe transform pipelines, observer fan-out, cancellation, and first-party transforms. |
 | [`logit-loom-llamacpp`](crates/llamacpp) | llama.cpp model/session integration through `llama-cpp-4`. |
+| [`logit-loom-diffusion`](crates/diffusion) | Backend-neutral diffusion plans, checkpoints, transactional state interventions, and observers. |
+| [`logit-loom-diffusion-sdcpp`](crates/diffusion-sdcpp) | Safe adapter for the versioned stable-diffusion.cpp companion ABI. |
+| [`logit-loom-tokenizer`](crates/tokenizer) | Unpublished bounded identities, batching, chunking, cancellation, and cache primitives for the open bulk-tokenizer phase. |
 
-The two foundational crates contain no model runtime. Applications can use
-them with a different inference backend by adapting candidate logits and token
-events at the documented boundaries.
+The backend-neutral crates contain no model runtime. Applications can use the
+token contracts with another text backend or the diffusion contracts with
+another tensor runtime at their documented boundaries.
 
 ## Getting started
 
@@ -72,6 +81,41 @@ The [getting-started guide](docs/getting-started.md) walks through dependency
 selection, the transform lifecycle, exact-byte observation, and opt-in native
 execution. Each crate README is also its compiled crate-level rustdoc, so its
 examples are checked as doctests.
+
+For an in-process image backend or downstream resident worker, see the
+[worker-local image execution guide](docs/image-execution.md).
+
+## Optional model profiles
+
+The [profile integration plan](NEXT_STEPS.md) covers three caller-fetched
+profiles: Qwen3 0.6B Q8_0 for small text experiments, MiniT2I-B/16 for compact
+direct-RGB image experiments, and Krea 2 Turbo for advanced latent
+experiments.
+
+The repository now has a machine-checked
+[acquisition catalog](models/README.md) with exact upstream revisions, selected
+files, byte counts, weight hashes, and license locations:
+
+```sh
+cargo run --quiet -p logit-loom-xtask -- models list
+cargo run --quiet -p logit-loom-xtask -- models fetch qwen3-0.6b-q8-0 \
+  --dir /path/to/model-store \
+  --dry-run
+```
+
+Qwen has an exact
+[profile loader and replay runbook](docs/runbooks/06-qwen-profile-replay.md).
+MiniT2I and Krea share a reviewed, versioned stable-diffusion.cpp adapter and
+have complete [image fork](docs/runbooks/07-minit2i-fork.md) and
+[latent transplant](docs/runbooks/08-krea2-latent-transplant.md) runbooks.
+All three profiles have
+[retained, output-free accelerator reports](docs/acceptance/README.md) that
+pass their mechanical acceptance gates and are checked in as
+**first-class** with `passed` acceptance status. Krea's report binds the exact
+license and runtime components, selected Vulkan device, checkpoint replay,
+bounded latent intervention, step timings, and qualified deployment-memory
+observations. No acquisition command runs during tests or CI, and no model
+code, weights, prompts, or generated images are bundled.
 
 ## A local runtime
 
@@ -158,6 +202,18 @@ receipts suitable for inspection or replay checks.
 - An explicit higher-level local runtime with separate replace/append
   admission, bounded one-shot and stateful generation, control builders, and
   compatibility identity access.
+- Bounded diffusion tensor, schedule, plan, checkpoint, intervention,
+  observer, and receipt contracts that remain distinct from token mechanics.
+- Serializable whole-image plans plus a transport-neutral local-executor seam
+  over exact borrowed inputs, caller-owned outputs, lifecycle state, cleanup
+  receipts, and classified failures.
+- An exact dynamic companion ABI for MiniT2I and Krea with transactional
+  post-Euler state callbacks, deterministic-prefix checkpoints, explicit
+  accelerator placement, per-step native timing outside deterministic
+  receipts, and no CPU-only retry.
+- Image ABI v2 text-to-image, image-to-image, inpaint, outpaint, reference
+  images, fixed request-local LoRA stacks, direct Krea VAE encode/decode, and
+  verified native LoRA participation.
 - Content-bound plans and mechanical execution receipts.
 
 See [architecture](docs/architecture.md) for boundaries and
@@ -172,6 +228,8 @@ cargo run -p logit-loom-core --example generation_plan
 cargo run -p logit-loom --example token_bias
 cargo run -p logit-loom --example observe_tokens
 cargo run -p logit-loom-runtime --example mechanics
+cargo run -p logit-loom-diffusion-sdcpp --example probe_companion -- \
+  /path/to/libstable-diffusion.so
 ```
 
 Model-backed runtime examples require a caller-supplied local GGUF and an
@@ -186,9 +244,9 @@ cargo run -p logit-loom-runtime --example branch \
 
 ## End-to-end experiment runbooks
 
-Five [mechanical experiment runbooks](docs/runbooks/README.md) take a specific
-token-stream question from caller-supplied artifacts through execution,
-inspection, success criteria, variations, and failure diagnosis:
+Eight [mechanical experiment runbooks](docs/runbooks/README.md) take a specific
+token-stream or diffusion-state question from caller-supplied artifacts
+through execution, inspection, success criteria, and failure diagnosis:
 
 | Runbook | Mechanical question | Main surfaces |
 | --- | --- | --- |
@@ -197,18 +255,25 @@ inspection, success criteria, variations, and failure diagnosis:
 | [Exact byte tripwire](docs/runbooks/03-exact-byte-tripwire.md) | At which admitted token does an exact byte suffix stop generation? | Cross-token byte stops, terminal selection, bounded generation |
 | [Causal circuit breaker](docs/runbooks/04-causal-circuit-breaker.md) | Can one observer trigger cancellation that another sees at the same safe boundary? | Observer ordering, cooperative cancellation, retained causal work |
 | [LoRA transplant](docs/runbooks/05-lora-transplant.md) | Can steering be applied and cleared between deterministic checkpoint replays? | Scoped LoRA, cleanup receipts, checkpoint isolation, session health |
+| [Qwen profile replay](docs/runbooks/06-qwen-profile-replay.md) | Does the pinned small text model replay one exact checkpoint? | Artifact verification, accelerator placement, exact token replay |
+| [MiniT2I image fork](docs/runbooks/07-minit2i-fork.md) | Does one direct-RGB checkpoint replay unchanged and accept one bounded state operation? | Companion ABI, diffusion checkpoint, channel bias, image identities |
+| [Krea 2 latent transplant](docs/runbooks/08-krea2-latent-transplant.md) | Does one pinned latent checkpoint replay unchanged and accept one bounded channel operation? | Gated components, latent lineage, exact plan identity, image identities |
 
-Each runbook is backed by a compiled `logit-loom-runtime` example. Successful
-runs write a structured JSON report containing the serialized generation plan,
-model and backend identities, reported devices, placement and session
-allocation, exact generated bytes and token IDs, and the relevant execution
-receipts. Cargo and native diagnostics remain on standard error, so reports can
-be retained with `tee` and inspected with `jq`.
+Each runbook is backed by a compiled Rust example. Successful runs write a
+structured JSON report containing exact artifact/runtime identities, plans,
+placement evidence, execution receipts, and—where available—non-deterministic
+deployment measurements. General text reports may include exact generated
+bytes and token IDs for local inspection; image reports retain only pixel
+identities and write bytes to caller-selected PPM files. Cargo and native
+diagnostics remain on standard error, so reports can be retained with `tee`
+and inspected with `jq`.
 
 The examples never download a model, choose a prompt template, or silently
 retry rejected accelerator placement as CPU-only inference. Output differences
 are observations, not evidence of model quality or efficacy; unchanged output
 does not by itself mean that a transform or steering lifecycle failed.
+Output-free retained acceptance evidence follows the
+[model-run schema](docs/acceptance/model-run.schema.json).
 
 ## Status
 

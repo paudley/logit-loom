@@ -1,0 +1,21 @@
+schema = "logit-loom-upstream-import-v1"
+name = "gigatoken"
+version = "0.9.0"
+revision = "0d9765fa7312af7534535e6315a5c49d74807b2a"
+repository = "https://github.com/marcelroed/gigatoken"
+license = "MIT"
+observed = "2026-07-26"
+disposition = "design-derived-safe-reimplementation"
+included = [
+  "flat ragged batch and stable row-count direction",
+  "short-span cache direction",
+  "parallel work partitioning direction",
+]
+excluded = [
+  "unsafe SIMD and nightly portable_simd",
+  "PyO3 and NumPy bindings",
+  "Arrow and Parquet integration",
+  "Hugging Face Hub and network acquisition",
+  "ambient Rayon pools",
+  "unbounded caches and scratch",
+]

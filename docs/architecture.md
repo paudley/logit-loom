@@ -2,24 +2,40 @@
 
 # Architecture
 
-Logit Loom separates stable token-stream contracts from callback execution and
-from a fast-moving model backend.
+The diffusion runtime decision and its post-Euler state boundary are recorded
+in [ADR 0001](adr/0001-stable-diffusion-runtime.md).
+
+Logit Loom separates stable mechanics contracts from callback execution and
+from fast-moving model backends. Token candidates and diffusion tensors remain
+different typed surfaces.
 
 ```text
 application
-  ├─ explicit local workflow ──────────────── logit-loom-runtime
-  ├─ plans, token IDs, receipts ───────────── logit-loom-core
-  ├─ transforms, observers, cancellation ─── logit-loom
-  └─ model, session, native sampling/state ── logit-loom-llamacpp
+  ├─ exact optional model profiles ─────────── logit-loom-models
+  ├─ worker-local lifecycle and buffers ────── logit-loom-executor
+  ├─ explicit local text workflow ──────────── logit-loom-runtime
+  ├─ token plans, IDs, receipts ────────────── logit-loom-core
+  ├─ logit transforms and token observers ──── logit-loom
+  ├─ diffusion plans and state operations ──── logit-loom-diffusion
+  ├─ llama.cpp model/session adapter ───────── logit-loom-llamacpp
+  └─ stable-diffusion.cpp image adapter ────── logit-loom-diffusion-sdcpp
 
-logit-loom-runtime
+text lane
+  logit-loom-runtime
   ├─ logit-loom
   └─ logit-loom-llamacpp → llama-cpp-4 → llama.cpp
+
+image lane
+  logit-loom-diffusion-sdcpp
+  ├─ logit-loom-executor
+  ├─ logit-loom-diffusion
+  └─ companion ABI v1 + image ABI v2 → pinned stable-diffusion.cpp
 ```
 
-This split lets another backend consume `logit-loom-core` and `logit-loom`
-without importing llama.cpp types. Native ownership and compatibility churn
-remain in the adapter.
+This split lets another text backend consume `logit-loom-core` and
+`logit-loom`, or another image backend consume `logit-loom-diffusion`, without
+importing either native runtime's types. Native ownership, unsafety, and
+compatibility churn remain in adapter crates.
 
 ## Runtime façade
 
@@ -42,6 +58,74 @@ Arbitrary callbacks require a caller-defined `Digest`.
 
 The façade does not manage chat messages, templates, asynchronous execution, or
 workers. Those are downstream application concerns.
+
+## Worker-local executor seam
+
+`logit-loom-executor` is the transport-neutral boundary for a downstream
+resident worker. It defines exact borrowed inputs, caller-owned output
+allocations, cooperative cancellation, lifecycle states, cleanup receipts, and
+the `Rejected`, `Cancelled`, and `Poisoned` reuse dispositions. It deliberately
+does not define sockets, queues, resource admission, artifact stores, retries,
+or process supervision.
+
+The seam is synchronous so a backend cannot retain borrowed storage after a
+call. Native adapters keep their stronger ownership rules; in particular,
+`Sdcpp` remains neither `Send` nor `Sync`. A downstream application that needs
+concurrency should give each resident owner to one worker and communicate with
+that worker using its own authenticated transport.
+
+## Diffusion step boundary
+
+`logit-loom-diffusion` defines bounded tensor, schedule, plan, checkpoint,
+intervention, observer, whole-image execution, and receipt contracts without
+owning a tensor runtime. Whole-image plans bind exact input slots and layouts,
+output format, placement, seed policy, schedule, ordered LoRAs, installed
+operators, and batched observations. They never represent pixels or latent
+elements as token IDs or logits.
+
+The stable-diffusion.cpp adapter supports only the exact catalogued MiniT2I and
+Krea 2 component layouts. It dynamically loads companion ABI version 1 plus
+the required image ABI version 2 at the exact upstream commit recorded in ADR
+0001. Before context creation it verifies component bytes, the library digest,
+required symbols, ABI/revision, the bounded device report, and exact non-CPU
+backend names. No failed placement is retried on CPU.
+
+Native conditioning tensors are delivered first and hashed synchronously. The
+adapter then constructs an exact `DiffusionPlan` containing component,
+conditioning, RNG, seed, tensor, and custom schedule identities. After each
+Euler update, the companion exposes one contiguous host `f32` state with exact
+shape and sigma boundaries. Model evaluation remains on the caller-selected
+accelerator; the host callback boundary is reported separately. The companion
+also measures denoiser-plus-Euler elapsed time immediately before each
+callback. The adapter returns those non-deterministic deployment measurements
+separately from plans, receipts, checkpoints, and content identities.
+
+The adapter copies that complete state before calling Rust. An optional
+`PipelineProgram` applies ordered backend-neutral interventions to the copy,
+optionally at one selected step. A program error, panic, wrong shape, exhausted
+bound, or non-finite result returns a callback failure with no native
+write-back. Observers receive the complete finite post-intervention copy.
+Only after both phases succeed is the copy committed to native state.
+
+The lower-copy image-v2 path validates tightly packed source, mask, and
+reference bytes, applies a fixed request-local LoRA stack, verifies that each
+requested LoRA participated in at least one model tensor, and writes one RGB8
+image to caller-owned storage. It also exposes direct bounded Krea VAE
+encode/decode. Scheduled LoRA scales, model-block selectors, and arbitrary
+multi-operation image graphs remain representable in the backend-neutral plan
+but are rejected by this adapter until an exact native implementation exists.
+See [worker-local image execution](image-execution.md) for the support matrix
+and failure rules.
+
+`DiffusionCheckpoint` stores exact little-endian state bytes plus conservative
+lineage. Initial restore uses deterministic-prefix replay: rerun the exact
+plan and seed, require the recomputed post-step identity to match, restore the
+authenticated bytes, then branch. It does not skip earlier native work or
+permit a different schedule, conditioning input, artifact set, or backend.
+
+`Sdcpp` has one owner and is neither `Send` nor `Sync`. Raw pointers and dynamic
+symbols remain private; the complete local unsafe contract is in the adapter's
+[`SAFETY.md`](../crates/diffusion-sdcpp/SAFETY.md).
 
 ## Candidate and sampling sequence
 
@@ -146,6 +230,12 @@ Applications that persist a snapshot choose their own container format.
 `StateSnapshot::from_parts` revalidates the opaque byte count and identity,
 token-history identity, and causal position before a later restore checks the
 model and backend identities.
+
+The pinned llama.cpp state bytes contain causal memory but not output logits.
+After restoring all bytes, the adapter removes the final sequence position and
+re-decodes its exact recorded token to reconstruct the next-token boundary.
+Failure to remove or re-decode that position poisons the session instead of
+sampling from stale logits.
 
 ## Steering scopes
 

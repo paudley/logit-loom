@@ -1,0 +1,115 @@
+{
+  "schema_version": 1,
+  "identity_domain": "logit-loom-model-acceptance-report-v1",
+  "profile_id": "minit2i-b16",
+  "modality": "image",
+  "adapter": "logit-loom-diffusion-sdcpp-0.2.0",
+  "experiment": "minit2i-fork-v1",
+  "status": "passed",
+  "catalog_sha256": "5beaf0742618e09200fa81deb680ec89b13375ae6f405fa63257d55fbadc6ade",
+  "artifacts": [
+    {
+      "source_id": "minit2i",
+      "repository": "MiniT2I/MiniT2I",
+      "revision": "5b4da2870d1554992670d1005567e9d55b1b37bb",
+      "artifact_path": "minit2i-b-16/transformer/diffusion_pytorch_model.safetensors",
+      "bytes": 1032534472,
+      "sha256": "5114de36379acd45f810001d9da82d48f96559ce4428cde7a79b1e724983ced1"
+    },
+    {
+      "source_id": "flan-t5-large",
+      "repository": "google/flan-t5-large",
+      "revision": "0613663d0d48ea86ba8cb3d7a44f0f65dc596a2a",
+      "artifact_path": "model.safetensors",
+      "bytes": 3132668804,
+      "sha256": "a9dd06ce490f139af36e9eb77dd3758b4fd07a08a73d5a1abe5ff2591e2d388e"
+    }
+  ],
+  "runtime": {
+    "adapter_build_identity": "0ade250de95faea3f0de051eeff85cba979ba96f8f4f228341d926b076a3fc5b",
+    "backend": "stable-diffusion.cpp-vulkan",
+    "parameter_backend": "Vulkan0",
+    "devices": [
+      "Vulkan0 - AMD Radeon 8060S Graphics (RADV STRIX_HALO)"
+    ],
+    "accelerator_required": true,
+    "cpu_fallback": false
+  },
+  "runs": [
+    {
+      "label": "baseline",
+      "plan_identity": "fde5984c57f4ab5d38e8f14ee70d812431ce73d7e9d03e3699a9adaad0c87574",
+      "receipt_identity": "fab53564a32bf2ff694ca7b85148a0c99721a2cb5fba42931c5c91507a85b42a",
+      "output_identity": "46845f326a9bf00e6c9478530391ba4fe809f5ed7a36af4e6ba826fe830b46d0",
+      "completed_steps": 12
+    },
+    {
+      "label": "replay",
+      "plan_identity": "fde5984c57f4ab5d38e8f14ee70d812431ce73d7e9d03e3699a9adaad0c87574",
+      "receipt_identity": "84ceffb49677d59e77daf9e45d373a22ee657af9d511d482187495dfbcc726ae",
+      "output_identity": "46845f326a9bf00e6c9478530391ba4fe809f5ed7a36af4e6ba826fe830b46d0",
+      "completed_steps": 12
+    },
+    {
+      "label": "branch",
+      "plan_identity": "fde5984c57f4ab5d38e8f14ee70d812431ce73d7e9d03e3699a9adaad0c87574",
+      "receipt_identity": "d5359e95bfecc33f77edff3a82446f0fba4560c731b9a8c0915716fe65b02d2d",
+      "output_identity": "ce05beed42e73cb56a67d2277ab9cadb8707c50dd527e53d1ec4d9001a483aa4",
+      "completed_steps": 12
+    }
+  ],
+  "assertions": [
+    {
+      "id": "checkpoint-captured",
+      "status": "passed",
+      "evidence": "The baseline captured the declared post-Euler checkpoint after completed step 5."
+    },
+    {
+      "id": "exact-checkpoint-replay",
+      "status": "passed",
+      "evidence": "The unchanged replay authenticated the checkpoint and reproduced every post-step state identity and final pixel-byte identity."
+    },
+    {
+      "id": "bounded-branch-committed",
+      "status": "passed",
+      "evidence": "One bounded channel intervention committed transactionally at the declared checkpoint boundary with no failed stage."
+    },
+    {
+      "id": "branch-state-changed",
+      "status": "passed",
+      "evidence": "The declared intervention changed 262144 state elements at completed step 5."
+    },
+    {
+      "id": "branch-output-changed",
+      "status": "passed",
+      "evidence": "The intervened branch produced a pixel-byte identity distinct from the baseline and unchanged replay."
+    },
+    {
+      "id": "post-euler-state-contract",
+      "status": "passed",
+      "evidence": "The callback exposed shape [512,512,3,1], f32 elements, dimension-zero-fastest layout, and host-f32:Vulkan0 device lineage."
+    },
+    {
+      "id": "accelerator-placement",
+      "status": "passed",
+      "evidence": "Model parameters and evaluation explicitly selected Vulkan0; the adapter rejects CPU-named backends and did not retry on CPU."
+    }
+  ],
+  "measurements": {
+    "step_latency_milliseconds": [
+      409.941812,
+      147.381163,
+      144.666545,
+      148.225498,
+      146.212598,
+      147.258616,
+      145.981475,
+      147.834529,
+      160.032945,
+      155.041125,
+      146.071912,
+      146.970895
+    ]
+  },
+  "blockers": []
+}

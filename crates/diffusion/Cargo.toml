@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+
+[package]
+name = "logit-loom-diffusion"
+description = "Backend-neutral diffusion step contracts and transactional interventions"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/logit-loom-diffusion"
+readme = "README.md"
+keywords = ["diffusion", "inference", "checkpoint", "image", "ai"]
+categories = ["development-tools", "science"]
+
+[dependencies]
+logit-loom-core.workspace = true
+logit-loom-executor.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true
+
+[package.metadata.docs.rs]
+all-features = true

@@ -1,0 +1,516 @@
+--- include/stable-diffusion.h
++++ include/stable-diffusion.h
+@@ -423,6 +423,7 @@
+ // Logit Loom companion ABI. This surface is maintained by the Logit Loom
+ // patch and is not part of upstream stable-diffusion.cpp.
+ #define SD_LOOM_ABI_VERSION 1
++#define SD_LOOM_IMAGE_ABI_VERSION 2
+ 
+ enum sd_loom_profile_t {
+     SD_LOOM_PROFILE_MINIT2I_B16 = 1,
+@@ -501,6 +502,63 @@
+ 
+ typedef int32_t (*sd_loom_condition_cb_v1_t)(const sd_loom_condition_tensor_v1_t* tensor, void* data);
+ 
++enum sd_loom_image_operation_v2_t {
++    SD_LOOM_TEXT_TO_IMAGE_V2 = 1,
++    SD_LOOM_IMAGE_TO_IMAGE_V2 = 2,
++    SD_LOOM_INPAINT_V2 = 3,
++    SD_LOOM_OUTPAINT_V2 = 4,
++};
++
++typedef struct {
++    const uint8_t* data;
++    size_t bytes;
++    uint32_t width;
++    uint32_t height;
++    uint32_t channels;
++} sd_loom_image_view_v2_t;
++
++typedef struct {
++    const char* path;
++    float multiplier;
++    bool is_high_noise;
++} sd_loom_lora_v2_t;
++
++typedef struct {
++    uint32_t abi_version;
++    enum sd_loom_image_operation_v2_t operation;
++    const char* prompt;
++    const char* negative_prompt;
++    int width;
++    int height;
++    int64_t seed;
++    float cfg_scale;
++    float strength;
++    const float* sigmas;
++    size_t sigma_count;
++    sd_loom_image_view_v2_t init_image;
++    sd_loom_image_view_v2_t mask_image;
++    const sd_loom_image_view_v2_t* reference_images;
++    size_t reference_image_count;
++    const sd_loom_lora_v2_t* loras;
++    size_t lora_count;
++} sd_loom_image_params_v2_t;
++
++typedef struct {
++    uint32_t abi_version;
++    float* data;
++    size_t element_count;
++    int64_t* shape;
++    size_t rank;
++} sd_loom_owned_tensor_v2_t;
++
++typedef struct {
++    uint32_t abi_version;
++    const float* data;
++    size_t element_count;
++    const int64_t* shape;
++    size_t rank;
++} sd_loom_tensor_view_v2_t;
++
+ SD_API void sd_set_log_callback(sd_log_cb_t sd_log_cb, void* data);
+ SD_API void sd_set_progress_callback(sd_progress_cb_t cb, void* data);
+ SD_API void sd_set_preview_callback(sd_preview_cb_t cb, enum preview_t mode, int interval, bool denoised, bool noisy, void* data);
+@@ -656,6 +714,21 @@
+                                         sd_loom_step_cb_v1_t callback,
+                                         void* callback_data,
+                                         sd_image_t** image_out);
++SD_API int32_t sd_loom_generate_image_v2(sd_ctx_t* sd_ctx,
++                                        const sd_loom_image_params_v2_t* params,
++                                        sd_loom_condition_cb_v1_t condition_callback,
++                                        void* condition_callback_data,
++                                        sd_loom_step_cb_v1_t callback,
++                                        void* callback_data,
++                                        sd_image_t** image_out);
++SD_API int32_t sd_loom_vae_encode_v2(sd_ctx_t* sd_ctx,
++                                    const sd_loom_image_view_v2_t* image,
++                                    sd_loom_owned_tensor_v2_t** tensor_out);
++SD_API int32_t sd_loom_vae_decode_v2(sd_ctx_t* sd_ctx,
++                                    const sd_loom_tensor_view_v2_t* tensor,
++                                    sd_image_t** image_out);
++SD_API void sd_loom_free_tensor_v2(sd_loom_owned_tensor_v2_t* tensor);
++SD_API int32_t sd_loom_clear_session_v2(sd_ctx_t* sd_ctx);
+ 
+ // List available ggml backend devices, one `name<TAB>description` per line.
+ // The names are the device names accepted by the --backend / --params-backend
+--- src/stable-diffusion.cpp
++++ src/stable-diffusion.cpp
+@@ -3696,6 +3696,7 @@
+     native_params.diffusion_flash_attn = params->diffusion_flash_attn;
+     native_params.rng_type             = CPU_RNG;
+     native_params.sampler_rng_type     = CPU_RNG;
++    native_params.lora_apply_mode      = LORA_APPLY_AT_RUNTIME;
+ 
+     switch (params->profile) {
+         case SD_LOOM_PROFILE_MINIT2I_B16:
+@@ -5797,6 +5798,409 @@
+     return status;
+ }
+ 
++static bool sd_loom_empty_image_v2(const sd_loom_image_view_v2_t& image) {
++    return image.data == nullptr &&
++           image.bytes == 0 &&
++           image.width == 0 &&
++           image.height == 0 &&
++           image.channels == 0;
++}
++
++static bool sd_loom_valid_image_v2(const sd_loom_image_view_v2_t& image,
++                                   bool mask,
++                                   int expected_width,
++                                   int expected_height) {
++    if (image.data == nullptr ||
++        image.width == 0 ||
++        image.height == 0 ||
++        image.width > 4096 ||
++        image.height > 4096 ||
++        (mask ? image.channels != 1 : (image.channels != 3 && image.channels != 4)) ||
++        (expected_width > 0 && image.width != static_cast<uint32_t>(expected_width)) ||
++        (expected_height > 0 && image.height != static_cast<uint32_t>(expected_height))) {
++        return false;
++    }
++    size_t pixels = static_cast<size_t>(image.width) * static_cast<size_t>(image.height);
++    if (pixels > SIZE_MAX / image.channels) {
++        return false;
++    }
++    return image.bytes == pixels * image.channels;
++}
++
++static sd_image_t sd_loom_native_image_v2(const sd_loom_image_view_v2_t& image) {
++    return {
++        image.width,
++        image.height,
++        image.channels,
++        const_cast<uint8_t*>(image.data),
++    };
++}
++
++static bool sd_loom_valid_schedule_v2(const float* sigmas, size_t sigma_count) {
++    if (sigmas == nullptr || sigma_count < 2 || sigma_count > 4097) {
++        return false;
++    }
++    for (size_t i = 0; i < sigma_count; ++i) {
++        float sigma = sigmas[i];
++        if (!std::isfinite(sigma) ||
++            sigma < 0.f ||
++            (i + 1 < sigma_count && sigma <= 0.f) ||
++            (i > 0 && sigmas[i - 1] < sigma)) {
++            return false;
++        }
++    }
++    return true;
++}
++
++static bool sd_loom_bounded_string_v2(const char* value,
++                                      size_t maximum,
++                                      bool allow_empty) {
++    if (value == nullptr) {
++        return false;
++    }
++    size_t length = 0;
++    while (length <= maximum && value[length] != '\0') {
++        ++length;
++    }
++    return length <= maximum && (allow_empty || length > 0);
++}
++
++static bool sd_loom_loras_applied_v2(sd_ctx_t* sd_ctx,
++                                     const std::vector<sd_lora_t>& loras) {
++    for (const auto& requested : loras) {
++        std::string expected_id = requested.is_high_noise
++                                      ? "|high_noise|" + std::string(requested.path)
++                                      : std::string(requested.path);
++        bool matched = std::any_of(
++            sd_ctx->sd->runtime_lora_models.begin(),
++            sd_ctx->sd->runtime_lora_models.end(),
++            [&](const std::shared_ptr<LoraModel>& model) {
++                return model != nullptr &&
++                       model->lora_id == expected_id &&
++                       !model->applied_lora_tensors.empty();
++            });
++        if (!matched) {
++            return false;
++        }
++    }
++    return true;
++}
++
++static void sd_loom_reset_callbacks(sd_ctx_t* sd_ctx) {
++    sd_ctx->sd->loom_condition_callback      = nullptr;
++    sd_ctx->sd->loom_condition_callback_data = nullptr;
++    sd_ctx->sd->loom_step_callback           = nullptr;
++    sd_ctx->sd->loom_step_callback_data      = nullptr;
++    sd_ctx->sd->loom_step_status             = SD_LOOM_STATUS_OK;
++}
++
++int32_t sd_loom_generate_image_v2(sd_ctx_t* sd_ctx,
++                                  const sd_loom_image_params_v2_t* params,
++                                  sd_loom_condition_cb_v1_t condition_callback,
++                                  void* condition_callback_data,
++                                  sd_loom_step_cb_v1_t callback,
++                                  void* callback_data,
++                                  sd_image_t** image_out) {
++    if (image_out != nullptr) {
++        *image_out = nullptr;
++    }
++    if (sd_ctx == nullptr ||
++        sd_ctx->sd == nullptr ||
++        params == nullptr ||
++        image_out == nullptr ||
++        condition_callback == nullptr ||
++        callback == nullptr ||
++        params->abi_version != SD_LOOM_IMAGE_ABI_VERSION ||
++        !sd_loom_bounded_string_v2(params->prompt, 64 * 1024, false) ||
++        !sd_loom_bounded_string_v2(params->negative_prompt, 64 * 1024, true) ||
++        params->width <= 0 ||
++        params->height <= 0 ||
++        params->width > 4096 ||
++        params->height > 4096 ||
++        params->seed < 0 ||
++        !std::isfinite(params->cfg_scale) ||
++        params->cfg_scale < 0.f ||
++        params->cfg_scale > 64.f ||
++        !std::isfinite(params->strength) ||
++        params->strength <= 0.f ||
++        params->strength > 1.f ||
++        !sd_loom_valid_schedule_v2(params->sigmas, params->sigma_count) ||
++        params->reference_image_count > 16 ||
++        params->lora_count > 32 ||
++        (params->reference_image_count > 0 && params->reference_images == nullptr) ||
++        (params->lora_count > 0 && params->loras == nullptr) ||
++        sd_ctx->sd->loom_condition_callback != nullptr ||
++        sd_ctx->sd->loom_step_callback != nullptr) {
++        return SD_LOOM_STATUS_INVALID_ARGUMENT;
++    }
++
++    bool has_init = !sd_loom_empty_image_v2(params->init_image);
++    bool has_mask = !sd_loom_empty_image_v2(params->mask_image);
++    switch (params->operation) {
++        case SD_LOOM_TEXT_TO_IMAGE_V2:
++            if (has_init || has_mask || params->strength != 1.f) {
++                return SD_LOOM_STATUS_INVALID_ARGUMENT;
++            }
++            break;
++        case SD_LOOM_IMAGE_TO_IMAGE_V2:
++            if (!has_init || has_mask) {
++                return SD_LOOM_STATUS_INVALID_ARGUMENT;
++            }
++            break;
++        case SD_LOOM_INPAINT_V2:
++        case SD_LOOM_OUTPAINT_V2:
++            if (!has_init || !has_mask) {
++                return SD_LOOM_STATUS_INVALID_ARGUMENT;
++            }
++            break;
++        default:
++            return SD_LOOM_STATUS_INVALID_ARGUMENT;
++    }
++    if ((has_init &&
++         !sd_loom_valid_image_v2(params->init_image, false, params->width, params->height)) ||
++        (has_mask &&
++         !sd_loom_valid_image_v2(params->mask_image, true, params->width, params->height))) {
++        return SD_LOOM_STATUS_INVALID_ARGUMENT;
++    }
++    for (size_t i = 0; i < params->reference_image_count; ++i) {
++        if (!sd_loom_valid_image_v2(params->reference_images[i], false, 0, 0)) {
++            return SD_LOOM_STATUS_INVALID_ARGUMENT;
++        }
++    }
++
++    std::vector<sd_lora_t> native_loras;
++    native_loras.reserve(params->lora_count);
++    for (size_t i = 0; i < params->lora_count; ++i) {
++        const auto& lora = params->loras[i];
++        if (!sd_loom_bounded_string_v2(lora.path, 4096, false) ||
++            !std::isfinite(lora.multiplier) ||
++            lora.multiplier < -64.f ||
++            lora.multiplier > 64.f) {
++            return SD_LOOM_STATUS_INVALID_ARGUMENT;
++        }
++        native_loras.push_back({lora.is_high_noise, lora.multiplier, lora.path});
++    }
++
++    sd_img_gen_params_t native_params;
++    sd_img_gen_params_init(&native_params);
++    native_params.loras                            = native_loras.data();
++    native_params.lora_count                       = static_cast<uint32_t>(native_loras.size());
++    native_params.prompt                           = params->prompt;
++    native_params.negative_prompt                  = params->negative_prompt;
++    native_params.width                            = params->width;
++    native_params.height                           = params->height;
++    native_params.seed                             = params->seed;
++    native_params.strength                         = params->strength;
++    native_params.sample_params.guidance.txt_cfg   = params->cfg_scale;
++    native_params.sample_params.sample_method      = EULER_SAMPLE_METHOD;
++    native_params.sample_params.sample_steps       = static_cast<int>(params->sigma_count - 1);
++    native_params.sample_params.custom_sigmas      = const_cast<float*>(params->sigmas);
++    native_params.sample_params.custom_sigmas_count = static_cast<int>(params->sigma_count);
++    if (has_init) {
++        native_params.init_image = sd_loom_native_image_v2(params->init_image);
++    }
++    if (has_mask) {
++        native_params.mask_image = sd_loom_native_image_v2(params->mask_image);
++    }
++    std::vector<sd_image_t> native_references;
++    native_references.reserve(params->reference_image_count);
++    for (size_t i = 0; i < params->reference_image_count; ++i) {
++        native_references.push_back(sd_loom_native_image_v2(params->reference_images[i]));
++    }
++    native_params.ref_images       = native_references.data();
++    native_params.ref_images_count = static_cast<int>(native_references.size());
++
++    sd_ctx->sd->loom_condition_callback      = condition_callback;
++    sd_ctx->sd->loom_condition_callback_data = condition_callback_data;
++    sd_ctx->sd->loom_step_callback           = callback;
++    sd_ctx->sd->loom_step_callback_data      = callback_data;
++    sd_ctx->sd->loom_step_status             = SD_LOOM_STATUS_OK;
++
++    sd_image_t* images = nullptr;
++    int image_count    = 0;
++    bool generated     = false;
++    int32_t status     = SD_LOOM_STATUS_NATIVE_ERROR;
++    try {
++        generated = generate_image(sd_ctx, &native_params, &images, &image_count);
++        status    = sd_ctx->sd->loom_step_status;
++        if (generated &&
++            (status == SD_LOOM_STATUS_OK || status == SD_LOOM_STATUS_STOPPED) &&
++            !sd_loom_loras_applied_v2(sd_ctx, native_loras)) {
++            status = SD_LOOM_STATUS_UNSUPPORTED;
++        }
++        sd_ctx->sd->apply_loras(nullptr, 0);
++    } catch (...) {
++        status = SD_LOOM_STATUS_NATIVE_ERROR;
++        try {
++            sd_ctx->sd->apply_loras(nullptr, 0);
++        } catch (...) {
++        }
++    }
++    sd_loom_reset_callbacks(sd_ctx);
++
++    if (status == SD_LOOM_STATUS_CALLBACK_ERROR ||
++        status == SD_LOOM_STATUS_UNSUPPORTED) {
++        if (images != nullptr) {
++            free_sd_images(images, image_count);
++        }
++        return status;
++    }
++    if (!generated || images == nullptr || image_count != 1) {
++        if (images != nullptr) {
++            free_sd_images(images, image_count);
++        }
++        return SD_LOOM_STATUS_NATIVE_ERROR;
++    }
++
++    *image_out = images;
++    return status;
++}
++
++static void sd_loom_free_owned_tensor_v2(sd_loom_owned_tensor_v2_t* tensor) {
++    if (tensor == nullptr) {
++        return;
++    }
++    free(tensor->data);
++    free(tensor->shape);
++    tensor->data  = nullptr;
++    tensor->shape = nullptr;
++    free(tensor);
++}
++
++void sd_loom_free_tensor_v2(sd_loom_owned_tensor_v2_t* tensor) {
++    sd_loom_free_owned_tensor_v2(tensor);
++}
++
++int32_t sd_loom_vae_encode_v2(sd_ctx_t* sd_ctx,
++                              const sd_loom_image_view_v2_t* image,
++                              sd_loom_owned_tensor_v2_t** tensor_out) {
++    if (tensor_out != nullptr) {
++        *tensor_out = nullptr;
++    }
++    if (sd_ctx == nullptr ||
++        sd_ctx->sd == nullptr ||
++        image == nullptr ||
++        tensor_out == nullptr ||
++        !sd_loom_valid_image_v2(*image, false, 0, 0) ||
++        sd_ctx->sd->first_stage_model == nullptr ||
++        sd_ctx->sd->loom_condition_callback != nullptr ||
++        sd_ctx->sd->loom_step_callback != nullptr) {
++        return SD_LOOM_STATUS_INVALID_ARGUMENT;
++    }
++    try {
++        auto pixels = sd_image_to_tensor(sd_loom_native_image_v2(*image));
++        auto latent = sd_ctx->sd->encode_first_stage(pixels);
++        if (latent.empty() || latent.shape().empty() || latent.shape().size() > 8) {
++            return SD_LOOM_STATUS_NATIVE_ERROR;
++        }
++        auto latent_elements = latent.numel();
++        if (latent_elements <= 0 ||
++            static_cast<uint64_t>(latent_elements) > 16 * 1024 * 1024 ||
++            static_cast<uint64_t>(latent_elements) > SIZE_MAX / sizeof(float)) {
++            return SD_LOOM_STATUS_NATIVE_ERROR;
++        }
++        auto* result = static_cast<sd_loom_owned_tensor_v2_t*>(
++            calloc(1, sizeof(sd_loom_owned_tensor_v2_t)));
++        if (result == nullptr) {
++            return SD_LOOM_STATUS_NATIVE_ERROR;
++        }
++        result->abi_version   = SD_LOOM_IMAGE_ABI_VERSION;
++        result->element_count = static_cast<size_t>(latent_elements);
++        result->rank          = latent.shape().size();
++        result->data          = static_cast<float*>(malloc(result->element_count * sizeof(float)));
++        result->shape         = static_cast<int64_t*>(malloc(result->rank * sizeof(int64_t)));
++        if (result->data == nullptr || result->shape == nullptr) {
++            sd_loom_free_owned_tensor_v2(result);
++            return SD_LOOM_STATUS_NATIVE_ERROR;
++        }
++        std::memcpy(result->data, latent.data(), result->element_count * sizeof(float));
++        std::memcpy(result->shape, latent.shape().data(), result->rank * sizeof(int64_t));
++        *tensor_out = result;
++        return SD_LOOM_STATUS_OK;
++    } catch (...) {
++        return SD_LOOM_STATUS_NATIVE_ERROR;
++    }
++}
++
++int32_t sd_loom_vae_decode_v2(sd_ctx_t* sd_ctx,
++                              const sd_loom_tensor_view_v2_t* tensor,
++                              sd_image_t** image_out) {
++    if (image_out != nullptr) {
++        *image_out = nullptr;
++    }
++    if (sd_ctx == nullptr ||
++        sd_ctx->sd == nullptr ||
++        tensor == nullptr ||
++        image_out == nullptr ||
++        tensor->abi_version != SD_LOOM_IMAGE_ABI_VERSION ||
++        tensor->data == nullptr ||
++        tensor->shape == nullptr ||
++        tensor->element_count == 0 ||
++        tensor->element_count > 16 * 1024 * 1024 ||
++        tensor->rank == 0 ||
++        tensor->rank > 8 ||
++        sd_ctx->sd->first_stage_model == nullptr ||
++        sd_ctx->sd->loom_condition_callback != nullptr ||
++        sd_ctx->sd->loom_step_callback != nullptr) {
++        return SD_LOOM_STATUS_INVALID_ARGUMENT;
++    }
++    size_t expected = 1;
++    for (size_t i = 0; i < tensor->rank; ++i) {
++        if (tensor->shape[i] <= 0 ||
++            static_cast<uint64_t>(tensor->shape[i]) > SIZE_MAX ||
++            expected > SIZE_MAX / static_cast<size_t>(tensor->shape[i])) {
++            return SD_LOOM_STATUS_INVALID_ARGUMENT;
++        }
++        expected *= static_cast<size_t>(tensor->shape[i]);
++    }
++    if (expected != tensor->element_count) {
++        return SD_LOOM_STATUS_INVALID_ARGUMENT;
++    }
++    std::vector<int64_t> shape(tensor->shape, tensor->shape + tensor->rank);
++    std::vector<float> data(tensor->data, tensor->data + tensor->element_count);
++    if (std::any_of(data.begin(), data.end(), [](float value) {
++            return !std::isfinite(value);
++        })) {
++        return SD_LOOM_STATUS_INVALID_ARGUMENT;
++    }
++    try {
++        sd::Tensor<float> latent(std::move(shape), std::move(data));
++        auto decoded = sd_ctx->sd->decode_first_stage(latent);
++        if (decoded.empty()) {
++            return SD_LOOM_STATUS_NATIVE_ERROR;
++        }
++        auto* result = static_cast<sd_image_t*>(calloc(1, sizeof(sd_image_t)));
++        if (result == nullptr) {
++            return SD_LOOM_STATUS_NATIVE_ERROR;
++        }
++        result[0] = tensor_to_sd_image(decoded);
++        if (result[0].data == nullptr) {
++            free(result);
++            return SD_LOOM_STATUS_NATIVE_ERROR;
++        }
++        *image_out = result;
++        return SD_LOOM_STATUS_OK;
++    } catch (...) {
++        return SD_LOOM_STATUS_NATIVE_ERROR;
++    }
++}
++
++int32_t sd_loom_clear_session_v2(sd_ctx_t* sd_ctx) {
++    if (sd_ctx == nullptr ||
++        sd_ctx->sd == nullptr ||
++        sd_ctx->sd->loom_condition_callback != nullptr ||
++        sd_ctx->sd->loom_step_callback != nullptr) {
++        return SD_LOOM_STATUS_INVALID_ARGUMENT;
++    }
++    try {
++        sd_ctx->sd->apply_loras(nullptr, 0);
++        sd_ctx->sd->reset_cancel_flag();
++        return SD_LOOM_STATUS_OK;
++    } catch (...) {
++        return SD_LOOM_STATUS_NATIVE_ERROR;
++    }
++}
++
+ static std::optional<ImageGenerationLatents> prepare_video_generation_latents(sd_ctx_t* sd_ctx,
+                                                                               const sd_vid_gen_params_t* sd_vid_gen_params,
+                                                                               GenerationRequest* request) {

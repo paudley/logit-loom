@@ -4,6 +4,7 @@
 
 use logit_loom::{CoreError, ObserverError, PipelineError, PrefillObserverError, TransformError};
 use logit_loom_llamacpp::Error as AdapterError;
+use logit_loom_models::{ArtifactError, CatalogError};
 use thiserror::Error;
 
 /// Result type returned by `logit-loom-runtime`.
@@ -31,4 +32,10 @@ pub enum Error {
     /// A controlled-prefill observer was invalid.
     #[error(transparent)]
     PrefillObserver(#[from] PrefillObserverError),
+    /// The packaged model profile catalog was invalid.
+    #[error(transparent)]
+    ModelCatalog(#[from] CatalogError),
+    /// A caller-supplied profiled model artifact failed verification.
+    #[error(transparent)]
+    ModelArtifact(#[from] ArtifactError),
 }

@@ -13,6 +13,10 @@ None of the ordinary examples download or execute a model.
 | Serializable token, sampler, steering, checkpoint, and receipt contracts | `logit-loom-core` |
 | Safe transform pipelines, observers, and cancellation | `logit-loom` |
 | A causal llama.cpp session and native sampler adapter | `logit-loom-llamacpp` |
+| Transport-neutral worker-local lifecycle and exact buffers | `logit-loom-executor` |
+| Serializable diffusion plans, whole-image programs, and state operations | `logit-loom-diffusion` |
+| Pinned MiniT2I/Krea execution through stable-diffusion.cpp | `logit-loom-diffusion-sdcpp` |
+| Exact optional model catalog and artifact receipts | `logit-loom-models` |
 
 The `logit-loom` crate re-exports the core contracts. The llama.cpp adapter
 depends on both foundational crates. The runtime crate composes all three and
@@ -114,10 +118,10 @@ cargo run -p logit-loom-runtime --example branch \
   --features vulkan -- /path/to/model.gguf "Branch from here:"
 ```
 
-The [mechanical experiment runbooks](runbooks/README.md) turn five specific
-runtime questions into complete commands, JSON evidence reports, success
-criteria, variations, and failure diagnosis. Model execution remains opt-in
-and uses only caller-supplied local artifacts.
+The [mechanical experiment runbooks](runbooks/README.md) turn eight specific
+text and image questions into complete commands, JSON evidence reports,
+success criteria, and failure diagnosis. Model execution remains opt-in and
+uses only caller-supplied local artifacts.
 
 See the [runtime interface guide](runtime-interface.md) for ownership,
 ordering, automatic identities, checkpoints, steering, and the lower-level
@@ -143,6 +147,43 @@ Checkpoint state is opaque and bound to the model bytes, adapter build, and
 exact session allocation options. Keep it within a controlled deployment; do
 not treat it as a portable file format.
 
+## Use the diffusion contracts and adapter
+
+`logit-loom-diffusion` keeps iterative tensor state distinct from token IDs and
+logits. It provides model-free plans, exact schedules, typed tensor boundaries,
+ordered transactional interventions, observers, checkpoints, whole-image
+execution contracts, and receipts. `logit-loom-executor` supplies the
+transport-neutral lifecycle, buffer, cancellation, cleanup, and failure seam
+used by local workers.
+
+`logit-loom-diffusion-sdcpp` binds those contracts to companion ABI version 1
+plus image extension version 2 for the exact catalogued MiniT2I and Krea
+component layouts. The caller builds the pinned native companion, supplies
+every artifact path, selects an exact non-CPU backend, and chooses the prompt,
+seed, shape, guidance, and custom Euler schedule.
+
+```toml
+[dependencies]
+logit-loom-diffusion = "=0.2.0"
+logit-loom-diffusion-sdcpp = "=0.2.0"
+```
+
+Probe the native contract without loading a model:
+
+```sh
+cargo run --quiet -p logit-loom-diffusion-sdcpp \
+  --example probe_companion -- \
+  /path/to/libstable-diffusion.so
+```
+
+Then follow the [MiniT2I image fork](runbooks/07-minit2i-fork.md) or
+[Krea 2 latent transplant](runbooks/08-krea2-latent-transplant.md) runbook.
+The examples never download weights and never retry an unavailable accelerator
+on CPU.
+
+See [worker-local image execution](image-execution.md) for the whole-image
+support matrix, lifecycle, failure dispositions, and current ABI limitations.
+
 ## Next reading
 
 - [Architecture](architecture.md) defines ordering and failure boundaries.
@@ -152,6 +193,6 @@ not treat it as a portable file format.
   and artifact assumptions.
 - [Runtime interface](runtime-interface.md) documents the higher-level local
   workflow and its explicit boundaries.
-- [Mechanical experiment runbooks](runbooks/README.md) provide five opt-in
+- [Mechanical experiment runbooks](runbooks/README.md) provide eight opt-in
   model-backed workflows with structured evidence reports.
 - [Contributing](../CONTRIBUTING.md) lists the complete validation workflow.

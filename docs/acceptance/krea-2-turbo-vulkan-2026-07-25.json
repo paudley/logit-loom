@@ -1,0 +1,135 @@
+{
+  "schema_version": 1,
+  "identity_domain": "logit-loom-model-acceptance-report-v1",
+  "profile_id": "krea-2-turbo",
+  "modality": "image",
+  "adapter": "logit-loom-diffusion-sdcpp-0.2.0",
+  "experiment": "krea2-latent-transplant-v1",
+  "status": "passed",
+  "catalog_sha256": "5beaf0742618e09200fa81deb680ec89b13375ae6f405fa63257d55fbadc6ade",
+  "artifacts": [
+    {
+      "source_id": "krea-license",
+      "repository": "krea/Krea-2-Turbo",
+      "revision": "98e0fe118d17c9e3547fbb2e25acdbae2cadf7c7",
+      "artifact_path": "LICENSE.pdf",
+      "bytes": 137711,
+      "sha256": "b82a2805162bde714a4eb27b9063c4fc3345d08a30be055134a6160e5430ba74"
+    },
+    {
+      "source_id": "krea-2-turbo-q6-k",
+      "repository": "realrebelai/KREA-2_GGUFs",
+      "revision": "8a853670b13d88443e5e1a2541a9719ea5bfb508",
+      "artifact_path": "TURBO/Krea-2-Turbo-Q6_K.gguf",
+      "bytes": 10521682016,
+      "sha256": "d95c232c7835d5fc2b35b8f0ddef0606cc59e0162754ef7e4047327f64ca67a9"
+    },
+    {
+      "source_id": "qwen3-vl-text-encoder",
+      "repository": "Qwen/Qwen3-VL-4B-Instruct-GGUF",
+      "revision": "1cd86afb9a95c410a6038ab3b40d8b578c892266",
+      "artifact_path": "Qwen3VL-4B-Instruct-Q4_K_M.gguf",
+      "bytes": 2497281664,
+      "sha256": "66358cb18bb6b3b1b6675aa412c7a88ef01d228f481184d13668e5201c730a0a"
+    },
+    {
+      "source_id": "wan-2.1-vae",
+      "repository": "Comfy-Org/Wan_2.1_ComfyUI_repackaged",
+      "revision": "06e001fc51048fb03433a6fb25334de7836704a5",
+      "artifact_path": "split_files/vae/wan_2.1_vae.safetensors",
+      "bytes": 253815318,
+      "sha256": "2fc39d31359a4b0a64f55876d8ff7fa8d780956ae2cb13463b0223e15148976b"
+    }
+  ],
+  "runtime": {
+    "adapter_build_identity": "0ade250de95faea3f0de051eeff85cba979ba96f8f4f228341d926b076a3fc5b",
+    "backend": "stable-diffusion.cpp-vulkan",
+    "parameter_backend": "Vulkan0",
+    "devices": [
+      "Vulkan0 - AMD Radeon 8060S Graphics (RADV STRIX_HALO)"
+    ],
+    "accelerator_required": true,
+    "cpu_fallback": false
+  },
+  "runs": [
+    {
+      "label": "baseline",
+      "plan_identity": "c7bfbd326d74d8030b9daeeff6295df0035764ceaa0ef1d4a86f98994fa36853",
+      "receipt_identity": "fa77d99d51e766fb92f379c09cec0c42b7090b3797f8bc420da17aa6ec39341e",
+      "output_identity": "68411cd6f04ee0931e4da1aa61593d5e59034cc25bdd3b4c90368ac3644c5fc9",
+      "completed_steps": 4
+    },
+    {
+      "label": "replay",
+      "plan_identity": "c7bfbd326d74d8030b9daeeff6295df0035764ceaa0ef1d4a86f98994fa36853",
+      "receipt_identity": "cccee378d113d5e1b8412aca495666e105877f6fcf3e59105be9e09738c9c161",
+      "output_identity": "68411cd6f04ee0931e4da1aa61593d5e59034cc25bdd3b4c90368ac3644c5fc9",
+      "completed_steps": 4
+    },
+    {
+      "label": "branch",
+      "plan_identity": "c7bfbd326d74d8030b9daeeff6295df0035764ceaa0ef1d4a86f98994fa36853",
+      "receipt_identity": "fde410f6afc59a38b4d5ffe5395b0b01f4df68940aee1004cd198ad0409428de",
+      "output_identity": "8813830ca56f8d3a669c4b93b9ba74798609c41591ffd727ab0184e29949bff5",
+      "completed_steps": 4
+    }
+  ],
+  "assertions": [
+    {
+      "id": "checkpoint-captured",
+      "status": "passed",
+      "evidence": "The baseline captured the declared post-Euler checkpoint after completed step 1."
+    },
+    {
+      "id": "exact-checkpoint-replay",
+      "status": "passed",
+      "evidence": "The unchanged replay authenticated the checkpoint and reproduced every post-step state identity and final pixel-byte identity."
+    },
+    {
+      "id": "bounded-branch-committed",
+      "status": "passed",
+      "evidence": "One bounded channel intervention committed transactionally at the declared checkpoint boundary with no failed stage."
+    },
+    {
+      "id": "branch-state-changed",
+      "status": "passed",
+      "evidence": "The declared intervention changed 16384 state elements at completed step 1."
+    },
+    {
+      "id": "branch-output-changed",
+      "status": "passed",
+      "evidence": "The intervened branch produced a pixel-byte identity distinct from the baseline and unchanged replay."
+    },
+    {
+      "id": "post-euler-state-contract",
+      "status": "passed",
+      "evidence": "The callback exposed shape [128,128,16,1], f32 elements, dimension-zero-fastest layout, and host-f32:Vulkan0 device lineage."
+    },
+    {
+      "id": "accelerator-placement",
+      "status": "passed",
+      "evidence": "Model parameters and evaluation explicitly selected Vulkan0; the adapter rejects CPU-named backends and did not retry on CPU."
+    },
+    {
+      "id": "deployment-memory-observed",
+      "status": "passed",
+      "evidence": "Linux VmHWM recorded 14180196352 process bytes. System-wide AMD UMA VRAM plus GTT, sampled every 100 ms, peaked at 25747505152 bytes from a 181923840-byte baseline; it is not process-attributed."
+    },
+    {
+      "id": "step-latency-observed",
+      "status": "passed",
+      "evidence": "Native denoiser-plus-Euler latency was recorded for every completed baseline step outside deterministic receipt identities."
+    }
+  ],
+  "measurements": {
+    "peak_host_bytes": 14180196352,
+    "peak_device_bytes": 25747505152,
+    "step_latency_milliseconds": [
+      19354.524409,
+      16073.937184,
+      16223.842671,
+      15915.905161
+    ]
+  },
+  "blockers": []
+}

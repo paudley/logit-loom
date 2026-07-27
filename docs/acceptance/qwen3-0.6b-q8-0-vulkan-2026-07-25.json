@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "identity_domain": "logit-loom-model-acceptance-report-v1",
+  "profile_id": "qwen3-0.6b-q8-0",
+  "modality": "text",
+  "adapter": "logit-loom-llamacpp-0.2.0",
+  "experiment": "qwen-profile-replay-v1",
+  "status": "passed",
+  "catalog_sha256": "5beaf0742618e09200fa81deb680ec89b13375ae6f405fa63257d55fbadc6ade",
+  "artifacts": [
+    {
+      "source_id": "qwen3-gguf",
+      "repository": "Qwen/Qwen3-0.6B-GGUF",
+      "revision": "23749fefcc72300e3a2ad315e1317431b06b590a",
+      "artifact_path": "Qwen3-0.6B-Q8_0.gguf",
+      "bytes": 639446688,
+      "sha256": "9465e63a22add5354d9bb4b99e90117043c7124007664907259bd16d043bb031"
+    }
+  ],
+  "runtime": {
+    "adapter_build_identity": "aaca3a3b2ca2166ac272429739b2f010c374993333a31760aee90e9b02587dd0",
+    "backend": "llama.cpp-vulkan",
+    "devices": [
+      "Vulkan0:IntegratedGpu"
+    ],
+    "accelerator_required": true,
+    "cpu_fallback": false
+  },
+  "runs": [
+    {
+      "label": "baseline",
+      "plan_identity": "9c4e952fa17df4604ed42304e89e166d1934dbe6c1fe96b3116b0927037552d9",
+      "receipt_identity": "939f5fec15f516da7f010c28496f508fb368bb01a1307c582011ecc7a2da191a",
+      "output_identity": "8fc4ecefdeee20b8bf2c2e3b4d71aef3671015f209e42b9d4863f3b65493faf4",
+      "completed_steps": 16
+    },
+    {
+      "label": "replay",
+      "plan_identity": "9c4e952fa17df4604ed42304e89e166d1934dbe6c1fe96b3116b0927037552d9",
+      "receipt_identity": "939f5fec15f516da7f010c28496f508fb368bb01a1307c582011ecc7a2da191a",
+      "output_identity": "8fc4ecefdeee20b8bf2c2e3b4d71aef3671015f209e42b9d4863f3b65493faf4",
+      "completed_steps": 16
+    }
+  ],
+  "assertions": [
+    {
+      "id": "exact-checkpoint-replay",
+      "status": "passed",
+      "evidence": "The baseline and restored continuation have identical plan, receipt, token-ID, and token-byte identities."
+    },
+    {
+      "id": "accelerator-placement",
+      "status": "passed",
+      "evidence": "The model required accelerator placement on Vulkan0:IntegratedGpu with every model layer requested on the accelerator."
+    },
+    {
+      "id": "receipt-accounting",
+      "status": "passed",
+      "evidence": "Both runs admitted 16 tokens, advanced from causal position 6 to 22, and finished at the declared token limit."
+    }
+  ],
+  "blockers": []
+}

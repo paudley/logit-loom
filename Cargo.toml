@@ -3,10 +3,16 @@
 [workspace]
 resolver = "3"
 members = [
+    "models",
     "crates/core",
+    "crates/diffusion",
+    "crates/diffusion-sdcpp",
+    "crates/executor",
     "crates/loom",
     "crates/llamacpp",
     "crates/runtime",
+    "crates/tokenizer",
+    "xtask",
 ]
 
 [workspace.package]
@@ -21,11 +27,18 @@ homepage = "https://github.com/paudley/logit-loom"
 [workspace.dependencies]
 blake3 = "1.8.5"
 llama-cpp-4 = { version = "=0.4.2", default-features = false }
+libloading = "0.8.9"
 logit-loom = { version = "=0.2.0", path = "crates/loom" }
 logit-loom-core = { version = "=0.2.0", path = "crates/core" }
+logit-loom-diffusion = { version = "=0.2.0", path = "crates/diffusion" }
+logit-loom-diffusion-sdcpp = { version = "=0.2.0", path = "crates/diffusion-sdcpp" }
+logit-loom-executor = { version = "=0.2.0", path = "crates/executor" }
 logit-loom-llamacpp = { version = "=0.2.0", path = "crates/llamacpp" }
+logit-loom-models = { version = "=0.2.0", path = "models" }
+logit-loom-tokenizer = { version = "=0.2.0", path = "crates/tokenizer" }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.150"
+sha2 = "0.10.9"
 thiserror = "2.0.19"
 
 [workspace.lints.rust]

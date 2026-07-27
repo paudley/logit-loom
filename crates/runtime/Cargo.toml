@@ -33,6 +33,7 @@ webgpu = ["logit-loom-llamacpp/webgpu"]
 [dependencies]
 logit-loom.workspace = true
 logit-loom-llamacpp.workspace = true
+logit-loom-models.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 

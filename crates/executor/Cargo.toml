@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+
+[package]
+name = "logit-loom-executor"
+description = "Transport-neutral worker-local executor and borrowed-buffer contracts"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/logit-loom-executor"
+readme = "README.md"
+keywords = ["inference", "executor", "runtime", "buffer", "ai"]
+categories = ["development-tools", "science"]
+
+[dependencies]
+logit-loom-core.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
