@@ -86,12 +86,13 @@ timing, schedule interpretation, state-byte encoding, or serialized-shape
 changes require new domains rather than reinterpretation.
 
 `logit-loom-llamacpp` currently develops against local `llama-cpp-4` 0.4.2
-successor revision `f9a8d9ca1b91b09faa421807b42709cb96598f59`,
+successor revision `d76356b9725a3736212b3bfd16c66fc80c995c29`,
 carrying literal llama.cpp revision
 `f87067841bac583bc089a225382248d857791ca8`. The successor adds bounded tensor
 transactions, native decode-lifecycle hooks, lifetime-bound MTP and EAGLE-3
-sessions, and versioned exact implementation state. During review, the
-workspace resolves that source from the adjacent binding checkout.
+sessions, versioned exact implementation state, allocation-reusing
+tokenization and raw-piece sinks, and a count-only tokenizer query. During
+review, the workspace resolves that source from the adjacent binding checkout.
 
 At this revision an EAGLE-3 v3 draft for `gpt-oss` may name the terminal
 target `NextN` extraction site as layer index `n_layer`. The adapter admits
