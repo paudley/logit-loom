@@ -714,7 +714,7 @@ impl StepProgram for PlanProgram<'_> {
     }
 }
 
-struct InstalledChannelBias {
+pub(crate) struct InstalledChannelBias {
     specification: InterventionSpec,
     tensor: logit_loom_diffusion::TensorSpec,
     steps: StepSelector,
@@ -724,7 +724,10 @@ struct InstalledChannelBias {
 }
 
 impl InstalledChannelBias {
-    fn from_invocation(operator: &OperatorInvocation, plan: &DiffusionPlan) -> Result<Self> {
+    pub(crate) fn from_invocation(
+        operator: &OperatorInvocation,
+        plan: &DiffusionPlan,
+    ) -> Result<Self> {
         if operator.schema != channel_bias_schema_v1()
             || operator.selector != TensorSelector::SchedulerState
         {
@@ -795,14 +798,14 @@ impl Intervention for InstalledChannelBias {
     }
 }
 
-struct ObservationAccumulator {
+pub(crate) struct ObservationAccumulator {
     request: ObservationRequest,
     hasher: blake3::Hasher,
     observations: u32,
 }
 
 impl ObservationAccumulator {
-    fn new(request: ObservationRequest) -> Result<Self> {
+    pub(crate) fn new(request: ObservationRequest) -> Result<Self> {
         if request.selector != TensorSelector::SchedulerState
             || request.kind == ObservationKind::Snapshot
         {
@@ -823,7 +826,11 @@ impl ObservationAccumulator {
         })
     }
 
-    fn record(&mut self, context: &StepContext, state: &[f32]) -> std::result::Result<(), String> {
+    pub(crate) fn record(
+        &mut self,
+        context: &StepContext,
+        state: &[f32],
+    ) -> std::result::Result<(), String> {
         if !step_selected(&self.request.steps, context.step_index) {
             return Ok(());
         }
@@ -863,7 +870,7 @@ impl ObservationAccumulator {
         Ok(())
     }
 
-    fn finish(&self) -> Digest {
+    pub(crate) fn finish(&self) -> Digest {
         let mut hasher = self.hasher.clone();
         hasher.update(&self.observations.to_le_bytes());
         Digest::of_bytes("sdcpp-plan-observation-v1", hasher.finalize().as_bytes())

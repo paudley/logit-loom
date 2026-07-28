@@ -28,7 +28,7 @@ latency for every completed step. These non-deterministic deployment
 measurements are separate from mechanical receipts and do not affect replay or
 content identities.
 
-The safe Rust adapter contract is version 4. Its native-facing paths are
+The safe Rust adapter contract is version 5. Its native-facing paths are
 intentionally explicit:
 
 - The full-state path copies each post-Euler host `f32` tensor for
@@ -61,8 +61,17 @@ cancellation terminals, clean rejected-stage receipts, output
 materialization checks, fixed-point receipt serialization, atomic output
 publication, cleanup disposition, placement/transfer measurements, and
 poisoning on uncertainty. Model-free fake-arena tests exercise those mechanics
-without loading a companion library or model. The stable-diffusion.cpp
-version-three arena backend remains a separate native implementation step.
+without loading a companion library or model.
+
+`SdcppResidentProgram` implements that backend over the mandatory
+stable-diffusion.cpp program ABI v3. One arena can execute multiple ordered
+diffusion and direct-VAE stages, scheduled request-local `LoRA` scales,
+authenticated checkpoint restore/capture, scheduler-state interventions and
+observations, exact snapshots, deterministic RGB8 joins, and typed
+RGB8/RGBA8/PNG/tensor/checkpoint outputs. PNG values bind decoded geometry,
+RGB or RGBA color, a deterministic encoder identity, and a bounded encoded
+length. Every intermediate remains behind a generation-checked native handle;
+cleanup uncertainty poisons the owner.
 
 Image-v2 success confirms that every requested `LoRA` participated in at least
 one native model tensor. The native stack is cleared before reusable returns;
@@ -70,8 +79,9 @@ uncertain cleanup poisons the single-owner session. Direct bounded Krea VAE
 encode/decode exchanges finite native-layout tensors without making that
 layout portable to another profile or backend build.
 
-The whole-plan lowerer supports one native diffusion operation followed by
-bounded deterministic `MaskBlend` stages and explicit RGB8/checkpoint routes.
+The older `ImagePlanExecutor` whole-plan lowerer supports one native diffusion
+operation followed by bounded deterministic `MaskBlend` stages and explicit
+RGB8/checkpoint routes.
 Per-step `LoRA` schedules, arbitrary model-block or conditioning operators,
 snapshot observations, PNG/RGBA/tensor routes, multiple native inference
 operations, and version-two direct VAE execution are rejected before native
@@ -80,8 +90,9 @@ is in
 [`docs/image-execution.md`](https://github.com/paudley/logit-loom/blob/main/docs/image-execution.md).
 
 All whole-plan tests in the ordinary repository gate are model-free. Live
-execution of the version-two graph remains an opt-in acceptance lane over
-caller-supplied artifacts and an explicit non-CPU device.
+execution of either the version-two graph or resident program remains an
+opt-in acceptance lane over caller-supplied artifacts and an explicit non-CPU
+device.
 
 No model is downloaded or executed by tests, CI, package builds, or
 documentation builds. Build the caller-selected native library with

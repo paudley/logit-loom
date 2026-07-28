@@ -497,7 +497,16 @@ pub struct ObservationRequest {
 impl ObservationRequest {
     pub(crate) fn validate_for(&self, step_count: usize) -> Result<(), CoreError> {
         self.selector.validate()?;
-        self.steps.validate_for(step_count)
+        self.steps.validate_for(step_count)?;
+        if self.kind == ObservationKind::Snapshot
+            && !matches!(&self.steps, StepSelector::Exact { steps } if steps.len() == 1)
+        {
+            return Err(CoreError::invalid(
+                "image snapshot observation",
+                "must select exactly one post-transition boundary",
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -1027,6 +1036,22 @@ mod tests {
         });
         value.validate().unwrap();
         value.loras[0].scales.points.swap(0, 1);
+        assert!(value.validate().is_err());
+    }
+
+    #[test]
+    fn snapshot_observation_names_one_exact_boundary() {
+        let mut value = plan();
+        value.observations.push(ObservationRequest {
+            selector: TensorSelector::SchedulerState,
+            steps: StepSelector::Exact { steps: vec![1] },
+            kind: ObservationKind::Snapshot,
+        });
+        value.validate().unwrap();
+
+        value.observations[0].steps = StepSelector::All;
+        assert!(value.validate().is_err());
+        value.observations[0].steps = StepSelector::Exact { steps: vec![0, 1] };
         assert!(value.validate().is_err());
     }
 

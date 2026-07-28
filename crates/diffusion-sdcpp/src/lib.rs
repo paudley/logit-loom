@@ -8,6 +8,7 @@ mod error;
 mod execution;
 mod ffi;
 mod image;
+mod native_program;
 mod program;
 mod resident;
 mod runtime;
@@ -33,6 +34,11 @@ pub use image::{
     MAX_VAE_TENSOR_RANK, PixelReceipt, VaeImageOutput, VaeOperationReceipt, VaeTensor,
     VaeTensorOutput,
 };
+pub use native_program::{
+    RejectResidentArtifactPaths, ResidentArtifactPathResolver, SdcppResidentProgram,
+    resident_checkpoint_compatibility_v1, resident_checkpoint_conversion_v1,
+    resident_lora_target_v1, resident_png_encoding_v1, resident_png_maximum_bytes_v1,
+};
 pub use program::{ForkProgram, PipelineProgram};
 pub use resident::{
     ResidentImageProgramBackend, ResidentImageProgramDriver, ResidentImageProgramExecution,
@@ -44,7 +50,9 @@ pub use runtime::{Sdcpp, probe_companion};
 pub const COMPANION_ABI_VERSION: u32 = 1;
 /// Version of the whole-image extension layered over companion ABI v1.
 pub const IMAGE_ABI_VERSION: u32 = 2;
+/// Version of the resident native value-arena extension.
+pub const PROGRAM_ABI_VERSION: u32 = 3;
 /// Version of the safe Rust execution contract layered over the companion.
-pub const ADAPTER_CONTRACT_VERSION: u32 = 4;
+pub const ADAPTER_CONTRACT_VERSION: u32 = 5;
 /// Exact stable-diffusion.cpp revision required by this adapter.
 pub const UPSTREAM_COMMIT: &str = "ea4e566ccffa10f853ecc3f29e74b1820bc91beb";

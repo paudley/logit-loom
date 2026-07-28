@@ -10,10 +10,11 @@ The safe public adapter relies on all of the following conditions:
    upstream commit `ea4e566ccffa10f853ecc3f29e74b1820bc91beb`.
 2. Resolved symbols retain the C signatures declared in
    `native/stable-diffusion.cpp/logit-loom-step-v1.patch` and
-   `native/stable-diffusion.cpp/logit-loom-image-v2.patch` for the lifetime of
-   the loaded library. Every image parameter or tensor descriptor carries
-   extension version 2, which the companion checks before reading the rest of
-   that descriptor.
+   `native/stable-diffusion.cpp/logit-loom-image-v2.patch`, plus the program
+   ABI in `native/stable-diffusion.cpp/logit-loom-program-v3.patch`, for the
+   lifetime of the loaded library. Every image, tensor, program parameter, and
+   value descriptor carries its exact extension version, which the companion
+   checks before reading the rest of that descriptor.
 3. A non-null native context returned by `sd_loom_new_ctx_v1` belongs to the
    adapter and is released exactly once with `free_sd_ctx` before unloading
    the library.
@@ -51,6 +52,20 @@ The safe public adapter relies on all of the following conditions:
     reused.
 12. The context contains `PhantomData<Rc<()>>`, making it neither `Send` nor
    `Sync`. Reentrant generation on one context is not exposed.
+13. Each program-v3 handle binds one live arena generation and slot. Rust
+    never exposes that handle publicly, retains it only while the arena is
+    live, releases it at most once, and invalidates every remaining handle on
+    finish. Descriptors are checked against the public value type before any
+    byte slice, receipt, or output is published.
+14. Program-v3 arrays, scheduled `LoRA` points, checkpoint/snapshot output
+    storage, callbacks, and raw value-read state remain live for each
+    synchronous call. Native exceptions and callback panics are contained;
+    failed or cancelled generation rolls back every output created by that
+    stage.
+15. Native RGB/RGBA conversion and PNG encoding validate geometry, channel
+    count, multiplication, encoder format, and declared maximum bytes before
+    publishing a value. Encoded PNG storage is copied into the arena before
+    the temporary encoder allocation is released.
 
 The exact ABI/commit checks turn an accidental ordinary stable-diffusion.cpp
 library or another companion revision into a load error before any model
@@ -63,7 +78,9 @@ write-back, invalid native timing, exact profile shapes, checkpoint mismatch,
 advanced-image geometry, bounded VAE tensors, image copying, failure
 dispositions, authenticated checkpoint envelopes, stale-backend rejection,
 post-observation cancellation, whole-plan receipt lineage, and compile-fail
-`Send`/`Sync` assertions. The public
+`Send`/`Sync` assertions. Resident model-free tests additionally cover value
+liveness, scheduled-adapter target identity, typed PNG lowering, incremental
+native hashing, output atomicity, cleanup poisoning, and handle release. The public
 `probe_companion` path checks both symbol sets, companion ABI, commit, library
 bytes, and device-report handling against a caller-built companion without
 loading a model.

@@ -18,7 +18,11 @@ The companion ABI exposes:
   denoiser-plus-update elapsed time measured immediately before the callback;
 - an image ABI v2 extension for bounded source/mask/reference views, negative
   conditioning, fixed request-local `LoRA` entries, direct VAE tensors, and explicit
-  session cleanup; and
+  session cleanup;
+- a mandatory program ABI v3 value arena for multiple diffusion/VAE stages,
+  scheduled request-local `LoRA` scales, checkpoint and snapshot state,
+  deterministic joins, exact RGB8/RGBA8 conversion, bounded deterministic
+  PNG encoding, generation-checked handles, and verified cleanup; and
 - explicit continue, cooperative-stop, callback-error, unsupported-mechanic,
   invalid-argument, and native-error results.
 
@@ -51,7 +55,8 @@ scripts/prepare-sdcpp.sh \
 If the source path does not exist, the script clones the upstream repository.
 It checks out the exact revision, applies
 [`logit-loom-step-v1.patch`](logit-loom-step-v1.patch) followed by
-[`logit-loom-image-v2.patch`](logit-loom-image-v2.patch), initializes only the
+[`logit-loom-image-v2.patch`](logit-loom-image-v2.patch) and
+[`logit-loom-program-v3.patch`](logit-loom-program-v3.patch), initializes only the
 required `ggml` submodule, and builds a shared library. Existing incompatible
 source changes are rejected. The script never runs from tests, CI,
 documentation, package builds, or `make check`.

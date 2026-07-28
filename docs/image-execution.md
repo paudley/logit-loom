@@ -47,11 +47,12 @@ and cleanup disposition. `ImageProgramMeasurementsV1` separately reports
 stage timing, placement, transfers, and observed peak arena bytes so those
 deployment observations do not alter deterministic plan or receipt identity.
 
-This is currently a backend-neutral, model-free capability. The existing
-stable-diffusion.cpp `ImagePlanExecutor` still implements only the
-single-primary support matrix below; it must reject the resident program
-family until the new companion ABI and safe executor are implemented and
-accepted.
+`SdcppResidentProgram` is the default-built stable-diffusion.cpp backend for
+this contract. Program ABI v3 is mandatory at library load: there is no
+runtime switch that removes the capability. Ordinary tests validate the graph,
+lowering, arena driver, receipts, and failure paths model-free; the retained
+companion build validates the exact C++ patch without loading a model. Live
+execution remains a separate opt-in acceptance boundary.
 
 ## Whole-plan order
 
@@ -89,10 +90,34 @@ first write. All route payloads are preflighted before cleanup, and route
 writes occur only after cleanup succeeds. Callback failures and unwinding are
 contained by the existing transactional full-state path.
 
-## stable-diffusion.cpp support matrix
+## Resident-program support matrix
+
+Program ABI v3 and safe adapter contract v5 provide this exact resident
+surface:
+
+| Mechanic | Resident adapter behavior |
+| --- | --- |
+| Native stages | Multiple ordered text-to-image, image-to-image, inpaint, outpaint, direct VAE encode, and direct VAE decode stages |
+| Inputs | Exact UTF-8 conditioning, tight RGB8/RGBA8/Gray8 images, finite dimension-zero-fastest `f32` tensors, authenticated checkpoints, and caller-retained verified `LoRA` descriptor paths |
+| LoRA | Ordered request-local fixed or scheduled scales at exact pre-denoiser boundaries; every adapter must participate in a native model tensor |
+| Checkpoint | Authenticated restore/capture with exact runtime compatibility and post-Euler boundary identity |
+| Operator | Installed scheduler-state channel bias; model-block and conditioning selectors fail during whole-program preflight |
+| Observation | Scheduler-state digest, statistics, and exact selected-boundary snapshots |
+| Compositing | Ordered deterministic tight-RGB8 mask blends |
+| Output | Individually typed RGB8, RGBA8, bounded PNG (RGB or RGBA plus encoder identity), tensor, checkpoint, snapshot, and final program-receipt routes |
+| Cancellation | Before start, between stages, or after one exact completed post-Euler boundary |
+| Cleanup | Generation-checked value release, retained or confirmed-clear disposition, epoch advancement, and poisoning on uncertainty |
+| Measurements | Per-stage wall/native time, arena peak, placement, and transfers outside deterministic identity |
+
+The adapter rejects unsupported selector semantics before the arena begins. It
+does not reinterpret opaque conditioning, invent model-block hook sites,
+approximate a scheduled adapter, select a seed for the coordinator, or fall
+back to another backend.
+
+## Single-primary stable-diffusion.cpp support matrix
 
 The image extension is layered over companion ABI v1, is required by safe
-adapter contract v4, and provides the following exact subset:
+adapter contract v5, and provides the following exact legacy subset:
 
 | Mechanic | Current adapter behavior |
 | --- | --- |

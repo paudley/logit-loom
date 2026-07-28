@@ -223,8 +223,10 @@ receipts suitable for inspection or replay checks.
 - A default-built resident image-program contract over typed single-assignment
   values, multiple native/VAE stages, deterministic joins, checkpoint
   conversion, liveness-derived arena bounds, stage-prefix receipts, and
-  deployment measurements kept outside deterministic identity. Native
-  resident-program execution remains a separate adapter acceptance boundary.
+  deployment measurements kept outside deterministic identity. The mandatory
+  stable-diffusion.cpp program ABI implements native execution, scheduled
+  adapters, RGB8/RGBA8/PNG outputs, and exact arena cleanup; model-backed
+  acceptance remains a separate opt-in boundary.
 - An exact dynamic companion ABI for MiniT2I and Krea with transactional
   post-Euler state callbacks, deterministic-prefix checkpoints, explicit
   accelerator placement, per-step native timing outside deterministic

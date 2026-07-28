@@ -12,7 +12,7 @@ use crate::{
     DiffusionSchedule, ImageBufferRole, ImageCleanupPolicy, ImageOperation, ImageOutputFormat,
     MAX_DEVICE_LABEL_BYTES, MAX_IMAGE_DIMENSION, MAX_IMAGE_LORAS, MAX_IMAGE_OBSERVATIONS,
     MAX_IMAGE_OPERATORS, ObservationKind, ObservationRequest, OperatorInvocation, ScaleSchedule,
-    SeedSelection, TensorDType, TensorSpec,
+    SeedSelection, StepSelector, TensorDType, TensorSpec,
 };
 
 /// Maximum ordered stages in one resident image program.
@@ -50,6 +50,26 @@ pub enum ImageOpaqueValueKindV1 {
     CheckpointState,
 }
 
+/// Exact decoded pixel representation carried by one PNG value.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ImagePngColorV1 {
+    /// Eight-bit red, green, and blue samples.
+    Rgb8,
+    /// Eight-bit red, green, blue, and alpha samples.
+    Rgba8,
+}
+
+impl ImagePngColorV1 {
+    /// Returns the exact decoded channel count.
+    pub const fn channels(self) -> u32 {
+        match self {
+            Self::Rgb8 => 3,
+            Self::Rgba8 => 4,
+        }
+    }
+}
+
 /// Exact logical representation of one resident program value.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", tag = "kind")]
@@ -72,6 +92,19 @@ pub enum ImageProgramValueSpecV1 {
         width: u32,
         /// Pixel height.
         height: u32,
+    },
+    /// Lossless PNG bytes with exact decoded geometry and encoder identity.
+    Png {
+        /// Decoded pixel width.
+        width: u32,
+        /// Decoded pixel height.
+        height: u32,
+        /// Decoded sample representation.
+        color: ImagePngColorV1,
+        /// Exact deterministic encoder implementation.
+        encoding: Digest,
+        /// Maximum accepted encoded byte length.
+        maximum_bytes: u64,
     },
     /// Tightly packed single-channel bytes.
     Gray8 {
@@ -119,6 +152,16 @@ impl ImageProgramValueSpecV1 {
                 validate_variable_bytes(*maximum_bytes)?;
                 *maximum_bytes
             }
+            Self::Png {
+                width,
+                height,
+                maximum_bytes,
+                ..
+            } => {
+                validate_dimensions(*width, *height)?;
+                validate_variable_bytes(*maximum_bytes)?;
+                *maximum_bytes
+            }
             Self::Rgb8 { width, height } => image_bytes(*width, *height, 3)?,
             Self::Rgba8 { width, height } => image_bytes(*width, *height, 4)?,
             Self::Gray8 { width, height } => image_bytes(*width, *height, 1)?,
@@ -146,7 +189,8 @@ impl ImageProgramValueSpecV1 {
         match self {
             Self::Utf8 { maximum_bytes }
             | Self::Checkpoint { maximum_bytes, .. }
-            | Self::Opaque { maximum_bytes, .. } => Ok(*maximum_bytes),
+            | Self::Opaque { maximum_bytes, .. }
+            | Self::Png { maximum_bytes, .. } => Ok(*maximum_bytes),
             Self::Rgb8 { width, height } => image_bytes(*width, *height, 3),
             Self::Rgba8 { width, height } => image_bytes(*width, *height, 4),
             Self::Gray8 { width, height } => image_bytes(*width, *height, 1),
@@ -159,7 +203,8 @@ impl ImageProgramValueSpecV1 {
         let valid = match self {
             Self::Utf8 { maximum_bytes }
             | Self::Checkpoint { maximum_bytes, .. }
-            | Self::Opaque { maximum_bytes, .. } => bytes > 0 && bytes <= *maximum_bytes,
+            | Self::Opaque { maximum_bytes, .. }
+            | Self::Png { maximum_bytes, .. } => bytes > 0 && bytes <= *maximum_bytes,
             Self::Rgb8 { .. } | Self::Rgba8 { .. } | Self::Gray8 { .. } | Self::Tensor { .. } => {
                 bytes == self.maximum_bytes()?
             }
@@ -381,6 +426,7 @@ impl ImageProgramNativeStageV1 {
         for observation in &self.observations {
             observation.validate_for(step_count)?;
         }
+        self.validate_snapshot_order()?;
         if [self.checkpoint_restore_at_step, self.checkpoint_after_step]
             .into_iter()
             .flatten()
@@ -393,6 +439,32 @@ impl ImageProgramNativeStageV1 {
         }
         self.validate_outputs(values)?;
         self.validate_checkpoint_compatibility(values)
+    }
+
+    fn validate_snapshot_order(&self) -> Result<(), CoreError> {
+        let snapshot_steps = self.observations.iter().filter_map(|observation| {
+            if observation.kind != ObservationKind::Snapshot {
+                return None;
+            }
+            match &observation.steps {
+                StepSelector::Exact { steps } => steps.first().copied(),
+                StepSelector::All => None,
+            }
+        });
+        if snapshot_steps
+            .scan(None, |previous, step| {
+                let ordered = previous.is_none_or(|previous| previous < step);
+                *previous = Some(step);
+                Some(ordered)
+            })
+            .all(|ordered| ordered)
+        {
+            return Ok(());
+        }
+        Err(CoreError::invalid(
+            "image snapshot observations",
+            "must name strictly increasing distinct boundaries",
+        ))
     }
 
     fn validate_required_inputs(&self) -> Result<(), CoreError> {
@@ -452,7 +524,7 @@ impl ImageProgramNativeStageV1 {
             ImageOperation::VaeEncode => self.output_format == ImageOutputFormat::Tensor,
             _ => matches!(
                 self.output_format,
-                ImageOutputFormat::Rgb8 | ImageOutputFormat::Rgba8
+                ImageOutputFormat::Rgb8 | ImageOutputFormat::Rgba8 | ImageOutputFormat::Png
             ),
         };
         if !output_compatible {
@@ -1737,6 +1809,15 @@ fn validate_primary_output(
                 width: value_width,
                 height: value_height,
             },
+        )
+        | (
+            _,
+            ImageOutputFormat::Png,
+            ImageProgramValueSpecV1::Png {
+                width: value_width,
+                height: value_height,
+                ..
+            },
         ) => (*value_width, *value_height) == (width, height),
         _ => false,
     };
@@ -2149,6 +2230,28 @@ mod tests {
             plan.digest().unwrap(),
             Digest::of_serializable("image-execution-plan-v3", &plan).unwrap()
         );
+    }
+
+    #[test]
+    fn png_primary_binds_decoded_type_encoder_and_encoded_bound() {
+        let mut plan = graph();
+        plan.values[7].spec = ImageProgramValueSpecV1::Png {
+            width: 2,
+            height: 1,
+            color: ImagePngColorV1::Rgba8,
+            encoding: digest("png-encoding"),
+            maximum_bytes: 1_024,
+        };
+        let ImageProgramStageOperationV1::Native { plan: native } = &mut plan.stages[5].operation
+        else {
+            panic!("fixture stage must be native");
+        };
+        native.output_format = ImageOutputFormat::Png;
+        plan.outputs[0].buffer = buffer("png-output", 1_024);
+        plan.validate().unwrap();
+
+        plan.outputs[0].buffer = buffer("oversized-png-output", 1_025);
+        assert!(plan.validate().is_err());
     }
 
     #[test]

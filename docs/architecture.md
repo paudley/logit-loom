@@ -38,7 +38,8 @@ image lane
   logit-loom-diffusion-sdcpp
   ├─ logit-loom-executor
   ├─ logit-loom-diffusion
-  └─ companion ABI v1 + image ABI v2 → pinned stable-diffusion.cpp
+  └─ companion ABI v1 + image ABI v2 + program ABI v3
+       → pinned stable-diffusion.cpp
 ```
 
 This split lets another text backend consume `logit-loom-core` and
@@ -99,14 +100,17 @@ types and geometry, derives release points and a conservative arena peak from
 value liveness, and binds exact output and receipt allocations. Deterministic
 receipts retain the completed-stage prefix and cleanup result; wall time,
 native time, placement, and transfers remain in a separate measurements
-record. No native pointer or arena handle enters a serialized value. The
-backend-neutral implementation and tests do not establish that the current
-stable-diffusion.cpp adapter executes this program family.
+record. No native pointer or arena handle enters a serialized value.
+`SdcppResidentProgram` executes this family over a request-scoped native value
+arena with generation-checked private handles. Ordinary repository tests and
+the retained native build establish contract/lowering and compilation only;
+model-backed behavior remains opt-in acceptance.
 
 The stable-diffusion.cpp adapter supports only the exact catalogued MiniT2I and
 Krea 2 component layouts. It dynamically loads companion ABI version 1 plus
-the required image ABI version 2 at the exact upstream commit recorded in ADR
-0001. Before context creation it verifies component bytes, the library digest,
+the required image ABI version 2 and program ABI version 3 at the exact
+upstream commit recorded in ADR 0001. Before context creation it verifies
+component bytes, the library digest,
 required symbols, ABI/revision, the bounded device report, and exact non-CPU
 backend names. No failed placement is retried on CPU.
 
@@ -133,16 +137,22 @@ requested LoRA participated in at least one model tensor, and writes one RGB8
 image to caller-owned storage. It also exposes direct bounded Krea VAE
 encode/decode.
 
-Safe adapter contract v4 adds `ImagePlanExecutor`, which combines those
+Safe adapter contract v4 introduced `ImagePlanExecutor`, which combines those
 advanced inputs with the transactional full-state callback in one native
 generation. Its version-two plan restores/captures an authenticated
 checkpoint before installed scheduler-state operators, observes and cancels
 after those operators, executes a bounded deterministic RGB8 mask-blend graph,
 preflights explicit output routes, accounts for retain/clear cleanup, and only
-then initializes caller-owned outputs. Scheduled LoRA scales, arbitrary
-model-block/conditioning operators, snapshots, multiple native inference
-operations, and version-two direct VAE remain rejected until an exact reviewed
-implementation exists. See
+then initializes caller-owned outputs. That version-two path continues to
+reject scheduled `LoRA` scales, arbitrary model-block/conditioning operators,
+snapshots, multiple native inference operations, and direct VAE stages rather
+than changing its established identity.
+
+Safe adapter contract v5 adds the separate `SdcppResidentProgram` and mandatory
+program ABI v3 for scheduled adapters, snapshots, multiple native/VAE stages,
+typed RGB8/RGBA8/PNG/tensor/checkpoint outputs, and private arena liveness.
+Only installed scheduler-state selectors are accepted; unresolved model-block
+and conditioning selectors fail whole-program preflight. See
 [worker-local image execution](image-execution.md) for the support matrix and
 failure rules.
 

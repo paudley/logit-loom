@@ -1,0 +1,1477 @@
+diff --git include/stable-diffusion.h include/stable-diffusion.h
+index ceba246..e36f89b 100644
+--- include/stable-diffusion.h
++++ include/stable-diffusion.h
+@@ -424,6 +424,7 @@ typedef bool (*sd_graph_eval_callback_t)(struct ggml_tensor* t, bool ask, void*
+ // patch and is not part of upstream stable-diffusion.cpp.
+ #define SD_LOOM_ABI_VERSION 1
+ #define SD_LOOM_IMAGE_ABI_VERSION 2
++#define SD_LOOM_PROGRAM_ABI_VERSION 3
+ 
+ enum sd_loom_profile_t {
+     SD_LOOM_PROFILE_MINIT2I_B16 = 1,
+@@ -559,6 +560,100 @@ typedef struct {
+     size_t rank;
+ } sd_loom_tensor_view_v2_t;
+ 
++typedef struct sd_loom_program_v3_t sd_loom_program_v3_t;
++
++enum sd_loom_value_kind_v3_t {
++    SD_LOOM_VALUE_BYTES_V3 = 1,
++    SD_LOOM_VALUE_IMAGE_V3 = 2,
++    SD_LOOM_VALUE_TENSOR_V3 = 3,
++    SD_LOOM_VALUE_LORA_V3 = 4,
++    SD_LOOM_VALUE_CHECKPOINT_STATE_V3 = 5,
++    SD_LOOM_VALUE_PNG_V3 = 6,
++};
++
++enum sd_loom_program_output_format_v3_t {
++    SD_LOOM_PROGRAM_RGB8_V3 = 1,
++    SD_LOOM_PROGRAM_RGBA8_V3 = 2,
++    SD_LOOM_PROGRAM_PNG_RGB8_V3 = 3,
++    SD_LOOM_PROGRAM_PNG_RGBA8_V3 = 4,
++};
++
++enum sd_loom_value_placement_v3_t {
++    SD_LOOM_VALUE_HOST_V3 = 1,
++    SD_LOOM_VALUE_MIXED_V3 = 2,
++};
++
++typedef struct {
++    uint64_t generation;
++    uint32_t slot;
++    uint32_t reserved;
++} sd_loom_value_handle_v3_t;
++
++typedef struct {
++    uint32_t abi_version;
++    enum sd_loom_value_kind_v3_t kind;
++    uint64_t bytes;
++    uint32_t width;
++    uint32_t height;
++    uint32_t channels;
++    enum sd_loom_tensor_dtype_t dtype;
++    uint64_t element_count;
++    uint32_t rank;
++    int64_t shape[8];
++    enum sd_loom_value_placement_v3_t placement;
++    uint64_t host_to_device_transfers;
++    uint64_t host_to_device_bytes;
++    uint64_t device_to_host_transfers;
++    uint64_t device_to_host_bytes;
++} sd_loom_value_descriptor_v3_t;
++
++typedef struct {
++    uint32_t step;
++    float scale;
++} sd_loom_lora_scale_point_v3_t;
++
++typedef struct {
++    sd_loom_value_handle_v3_t lora;
++    const sd_loom_lora_scale_point_v3_t* points;
++    size_t point_count;
++} sd_loom_lora_schedule_v3_t;
++
++typedef struct {
++    uint32_t abi_version;
++    enum sd_loom_image_operation_v2_t operation;
++    sd_loom_value_handle_v3_t positive_conditioning;
++    sd_loom_value_handle_v3_t negative_conditioning;
++    int width;
++    int height;
++    enum sd_loom_program_output_format_v3_t output_format;
++    uint64_t maximum_output_bytes;
++    int64_t seed;
++    float cfg_scale;
++    float strength;
++    const float* sigmas;
++    size_t sigma_count;
++    sd_loom_value_handle_v3_t init_image;
++    sd_loom_value_handle_v3_t mask_image;
++    const sd_loom_value_handle_v3_t* reference_images;
++    size_t reference_image_count;
++    const sd_loom_lora_schedule_v3_t* loras;
++    size_t lora_count;
++    uint32_t checkpoint_after_step;
++    const uint32_t* snapshot_after_steps;
++    size_t snapshot_count;
++} sd_loom_program_image_params_v3_t;
++
++typedef struct {
++    uint32_t abi_version;
++    sd_loom_value_handle_v3_t primary;
++    sd_loom_value_handle_v3_t checkpoint_state;
++    size_t snapshot_count;
++} sd_loom_program_image_result_v3_t;
++
++typedef int32_t (*sd_loom_value_read_cb_v3_t)(const uint8_t* bytes,
++                                              size_t byte_count,
++                                              void* data);
++
+ SD_API void sd_set_log_callback(sd_log_cb_t sd_log_cb, void* data);
+ SD_API void sd_set_progress_callback(sd_progress_cb_t cb, void* data);
+ SD_API void sd_set_preview_callback(sd_preview_cb_t cb, enum preview_t mode, int interval, bool denoised, bool noisy, void* data);
+@@ -729,6 +824,67 @@ SD_API int32_t sd_loom_vae_decode_v2(sd_ctx_t* sd_ctx,
+                                     sd_image_t** image_out);
+ SD_API void sd_loom_free_tensor_v2(sd_loom_owned_tensor_v2_t* tensor);
+ SD_API int32_t sd_loom_clear_session_v2(sd_ctx_t* sd_ctx);
++SD_API int32_t sd_loom_program_begin_v3(sd_ctx_t* sd_ctx,
++                                        size_t maximum_values,
++                                        uint64_t maximum_bytes,
++                                        sd_loom_program_v3_t** program_out);
++SD_API int32_t sd_loom_program_import_bytes_v3(sd_loom_program_v3_t* program,
++                                               const uint8_t* bytes,
++                                               size_t byte_count,
++                                               sd_loom_value_handle_v3_t* value_out);
++SD_API int32_t sd_loom_program_import_image_v3(sd_loom_program_v3_t* program,
++                                               const sd_loom_image_view_v2_t* image,
++                                               sd_loom_value_handle_v3_t* value_out);
++SD_API int32_t sd_loom_program_import_tensor_v3(sd_loom_program_v3_t* program,
++                                                const sd_loom_tensor_view_v2_t* tensor,
++                                                bool checkpoint_state,
++                                                sd_loom_value_handle_v3_t* value_out);
++SD_API int32_t sd_loom_program_import_lora_v3(sd_loom_program_v3_t* program,
++                                              const char* path,
++                                              bool is_high_noise,
++                                              sd_loom_value_handle_v3_t* value_out);
++SD_API int32_t sd_loom_program_mask_blend_v3(sd_loom_program_v3_t* program,
++                                             sd_loom_value_handle_v3_t base,
++                                             sd_loom_value_handle_v3_t overlay,
++                                             sd_loom_value_handle_v3_t mask,
++                                             sd_loom_value_handle_v3_t* value_out);
++SD_API int32_t sd_loom_program_vae_encode_v3(sd_loom_program_v3_t* program,
++                                             sd_loom_value_handle_v3_t image,
++                                             sd_loom_value_handle_v3_t* value_out);
++SD_API int32_t sd_loom_program_vae_decode_v3(sd_loom_program_v3_t* program,
++                                             sd_loom_value_handle_v3_t tensor,
++                                             uint32_t width,
++                                             uint32_t height,
++                                             enum sd_loom_program_output_format_v3_t output_format,
++                                             uint64_t maximum_output_bytes,
++                                             sd_loom_value_handle_v3_t* value_out);
++SD_API int32_t sd_loom_program_generate_image_v3(
++    sd_loom_program_v3_t* program,
++    const sd_loom_program_image_params_v3_t* params,
++    sd_loom_condition_cb_v1_t condition_callback,
++    void* condition_callback_data,
++    sd_loom_step_cb_v1_t step_callback,
++    void* step_callback_data,
++    sd_loom_value_handle_v3_t* snapshot_values,
++    size_t snapshot_capacity,
++    sd_loom_program_image_result_v3_t* result_out);
++SD_API int32_t sd_loom_program_describe_v3(const sd_loom_program_v3_t* program,
++                                           sd_loom_value_handle_v3_t value,
++                                           sd_loom_value_descriptor_v3_t* descriptor_out);
++SD_API int32_t sd_loom_program_read_v3(const sd_loom_program_v3_t* program,
++                                       sd_loom_value_handle_v3_t value,
++                                       sd_loom_value_read_cb_v3_t callback,
++                                       void* callback_data);
++SD_API int32_t sd_loom_program_copy_v3(const sd_loom_program_v3_t* program,
++                                       sd_loom_value_handle_v3_t value,
++                                       uint8_t* output,
++                                       size_t output_capacity,
++                                       size_t* bytes_written);
++SD_API int32_t sd_loom_program_release_v3(sd_loom_program_v3_t* program,
++                                          sd_loom_value_handle_v3_t value);
++SD_API int32_t sd_loom_program_finish_v3(sd_loom_program_v3_t* program,
++                                         bool clear_model_session,
++                                         uint64_t* peak_arena_bytes);
+ 
+ // List available ggml backend devices, one `name<TAB>description` per line.
+ // The names are the device names accepted by the --backend / --params-backend
+diff --git src/stable-diffusion.cpp src/stable-diffusion.cpp
+index 5a5d12a..fb08469 100644
+--- src/stable-diffusion.cpp
++++ src/stable-diffusion.cpp
+@@ -1,12 +1,20 @@
+ #include <algorithm>
+ #include <cmath>
++#include <cstring>
+ #include <cstdlib>
++#include <limits>
++#include <new>
+ #include <set>
++#include <string>
+ #include <type_traits>
+ #include <unordered_set>
+ #include <utility>
+ #include <vector>
+ 
++#define STBI_WRITE_NO_STDIO
++#define STB_IMAGE_WRITE_IMPLEMENTATION
++#include "stb_image_write.h"
++
+ #include "core/ggml_extend.hpp"
+ #include "core/ggml_graph_cut.h"
+ #include "core/layer_split_partition.h"
+@@ -211,6 +219,8 @@ public:
+     sd_loom_step_cb_v1_t loom_step_callback = nullptr;
+     void* loom_step_callback_data            = nullptr;
+     int32_t loom_step_status                  = SD_LOOM_STATUS_OK;
++    uint64_t loom_program_generation          = 0;
++    bool loom_program_active                  = false;
+     int n_threads                    = -1;
+     float default_flow_shift         = INFINITY;
+ 
+@@ -6201,6 +6211,1261 @@ int32_t sd_loom_clear_session_v2(sd_ctx_t* sd_ctx) {
+     }
+ }
+ 
++struct sd_loom_value_v3_t {
++    sd_loom_value_kind_v3_t kind = SD_LOOM_VALUE_BYTES_V3;
++    std::vector<uint8_t> bytes;
++    std::vector<float> tensor;
++    std::vector<int64_t> shape;
++    std::string path;
++    uint32_t width      = 0;
++    uint32_t height     = 0;
++    uint32_t channels   = 0;
++    bool is_high_noise  = false;
++    bool live           = true;
++
++    uint64_t data_bytes() const {
++        if (kind == SD_LOOM_VALUE_TENSOR_V3 ||
++            kind == SD_LOOM_VALUE_CHECKPOINT_STATE_V3) {
++            return static_cast<uint64_t>(tensor.size()) * sizeof(float);
++        }
++        if (kind == SD_LOOM_VALUE_LORA_V3) {
++            return static_cast<uint64_t>(path.size());
++        }
++        return static_cast<uint64_t>(bytes.size());
++    }
++
++    uint64_t resident_bytes() const {
++        uint64_t total = data_bytes();
++        if (kind == SD_LOOM_VALUE_TENSOR_V3 ||
++            kind == SD_LOOM_VALUE_CHECKPOINT_STATE_V3) {
++            uint64_t shape_bytes = static_cast<uint64_t>(shape.size()) * sizeof(int64_t);
++            if (total > UINT64_MAX - shape_bytes) {
++                return UINT64_MAX;
++            }
++            total += shape_bytes;
++        }
++        return total;
++    }
++};
++
++struct sd_loom_program_v3_t {
++    sd_ctx_t* context = nullptr;
++    uint64_t generation = 0;
++    size_t maximum_values = 0;
++    uint64_t maximum_bytes = 0;
++    uint64_t live_bytes = 0;
++    uint64_t peak_bytes = 0;
++    std::vector<sd_loom_value_v3_t> values;
++};
++
++static sd_loom_value_handle_v3_t sd_loom_empty_handle_v3() {
++    return {0, UINT32_MAX, 0};
++}
++
++static bool sd_loom_program_live_v3(const sd_loom_program_v3_t* program) {
++    return program != nullptr &&
++           program->context != nullptr &&
++           program->context->sd != nullptr &&
++           program->context->sd->loom_program_active &&
++           program->generation != 0 &&
++           program->context->sd->loom_program_generation == program->generation;
++}
++
++static sd_loom_value_v3_t* sd_loom_value_mut_v3(sd_loom_program_v3_t* program,
++                                                sd_loom_value_handle_v3_t handle) {
++    if (!sd_loom_program_live_v3(program) ||
++        handle.reserved != 0 ||
++        handle.generation != program->generation ||
++        handle.slot >= program->values.size()) {
++        return nullptr;
++    }
++    auto& value = program->values[handle.slot];
++    return value.live ? &value : nullptr;
++}
++
++static const sd_loom_value_v3_t* sd_loom_value_v3(const sd_loom_program_v3_t* program,
++                                                  sd_loom_value_handle_v3_t handle) {
++    return sd_loom_value_mut_v3(const_cast<sd_loom_program_v3_t*>(program), handle);
++}
++
++static int32_t sd_loom_add_value_v3(sd_loom_program_v3_t* program,
++                                    sd_loom_value_v3_t value,
++                                    sd_loom_value_handle_v3_t* value_out) {
++    if (value_out != nullptr) {
++        *value_out = sd_loom_empty_handle_v3();
++    }
++    if (!sd_loom_program_live_v3(program) ||
++        value_out == nullptr ||
++        program->values.size() >= program->maximum_values ||
++        program->values.size() >= UINT32_MAX) {
++        return SD_LOOM_STATUS_INVALID_ARGUMENT;
++    }
++    uint64_t bytes = value.resident_bytes();
++    if (bytes == 0 ||
++        bytes == UINT64_MAX ||
++        bytes > program->maximum_bytes ||
++        program->live_bytes > program->maximum_bytes - bytes) {
++        return SD_LOOM_STATUS_INVALID_ARGUMENT;
++    }
++    uint32_t slot = static_cast<uint32_t>(program->values.size());
++    try {
++        program->values.push_back(std::move(value));
++    } catch (...) {
++        return SD_LOOM_STATUS_NATIVE_ERROR;
++    }
++    program->live_bytes += bytes;
++    program->peak_bytes = std::max(program->peak_bytes, program->live_bytes);
++    *value_out = {program->generation, slot, 0};
++    return SD_LOOM_STATUS_OK;
++}
++
++static bool sd_loom_valid_tensor_view_v3(const sd_loom_tensor_view_v2_t& tensor) {
++    if (tensor.abi_version != SD_LOOM_IMAGE_ABI_VERSION ||
++        tensor.data == nullptr ||
++        tensor.shape == nullptr ||
++        tensor.element_count == 0 ||
++        tensor.element_count > 16 * 1024 * 1024 ||
++        tensor.rank == 0 ||
++        tensor.rank > 8) {
++        return false;
++    }
++    size_t expected = 1;
++    for (size_t i = 0; i < tensor.rank; ++i) {
++        if (tensor.shape[i] <= 0 ||
++            static_cast<uint64_t>(tensor.shape[i]) > SIZE_MAX ||
++            expected > SIZE_MAX / static_cast<size_t>(tensor.shape[i])) {
++            return false;
++        }
++        expected *= static_cast<size_t>(tensor.shape[i]);
++    }
++    return expected == tensor.element_count &&
++           std::all_of(tensor.data,
++                       tensor.data + tensor.element_count,
++                       [](float value) {
++                           return std::isfinite(value);
++                       });
++}
++
++static sd_loom_image_view_v2_t sd_loom_image_view_v3(const sd_loom_value_v3_t& value) {
++    return {
++        value.bytes.data(),
++        value.bytes.size(),
++        value.width,
++        value.height,
++        value.channels,
++    };
++}
++
++static sd_loom_tensor_view_v2_t sd_loom_tensor_view_v3(const sd_loom_value_v3_t& value) {
++    return {
++        SD_LOOM_IMAGE_ABI_VERSION,
++        value.tensor.data(),
++        value.tensor.size(),
++        value.shape.data(),
++        value.shape.size(),
++    };
++}
++
++int32_t sd_loom_program_begin_v3(sd_ctx_t* sd_ctx,
++                                 size_t maximum_values,
++                                 uint64_t maximum_bytes,
++                                 sd_loom_program_v3_t** program_out) {
++    if (program_out != nullptr) {
++        *program_out = nullptr;
++    }
++    if (sd_ctx == nullptr ||
++        sd_ctx->sd == nullptr ||
++        program_out == nullptr ||
++        maximum_values == 0 ||
++        maximum_values > 128 ||
++        maximum_bytes == 0 ||
++        maximum_bytes > 2ULL * 1024 * 1024 * 1024 ||
++        sd_ctx->sd->loom_program_active ||
++        sd_ctx->sd->loom_condition_callback != nullptr ||
++        sd_ctx->sd->loom_step_callback != nullptr ||
++        sd_ctx->sd->loom_program_generation == UINT64_MAX) {
++        return SD_LOOM_STATUS_INVALID_ARGUMENT;
++    }
++    try {
++        auto* program = new (std::nothrow) sd_loom_program_v3_t();
++        if (program == nullptr) {
++            return SD_LOOM_STATUS_NATIVE_ERROR;
++        }
++        try {
++            program->values.reserve(maximum_values);
++        } catch (...) {
++            delete program;
++            return SD_LOOM_STATUS_NATIVE_ERROR;
++        }
++        sd_ctx->sd->loom_program_generation += 1;
++        sd_ctx->sd->loom_program_active = true;
++        program->context = sd_ctx;
++        program->generation = sd_ctx->sd->loom_program_generation;
++        program->maximum_values = maximum_values;
++        program->maximum_bytes = maximum_bytes;
++        *program_out = program;
++        return SD_LOOM_STATUS_OK;
++    } catch (...) {
++        return SD_LOOM_STATUS_NATIVE_ERROR;
++    }
++}
++
++int32_t sd_loom_program_import_bytes_v3(sd_loom_program_v3_t* program,
++                                        const uint8_t* bytes,
++                                        size_t byte_count,
++                                        sd_loom_value_handle_v3_t* value_out) {
++    if (bytes == nullptr || byte_count == 0 || byte_count > 1024ULL * 1024 * 1024) {
++        return SD_LOOM_STATUS_INVALID_ARGUMENT;
++    }
++    try {
++        sd_loom_value_v3_t value;
++        value.kind = SD_LOOM_VALUE_BYTES_V3;
++        value.bytes.assign(bytes, bytes + byte_count);
++        return sd_loom_add_value_v3(program, std::move(value), value_out);
++    } catch (...) {
++        return SD_LOOM_STATUS_NATIVE_ERROR;
++    }
++}
++
++int32_t sd_loom_program_import_image_v3(sd_loom_program_v3_t* program,
++                                        const sd_loom_image_view_v2_t* image,
++                                        sd_loom_value_handle_v3_t* value_out) {
++    if (image == nullptr ||
++        !sd_loom_valid_image_v2(*image, image->channels == 1, 0, 0)) {
++        return SD_LOOM_STATUS_INVALID_ARGUMENT;
++    }
++    try {
++        sd_loom_value_v3_t value;
++        value.kind = SD_LOOM_VALUE_IMAGE_V3;
++        value.bytes.assign(image->data, image->data + image->bytes);
++        value.width = image->width;
++        value.height = image->height;
++        value.channels = image->channels;
++        return sd_loom_add_value_v3(program, std::move(value), value_out);
++    } catch (...) {
++        return SD_LOOM_STATUS_NATIVE_ERROR;
++    }
++}
++
++int32_t sd_loom_program_import_tensor_v3(sd_loom_program_v3_t* program,
++                                         const sd_loom_tensor_view_v2_t* tensor,
++                                         bool checkpoint_state,
++                                         sd_loom_value_handle_v3_t* value_out) {
++    if (tensor == nullptr || !sd_loom_valid_tensor_view_v3(*tensor)) {
++        return SD_LOOM_STATUS_INVALID_ARGUMENT;
++    }
++    try {
++        sd_loom_value_v3_t value;
++        value.kind = checkpoint_state
++                         ? SD_LOOM_VALUE_CHECKPOINT_STATE_V3
++                         : SD_LOOM_VALUE_TENSOR_V3;
++        value.tensor.assign(tensor->data, tensor->data + tensor->element_count);
++        value.shape.assign(tensor->shape, tensor->shape + tensor->rank);
++        return sd_loom_add_value_v3(program, std::move(value), value_out);
++    } catch (...) {
++        return SD_LOOM_STATUS_NATIVE_ERROR;
++    }
++}
++
++int32_t sd_loom_program_import_lora_v3(sd_loom_program_v3_t* program,
++                                       const char* path,
++                                       bool is_high_noise,
++                                       sd_loom_value_handle_v3_t* value_out) {
++    if (!sd_loom_bounded_string_v2(path, 4096, false)) {
++        return SD_LOOM_STATUS_INVALID_ARGUMENT;
++    }
++    try {
++        sd_loom_value_v3_t value;
++        value.kind = SD_LOOM_VALUE_LORA_V3;
++        value.path = path;
++        value.is_high_noise = is_high_noise;
++        return sd_loom_add_value_v3(program, std::move(value), value_out);
++    } catch (...) {
++        return SD_LOOM_STATUS_NATIVE_ERROR;
++    }
++}
++
++int32_t sd_loom_program_mask_blend_v3(sd_loom_program_v3_t* program,
++                                      sd_loom_value_handle_v3_t base_handle,
++                                      sd_loom_value_handle_v3_t overlay_handle,
++                                      sd_loom_value_handle_v3_t mask_handle,
++                                      sd_loom_value_handle_v3_t* value_out) {
++    const auto* base = sd_loom_value_v3(program, base_handle);
++    const auto* overlay = sd_loom_value_v3(program, overlay_handle);
++    const auto* mask = sd_loom_value_v3(program, mask_handle);
++    if (base == nullptr ||
++        overlay == nullptr ||
++        mask == nullptr ||
++        base->kind != SD_LOOM_VALUE_IMAGE_V3 ||
++        overlay->kind != SD_LOOM_VALUE_IMAGE_V3 ||
++        mask->kind != SD_LOOM_VALUE_IMAGE_V3 ||
++        base->channels != 3 ||
++        overlay->channels != 3 ||
++        mask->channels != 1 ||
++        base->width != overlay->width ||
++        base->height != overlay->height ||
++        base->width != mask->width ||
++        base->height != mask->height ||
++        base->bytes.size() != overlay->bytes.size() ||
++        base->bytes.size() != mask->bytes.size() * 3) {
++        return SD_LOOM_STATUS_INVALID_ARGUMENT;
++    }
++    try {
++        sd_loom_value_v3_t value;
++        value.kind = SD_LOOM_VALUE_IMAGE_V3;
++        value.width = base->width;
++        value.height = base->height;
++        value.channels = 3;
++        value.bytes.resize(base->bytes.size());
++        for (size_t pixel = 0; pixel < mask->bytes.size(); ++pixel) {
++            uint32_t alpha = mask->bytes[pixel];
++            for (size_t channel = 0; channel < 3; ++channel) {
++                size_t index = pixel * 3 + channel;
++                uint32_t mixed = static_cast<uint32_t>(base->bytes[index]) * (255 - alpha) +
++                                 static_cast<uint32_t>(overlay->bytes[index]) * alpha +
++                                 127;
++                value.bytes[index] = static_cast<uint8_t>(mixed / 255);
++            }
++        }
++        return sd_loom_add_value_v3(program, std::move(value), value_out);
++    } catch (...) {
++        return SD_LOOM_STATUS_NATIVE_ERROR;
++    }
++}
++
++static bool sd_loom_program_output_format_v3(
++    sd_loom_program_output_format_v3_t format,
++    uint32_t* channels,
++    bool* png) {
++    if (channels == nullptr || png == nullptr) {
++        return false;
++    }
++    switch (format) {
++        case SD_LOOM_PROGRAM_RGB8_V3:
++            *channels = 3;
++            *png = false;
++            return true;
++        case SD_LOOM_PROGRAM_RGBA8_V3:
++            *channels = 4;
++            *png = false;
++            return true;
++        case SD_LOOM_PROGRAM_PNG_RGB8_V3:
++            *channels = 3;
++            *png = true;
++            return true;
++        case SD_LOOM_PROGRAM_PNG_RGBA8_V3:
++            *channels = 4;
++            *png = true;
++            return true;
++        default:
++            return false;
++    }
++}
++
++static bool sd_loom_output_upper_bound_v3(
++    uint32_t width,
++    uint32_t height,
++    uint32_t channels,
++    bool png,
++    uint64_t* bytes_out) {
++    if (bytes_out == nullptr ||
++        width == 0 ||
++        height == 0 ||
++        width > 4096 ||
++        height > 4096 ||
++        (channels != 3 && channels != 4)) {
++        return false;
++    }
++    uint64_t row_bytes = static_cast<uint64_t>(width) * channels;
++    uint64_t decoded_bytes = row_bytes * height;
++    if (!png) {
++        *bytes_out = decoded_bytes;
++        return true;
++    }
++    uint64_t filtered_bytes = (row_bytes + 1) * height;
++    uint64_t blocks = (filtered_bytes + 32766) / 32767;
++    if (blocks > (UINT64_MAX - filtered_bytes - 63) / 5) {
++        return false;
++    }
++    *bytes_out = filtered_bytes + 63 + blocks * 5;
++    return true;
++}
++
++static int32_t sd_loom_add_output_image_v3(
++    sd_loom_program_v3_t* program,
++    const sd_image_t* image,
++    sd_loom_program_output_format_v3_t output_format,
++    uint64_t maximum_output_bytes,
++    sd_loom_value_handle_v3_t* value_out) {
++    uint32_t output_channels = 0;
++    bool png = false;
++    uint64_t required_bytes = 0;
++    if (image == nullptr ||
++        image->data == nullptr ||
++        image->width == 0 ||
++        image->height == 0 ||
++        (image->channel != 3 && image->channel != 4) ||
++        !sd_loom_program_output_format_v3(output_format, &output_channels, &png) ||
++        !sd_loom_output_upper_bound_v3(image->width,
++                                       image->height,
++                                       output_channels,
++                                       png,
++                                       &required_bytes) ||
++        maximum_output_bytes == 0 ||
++        maximum_output_bytes < required_bytes ||
++        maximum_output_bytes > program->maximum_bytes) {
++        return SD_LOOM_STATUS_INVALID_ARGUMENT;
++    }
++    size_t pixels = static_cast<size_t>(image->width) * image->height;
++    if (pixels > SIZE_MAX / output_channels) {
++        return SD_LOOM_STATUS_NATIVE_ERROR;
++    }
++    try {
++        std::vector<uint8_t> decoded(pixels * output_channels);
++        for (size_t pixel = 0; pixel < pixels; ++pixel) {
++            decoded[pixel * output_channels] = image->data[pixel * image->channel];
++            decoded[pixel * output_channels + 1] =
++                image->data[pixel * image->channel + 1];
++            decoded[pixel * output_channels + 2] =
++                image->data[pixel * image->channel + 2];
++            if (output_channels == 4) {
++                decoded[pixel * output_channels + 3] =
++                    image->channel == 4
++                        ? image->data[pixel * image->channel + 3]
++                        : 255;
++            }
++        }
++
++        sd_loom_value_v3_t value;
++        value.kind = png ? SD_LOOM_VALUE_PNG_V3 : SD_LOOM_VALUE_IMAGE_V3;
++        value.width = image->width;
++        value.height = image->height;
++        value.channels = output_channels;
++        if (!png) {
++            if (decoded.size() > maximum_output_bytes) {
++                return SD_LOOM_STATUS_INVALID_ARGUMENT;
++            }
++            value.bytes = std::move(decoded);
++            return sd_loom_add_value_v3(program, std::move(value), value_out);
++        }
++
++        int encoded_bytes = 0;
++        unsigned char* encoded = stbi_write_png_to_mem(
++            decoded.data(),
++            static_cast<int>(image->width * output_channels),
++            static_cast<int>(image->width),
++            static_cast<int>(image->height),
++            static_cast<int>(output_channels),
++            &encoded_bytes,
++            nullptr);
++        if (encoded == nullptr || encoded_bytes <= 0) {
++            if (encoded != nullptr) {
++                STBIW_FREE(encoded);
++            }
++            return SD_LOOM_STATUS_NATIVE_ERROR;
++        }
++        if (static_cast<uint64_t>(encoded_bytes) > maximum_output_bytes) {
++            STBIW_FREE(encoded);
++            return SD_LOOM_STATUS_INVALID_ARGUMENT;
++        }
++        try {
++            value.bytes.assign(encoded, encoded + encoded_bytes);
++        } catch (...) {
++            STBIW_FREE(encoded);
++            throw;
++        }
++        STBIW_FREE(encoded);
++        return sd_loom_add_value_v3(program, std::move(value), value_out);
++    } catch (...) {
++        return SD_LOOM_STATUS_NATIVE_ERROR;
++    }
++}
++
++int32_t sd_loom_program_vae_encode_v3(sd_loom_program_v3_t* program,
++                                      sd_loom_value_handle_v3_t image_handle,
++                                      sd_loom_value_handle_v3_t* value_out) {
++    const auto* image = sd_loom_value_v3(program, image_handle);
++    if (image == nullptr ||
++        image->kind != SD_LOOM_VALUE_IMAGE_V3 ||
++        image->channels == 1) {
++        return SD_LOOM_STATUS_INVALID_ARGUMENT;
++    }
++    auto image_view = sd_loom_image_view_v3(*image);
++    sd_loom_owned_tensor_v2_t* encoded = nullptr;
++    int32_t status = sd_loom_vae_encode_v2(program->context, &image_view, &encoded);
++    if (status != SD_LOOM_STATUS_OK) {
++        return status;
++    }
++    if (encoded == nullptr) {
++        return SD_LOOM_STATUS_NATIVE_ERROR;
++    }
++    try {
++        sd_loom_value_v3_t value;
++        value.kind = SD_LOOM_VALUE_TENSOR_V3;
++        value.tensor.assign(encoded->data, encoded->data + encoded->element_count);
++        value.shape.assign(encoded->shape, encoded->shape + encoded->rank);
++        sd_loom_free_tensor_v2(encoded);
++        return sd_loom_add_value_v3(program, std::move(value), value_out);
++    } catch (...) {
++        sd_loom_free_tensor_v2(encoded);
++        return SD_LOOM_STATUS_NATIVE_ERROR;
++    }
++}
++
++int32_t sd_loom_program_vae_decode_v3(sd_loom_program_v3_t* program,
++                                      sd_loom_value_handle_v3_t tensor_handle,
++                                      uint32_t width,
++                                      uint32_t height,
++                                      sd_loom_program_output_format_v3_t output_format,
++                                      uint64_t maximum_output_bytes,
++                                      sd_loom_value_handle_v3_t* value_out) {
++    const auto* tensor = sd_loom_value_v3(program, tensor_handle);
++    uint32_t output_channels = 0;
++    bool png = false;
++    uint64_t required_bytes = 0;
++    if (tensor == nullptr ||
++        tensor->kind != SD_LOOM_VALUE_TENSOR_V3 ||
++        width == 0 ||
++        height == 0 ||
++        width > 4096 ||
++        height > 4096 ||
++        !sd_loom_program_output_format_v3(output_format, &output_channels, &png) ||
++        !sd_loom_output_upper_bound_v3(width,
++                                       height,
++                                       output_channels,
++                                       png,
++                                       &required_bytes) ||
++        maximum_output_bytes == 0 ||
++        maximum_output_bytes < required_bytes ||
++        maximum_output_bytes > program->maximum_bytes) {
++        return SD_LOOM_STATUS_INVALID_ARGUMENT;
++    }
++    auto tensor_view = sd_loom_tensor_view_v3(*tensor);
++    sd_image_t* image = nullptr;
++    int32_t status = sd_loom_vae_decode_v2(program->context, &tensor_view, &image);
++    if (status != SD_LOOM_STATUS_OK) {
++        return status;
++    }
++    if (image == nullptr ||
++        image->data == nullptr ||
++        image->width != width ||
++        image->height != height ||
++        (image->channel != 3 && image->channel != 4)) {
++        if (image != nullptr) {
++            free_sd_images(image, 1);
++        }
++        return SD_LOOM_STATUS_NATIVE_ERROR;
++    }
++    int32_t output_status = sd_loom_add_output_image_v3(program,
++                                                        image,
++                                                        output_format,
++                                                        maximum_output_bytes,
++                                                        value_out);
++    free_sd_images(image, 1);
++    return output_status;
++}
++
++static bool sd_loom_empty_handle_value_v3(sd_loom_value_handle_v3_t handle) {
++    return handle.generation == 0 &&
++           handle.slot == UINT32_MAX &&
++           handle.reserved == 0;
++}
++
++static bool sd_loom_valid_utf8_v3(const std::vector<uint8_t>& bytes) {
++    for (size_t index = 0; index < bytes.size();) {
++        uint8_t first = bytes[index];
++        if (first <= 0x7f) {
++            index += 1;
++            continue;
++        }
++        auto continuation = [&](size_t offset) {
++            return index + offset < bytes.size() &&
++                   (bytes[index + offset] & 0xc0) == 0x80;
++        };
++        if (first >= 0xc2 && first <= 0xdf && continuation(1)) {
++            index += 2;
++        } else if (first == 0xe0 &&
++                   index + 2 < bytes.size() &&
++                   bytes[index + 1] >= 0xa0 &&
++                   bytes[index + 1] <= 0xbf &&
++                   continuation(2)) {
++            index += 3;
++        } else if (((first >= 0xe1 && first <= 0xec) ||
++                    (first >= 0xee && first <= 0xef)) &&
++                   continuation(1) &&
++                   continuation(2)) {
++            index += 3;
++        } else if (first == 0xed &&
++                   index + 2 < bytes.size() &&
++                   bytes[index + 1] >= 0x80 &&
++                   bytes[index + 1] <= 0x9f &&
++                   continuation(2)) {
++            index += 3;
++        } else if (first == 0xf0 &&
++                   index + 3 < bytes.size() &&
++                   bytes[index + 1] >= 0x90 &&
++                   bytes[index + 1] <= 0xbf &&
++                   continuation(2) &&
++                   continuation(3)) {
++            index += 4;
++        } else if (first >= 0xf1 &&
++                   first <= 0xf3 &&
++                   continuation(1) &&
++                   continuation(2) &&
++                   continuation(3)) {
++            index += 4;
++        } else if (first == 0xf4 &&
++                   index + 3 < bytes.size() &&
++                   bytes[index + 1] >= 0x80 &&
++                   bytes[index + 1] <= 0x8f &&
++                   continuation(2) &&
++                   continuation(3)) {
++            index += 4;
++        } else {
++            return false;
++        }
++    }
++    return true;
++}
++
++static bool sd_loom_text_value_v3(const sd_loom_program_v3_t* program,
++                                  sd_loom_value_handle_v3_t handle,
++                                  bool allow_empty,
++                                  std::string* text_out) {
++    if (text_out == nullptr) {
++        return false;
++    }
++    text_out->clear();
++    if (sd_loom_empty_handle_value_v3(handle)) {
++        return allow_empty;
++    }
++    const auto* value = sd_loom_value_v3(program, handle);
++    if (value == nullptr ||
++        value->kind != SD_LOOM_VALUE_BYTES_V3 ||
++        value->bytes.size() > 64 * 1024 ||
++        (!allow_empty && value->bytes.empty()) ||
++        !sd_loom_valid_utf8_v3(value->bytes) ||
++        std::find(value->bytes.begin(), value->bytes.end(), uint8_t{0}) != value->bytes.end()) {
++        return false;
++    }
++    try {
++        text_out->assign(reinterpret_cast<const char*>(value->bytes.data()),
++                         value->bytes.size());
++        return true;
++    } catch (...) {
++        return false;
++    }
++}
++
++static const sd_loom_value_v3_t* sd_loom_optional_image_v3(
++    const sd_loom_program_v3_t* program,
++    sd_loom_value_handle_v3_t handle) {
++    if (sd_loom_empty_handle_value_v3(handle)) {
++        return nullptr;
++    }
++    const auto* value = sd_loom_value_v3(program, handle);
++    return value != nullptr && value->kind == SD_LOOM_VALUE_IMAGE_V3
++               ? value
++               : nullptr;
++}
++
++static bool sd_loom_valid_lora_schedule_v3(
++    const sd_loom_program_v3_t* program,
++    const sd_loom_lora_schedule_v3_t& schedule,
++    uint32_t step_count) {
++    const auto* lora = sd_loom_value_v3(program, schedule.lora);
++    if (lora == nullptr ||
++        lora->kind != SD_LOOM_VALUE_LORA_V3 ||
++        schedule.points == nullptr ||
++        schedule.point_count == 0 ||
++        schedule.point_count > 4096 ||
++        schedule.points[0].step != 0) {
++        return false;
++    }
++    for (size_t point = 0; point < schedule.point_count; ++point) {
++        const auto& current = schedule.points[point];
++        if (current.step >= step_count ||
++            !std::isfinite(current.scale) ||
++            current.scale < -64.f ||
++            current.scale > 64.f ||
++            (point > 0 && schedule.points[point - 1].step >= current.step)) {
++            return false;
++        }
++    }
++    return true;
++}
++
++static bool sd_loom_valid_snapshot_steps_v3(
++    const sd_loom_program_image_params_v3_t* params,
++    uint32_t step_count) {
++    if (params->snapshot_count > 16 ||
++        (params->snapshot_count > 0 && params->snapshot_after_steps == nullptr)) {
++        return false;
++    }
++    for (size_t snapshot = 0; snapshot < params->snapshot_count; ++snapshot) {
++        uint32_t step = params->snapshot_after_steps[snapshot];
++        if (step >= step_count ||
++            (snapshot > 0 && params->snapshot_after_steps[snapshot - 1] >= step)) {
++            return false;
++        }
++    }
++    return true;
++}
++
++static bool sd_loom_valid_generation_inputs_v3(
++    const sd_loom_program_v3_t* program,
++    const sd_loom_program_image_params_v3_t* params,
++    const sd_loom_value_v3_t* init_image,
++    const sd_loom_value_v3_t* mask_image) {
++    bool has_init = init_image != nullptr;
++    bool has_mask = mask_image != nullptr;
++    switch (params->operation) {
++        case SD_LOOM_TEXT_TO_IMAGE_V2:
++            if (has_init || has_mask || params->strength != 1.f) {
++                return false;
++            }
++            break;
++        case SD_LOOM_IMAGE_TO_IMAGE_V2:
++            if (!has_init || has_mask) {
++                return false;
++            }
++            break;
++        case SD_LOOM_INPAINT_V2:
++        case SD_LOOM_OUTPAINT_V2:
++            if (!has_init || !has_mask) {
++                return false;
++            }
++            break;
++        default:
++            return false;
++    }
++    if ((has_init &&
++         (init_image->width != static_cast<uint32_t>(params->width) ||
++          init_image->height != static_cast<uint32_t>(params->height) ||
++          (init_image->channels != 3 && init_image->channels != 4))) ||
++        (has_mask &&
++         (mask_image->width != static_cast<uint32_t>(params->width) ||
++          mask_image->height != static_cast<uint32_t>(params->height) ||
++          mask_image->channels != 1))) {
++        return false;
++    }
++    for (size_t reference = 0; reference < params->reference_image_count; ++reference) {
++        const auto* value = sd_loom_optional_image_v3(program,
++                                                       params->reference_images[reference]);
++        if (value == nullptr || (value->channels != 3 && value->channels != 4)) {
++            return false;
++        }
++    }
++    return true;
++}
++
++struct sd_loom_program_step_state_v3_t {
++    sd_loom_program_v3_t* program = nullptr;
++    sd_loom_step_cb_v1_t callback = nullptr;
++    void* callback_data = nullptr;
++    const sd_loom_program_image_params_v3_t* params = nullptr;
++    sd_loom_value_handle_v3_t checkpoint = sd_loom_empty_handle_v3();
++    std::vector<sd_loom_value_handle_v3_t> snapshots;
++    size_t snapshot_cursor = 0;
++    size_t applied_lora_boundaries = 0;
++    int32_t failure_status = SD_LOOM_STATUS_OK;
++};
++
++static int32_t sd_loom_add_step_state_v3(sd_loom_program_step_state_v3_t* state,
++                                         const sd_loom_step_v1_t* step,
++                                         bool checkpoint,
++                                         sd_loom_value_handle_v3_t* value_out) {
++    if (state == nullptr ||
++        step == nullptr ||
++        value_out == nullptr ||
++        step->state == nullptr ||
++        step->state_len == 0 ||
++        step->state_len > 16 * 1024 * 1024 ||
++        step->shape == nullptr ||
++        step->rank == 0 ||
++        step->rank > 8) {
++        return SD_LOOM_STATUS_NATIVE_ERROR;
++    }
++    sd_loom_value_v3_t value;
++    value.kind = checkpoint
++                     ? SD_LOOM_VALUE_CHECKPOINT_STATE_V3
++                     : SD_LOOM_VALUE_TENSOR_V3;
++    value.tensor.assign(step->state, step->state + step->state_len);
++    value.shape.assign(step->shape, step->shape + step->rank);
++    return sd_loom_add_value_v3(state->program, std::move(value), value_out);
++}
++
++static bool sd_loom_apply_lora_boundary_v3(
++    sd_loom_program_step_state_v3_t* state,
++    const sd_loom_lora_schedule_v3_t& schedule,
++    uint32_t boundary) {
++    const sd_loom_lora_scale_point_v3_t* selected = nullptr;
++    for (size_t point = 1; point < schedule.point_count; ++point) {
++        if (schedule.points[point].step == boundary) {
++            selected = &schedule.points[point];
++            break;
++        }
++    }
++    if (selected == nullptr) {
++        return true;
++    }
++    const auto* lora = sd_loom_value_v3(state->program, schedule.lora);
++    if (lora == nullptr) {
++        return false;
++    }
++    std::string expected_id = lora->is_high_noise
++                                  ? "|high_noise|" + lora->path
++                                  : lora->path;
++    bool matched = false;
++    for (const auto& model : state->program->context->sd->runtime_lora_models) {
++        if (model != nullptr &&
++            model->lora_id == expected_id &&
++            !model->applied_lora_tensors.empty()) {
++            model->multiplier = selected->scale;
++            matched = true;
++        }
++    }
++    if (matched) {
++        state->applied_lora_boundaries += 1;
++    }
++    return matched;
++}
++
++static int32_t sd_loom_program_step_callback_v3(const sd_loom_step_v1_t* step,
++                                                 void* data) {
++    auto* state = static_cast<sd_loom_program_step_state_v3_t*>(data);
++    if (state == nullptr ||
++        state->program == nullptr ||
++        state->callback == nullptr ||
++        state->params == nullptr ||
++        step == nullptr) {
++        return SD_LOOM_CALLBACK_ERROR;
++    }
++    try {
++        if (state->params->checkpoint_after_step == step->step_index) {
++            if (!sd_loom_empty_handle_value_v3(state->checkpoint)) {
++                state->failure_status = SD_LOOM_STATUS_CALLBACK_ERROR;
++                return SD_LOOM_CALLBACK_ERROR;
++            }
++            state->failure_status =
++                sd_loom_add_step_state_v3(state, step, true, &state->checkpoint);
++            if (state->failure_status != SD_LOOM_STATUS_OK) {
++                return SD_LOOM_CALLBACK_ERROR;
++            }
++        }
++
++        int32_t callback_result = state->callback(step, state->callback_data);
++        if (callback_result != SD_LOOM_CALLBACK_CONTINUE) {
++            return callback_result;
++        }
++
++        if (state->snapshot_cursor < state->params->snapshot_count &&
++            state->params->snapshot_after_steps[state->snapshot_cursor] == step->step_index) {
++            auto& snapshot = state->snapshots[state->snapshot_cursor];
++            state->failure_status =
++                sd_loom_add_step_state_v3(state, step, false, &snapshot);
++            if (state->failure_status != SD_LOOM_STATUS_OK) {
++                return SD_LOOM_CALLBACK_ERROR;
++            }
++            state->snapshot_cursor += 1;
++        }
++
++        uint32_t next_boundary = step->step_index + 1;
++        for (size_t lora = 0; lora < state->params->lora_count; ++lora) {
++            if (!sd_loom_apply_lora_boundary_v3(state,
++                                                 state->params->loras[lora],
++                                                 next_boundary)) {
++                state->failure_status = SD_LOOM_STATUS_UNSUPPORTED;
++                return SD_LOOM_CALLBACK_ERROR;
++            }
++        }
++        return SD_LOOM_CALLBACK_CONTINUE;
++    } catch (...) {
++        state->failure_status = SD_LOOM_STATUS_NATIVE_ERROR;
++        return SD_LOOM_CALLBACK_ERROR;
++    }
++}
++
++static bool sd_loom_release_if_live_v3(sd_loom_program_v3_t* program,
++                                       sd_loom_value_handle_v3_t* handle) {
++    if (handle == nullptr || sd_loom_empty_handle_value_v3(*handle)) {
++        return true;
++    }
++    int32_t status = sd_loom_program_release_v3(program, *handle);
++    *handle = sd_loom_empty_handle_v3();
++    return status == SD_LOOM_STATUS_OK;
++}
++
++static bool sd_loom_rollback_generation_v3(
++    sd_loom_program_v3_t* program,
++    sd_loom_program_step_state_v3_t* state,
++    sd_loom_value_handle_v3_t* primary) {
++    bool released = sd_loom_release_if_live_v3(program, primary);
++    released = sd_loom_release_if_live_v3(program, &state->checkpoint) && released;
++    for (auto& snapshot : state->snapshots) {
++        released = sd_loom_release_if_live_v3(program, &snapshot) && released;
++    }
++    return released;
++}
++
++static int32_t sd_loom_add_generated_image_v3(
++    sd_loom_program_v3_t* program,
++    const sd_image_t* image,
++    sd_loom_program_output_format_v3_t output_format,
++    uint64_t maximum_output_bytes,
++    sd_loom_value_handle_v3_t* primary_out) {
++    return sd_loom_add_output_image_v3(program,
++                                       image,
++                                       output_format,
++                                       maximum_output_bytes,
++                                       primary_out);
++}
++
++int32_t sd_loom_program_generate_image_v3(
++    sd_loom_program_v3_t* program,
++    const sd_loom_program_image_params_v3_t* params,
++    sd_loom_condition_cb_v1_t condition_callback,
++    void* condition_callback_data,
++    sd_loom_step_cb_v1_t step_callback,
++    void* step_callback_data,
++    sd_loom_value_handle_v3_t* snapshot_values,
++    size_t snapshot_capacity,
++    sd_loom_program_image_result_v3_t* result_out) {
++    if (result_out != nullptr) {
++        *result_out = {
++            SD_LOOM_PROGRAM_ABI_VERSION,
++            sd_loom_empty_handle_v3(),
++            sd_loom_empty_handle_v3(),
++            0,
++        };
++    }
++    if (snapshot_values != nullptr) {
++        for (size_t snapshot = 0; snapshot < snapshot_capacity; ++snapshot) {
++            snapshot_values[snapshot] = sd_loom_empty_handle_v3();
++        }
++    }
++    uint32_t output_channels = 0;
++    bool png = false;
++    uint64_t required_output_bytes = 0;
++    if (!sd_loom_program_live_v3(program) ||
++        params == nullptr ||
++        result_out == nullptr ||
++        condition_callback == nullptr ||
++        step_callback == nullptr ||
++        params->abi_version != SD_LOOM_PROGRAM_ABI_VERSION ||
++        params->width <= 0 ||
++        params->height <= 0 ||
++        params->width > 4096 ||
++        params->height > 4096 ||
++        !sd_loom_program_output_format_v3(params->output_format,
++                                          &output_channels,
++                                          &png) ||
++        !sd_loom_output_upper_bound_v3(static_cast<uint32_t>(params->width),
++                                       static_cast<uint32_t>(params->height),
++                                       output_channels,
++                                       png,
++                                       &required_output_bytes) ||
++        params->maximum_output_bytes == 0 ||
++        params->maximum_output_bytes < required_output_bytes ||
++        params->maximum_output_bytes > program->maximum_bytes ||
++        params->seed < 0 ||
++        !std::isfinite(params->cfg_scale) ||
++        params->cfg_scale < 0.f ||
++        params->cfg_scale > 64.f ||
++        !std::isfinite(params->strength) ||
++        params->strength <= 0.f ||
++        params->strength > 1.f ||
++        !sd_loom_valid_schedule_v2(params->sigmas, params->sigma_count) ||
++        params->reference_image_count > 16 ||
++        params->lora_count > 32 ||
++        (params->reference_image_count > 0 && params->reference_images == nullptr) ||
++        (params->lora_count > 0 && params->loras == nullptr) ||
++        params->snapshot_count != snapshot_capacity ||
++        (snapshot_capacity > 0 && snapshot_values == nullptr)) {
++        return SD_LOOM_STATUS_INVALID_ARGUMENT;
++    }
++
++    uint32_t step_count = static_cast<uint32_t>(params->sigma_count - 1);
++    if ((params->checkpoint_after_step != UINT32_MAX &&
++         params->checkpoint_after_step >= step_count) ||
++        !sd_loom_valid_snapshot_steps_v3(params, step_count)) {
++        return SD_LOOM_STATUS_INVALID_ARGUMENT;
++    }
++
++    std::string prompt;
++    std::string negative_prompt;
++    if (!sd_loom_text_value_v3(program,
++                               params->positive_conditioning,
++                               false,
++                               &prompt) ||
++        !sd_loom_text_value_v3(program,
++                               params->negative_conditioning,
++                               true,
++                               &negative_prompt)) {
++        return SD_LOOM_STATUS_INVALID_ARGUMENT;
++    }
++
++    const auto* init_image =
++        sd_loom_optional_image_v3(program, params->init_image);
++    const auto* mask_image =
++        sd_loom_optional_image_v3(program, params->mask_image);
++    if ((!sd_loom_empty_handle_value_v3(params->init_image) && init_image == nullptr) ||
++        (!sd_loom_empty_handle_value_v3(params->mask_image) && mask_image == nullptr) ||
++        !sd_loom_valid_generation_inputs_v3(program, params, init_image, mask_image)) {
++        return SD_LOOM_STATUS_INVALID_ARGUMENT;
++    }
++
++    size_t expected_lora_boundaries = 0;
++    try {
++        std::unordered_set<uint32_t> lora_slots;
++        for (size_t lora = 0; lora < params->lora_count; ++lora) {
++            if (!sd_loom_valid_lora_schedule_v3(program, params->loras[lora], step_count) ||
++                !lora_slots.insert(params->loras[lora].lora.slot).second) {
++                return SD_LOOM_STATUS_INVALID_ARGUMENT;
++            }
++            expected_lora_boundaries += params->loras[lora].point_count - 1;
++        }
++    } catch (...) {
++        return SD_LOOM_STATUS_NATIVE_ERROR;
++    }
++
++    try {
++        std::vector<sd_loom_image_view_v2_t> reference_images;
++        reference_images.reserve(params->reference_image_count);
++        for (size_t reference = 0; reference < params->reference_image_count; ++reference) {
++            reference_images.push_back(sd_loom_image_view_v3(
++                *sd_loom_value_v3(program, params->reference_images[reference])));
++        }
++
++        std::vector<sd_loom_lora_v2_t> loras;
++        loras.reserve(params->lora_count);
++        for (size_t lora = 0; lora < params->lora_count; ++lora) {
++            const auto* value = sd_loom_value_v3(program, params->loras[lora].lora);
++            loras.push_back({
++                value->path.c_str(),
++                params->loras[lora].points[0].scale,
++                value->is_high_noise,
++            });
++        }
++
++        sd_loom_image_params_v2_t native_params = {
++            SD_LOOM_IMAGE_ABI_VERSION,
++            params->operation,
++            prompt.c_str(),
++            negative_prompt.c_str(),
++            params->width,
++            params->height,
++            params->seed,
++            params->cfg_scale,
++            params->strength,
++            params->sigmas,
++            params->sigma_count,
++            init_image == nullptr
++                ? sd_loom_image_view_v2_t{}
++                : sd_loom_image_view_v3(*init_image),
++            mask_image == nullptr
++                ? sd_loom_image_view_v2_t{}
++                : sd_loom_image_view_v3(*mask_image),
++            reference_images.data(),
++            reference_images.size(),
++            loras.data(),
++            loras.size(),
++        };
++
++        sd_loom_program_step_state_v3_t callback_state;
++        callback_state.program = program;
++        callback_state.callback = step_callback;
++        callback_state.callback_data = step_callback_data;
++        callback_state.params = params;
++        callback_state.snapshots.assign(params->snapshot_count,
++                                        sd_loom_empty_handle_v3());
++
++        sd_image_t* image = nullptr;
++        int32_t status = sd_loom_generate_image_v2(program->context,
++                                                   &native_params,
++                                                   condition_callback,
++                                                   condition_callback_data,
++                                                   sd_loom_program_step_callback_v3,
++                                                   &callback_state,
++                                                   &image);
++        if (callback_state.failure_status != SD_LOOM_STATUS_OK) {
++            status = callback_state.failure_status;
++        }
++
++        sd_loom_value_handle_v3_t primary = sd_loom_empty_handle_v3();
++        if (status == SD_LOOM_STATUS_OK &&
++            callback_state.snapshot_cursor == params->snapshot_count &&
++            callback_state.applied_lora_boundaries == expected_lora_boundaries &&
++            image != nullptr &&
++            image->data != nullptr &&
++            image->width == static_cast<uint32_t>(params->width) &&
++            image->height == static_cast<uint32_t>(params->height) &&
++            (image->channel == 3 || image->channel == 4)) {
++            status = sd_loom_add_generated_image_v3(program,
++                                                     image,
++                                                     params->output_format,
++                                                     params->maximum_output_bytes,
++                                                     &primary);
++        } else if (status == SD_LOOM_STATUS_OK) {
++            status = SD_LOOM_STATUS_NATIVE_ERROR;
++        }
++
++        if (image != nullptr) {
++            free_sd_images(image, 1);
++        }
++        if (status != SD_LOOM_STATUS_OK) {
++            if (!sd_loom_rollback_generation_v3(program,
++                                                 &callback_state,
++                                                 &primary)) {
++                return SD_LOOM_STATUS_NATIVE_ERROR;
++            }
++            return status;
++        }
++
++        result_out->primary = primary;
++        result_out->checkpoint_state = callback_state.checkpoint;
++        result_out->snapshot_count = callback_state.snapshots.size();
++        for (size_t snapshot = 0; snapshot < callback_state.snapshots.size(); ++snapshot) {
++            snapshot_values[snapshot] = callback_state.snapshots[snapshot];
++        }
++        return SD_LOOM_STATUS_OK;
++    } catch (...) {
++        return SD_LOOM_STATUS_NATIVE_ERROR;
++    }
++}
++
++int32_t sd_loom_program_describe_v3(const sd_loom_program_v3_t* program,
++                                    sd_loom_value_handle_v3_t handle,
++                                    sd_loom_value_descriptor_v3_t* descriptor_out) {
++    if (descriptor_out != nullptr) {
++        *descriptor_out = {};
++    }
++    const auto* value = sd_loom_value_v3(program, handle);
++    if (value == nullptr || descriptor_out == nullptr) {
++        return SD_LOOM_STATUS_INVALID_ARGUMENT;
++    }
++    descriptor_out->abi_version = SD_LOOM_PROGRAM_ABI_VERSION;
++    descriptor_out->kind = value->kind;
++    descriptor_out->bytes = value->data_bytes();
++    descriptor_out->width = value->width;
++    descriptor_out->height = value->height;
++    descriptor_out->channels = value->channels;
++    descriptor_out->dtype = (value->kind == SD_LOOM_VALUE_TENSOR_V3 ||
++                             value->kind == SD_LOOM_VALUE_CHECKPOINT_STATE_V3)
++                                ? SD_LOOM_TENSOR_F32
++                                : static_cast<sd_loom_tensor_dtype_t>(0);
++    descriptor_out->element_count = value->tensor.size();
++    descriptor_out->rank = static_cast<uint32_t>(value->shape.size());
++    for (size_t i = 0; i < value->shape.size(); ++i) {
++        descriptor_out->shape[i] = value->shape[i];
++    }
++    descriptor_out->placement = SD_LOOM_VALUE_HOST_V3;
++    return SD_LOOM_STATUS_OK;
++}
++
++static const uint8_t* sd_loom_value_bytes_v3(const sd_loom_value_v3_t& value) {
++    if (value.kind == SD_LOOM_VALUE_TENSOR_V3 ||
++        value.kind == SD_LOOM_VALUE_CHECKPOINT_STATE_V3) {
++        return reinterpret_cast<const uint8_t*>(value.tensor.data());
++    }
++    if (value.kind == SD_LOOM_VALUE_LORA_V3) {
++        return reinterpret_cast<const uint8_t*>(value.path.data());
++    }
++    return value.bytes.data();
++}
++
++int32_t sd_loom_program_read_v3(const sd_loom_program_v3_t* program,
++                                sd_loom_value_handle_v3_t handle,
++                                sd_loom_value_read_cb_v3_t callback,
++                                void* callback_data) {
++    const auto* value = sd_loom_value_v3(program, handle);
++    if (value == nullptr || callback == nullptr) {
++        return SD_LOOM_STATUS_INVALID_ARGUMENT;
++    }
++    uint64_t bytes = value->data_bytes();
++    if (bytes == 0 || bytes > SIZE_MAX) {
++        return SD_LOOM_STATUS_NATIVE_ERROR;
++    }
++    int32_t status = callback(sd_loom_value_bytes_v3(*value),
++                              static_cast<size_t>(bytes),
++                              callback_data);
++    return status == SD_LOOM_CALLBACK_CONTINUE
++               ? SD_LOOM_STATUS_OK
++               : SD_LOOM_STATUS_CALLBACK_ERROR;
++}
++
++int32_t sd_loom_program_copy_v3(const sd_loom_program_v3_t* program,
++                                sd_loom_value_handle_v3_t handle,
++                                uint8_t* output,
++                                size_t output_capacity,
++                                size_t* bytes_written) {
++    if (bytes_written != nullptr) {
++        *bytes_written = 0;
++    }
++    const auto* value = sd_loom_value_v3(program, handle);
++    if (value == nullptr || output == nullptr || bytes_written == nullptr) {
++        return SD_LOOM_STATUS_INVALID_ARGUMENT;
++    }
++    uint64_t bytes = value->data_bytes();
++    if (bytes == 0 || bytes > SIZE_MAX || bytes > output_capacity) {
++        return SD_LOOM_STATUS_INVALID_ARGUMENT;
++    }
++    std::memcpy(output, sd_loom_value_bytes_v3(*value), static_cast<size_t>(bytes));
++    *bytes_written = static_cast<size_t>(bytes);
++    return SD_LOOM_STATUS_OK;
++}
++
++int32_t sd_loom_program_release_v3(sd_loom_program_v3_t* program,
++                                   sd_loom_value_handle_v3_t handle) {
++    auto* value = sd_loom_value_mut_v3(program, handle);
++    if (value == nullptr) {
++        return SD_LOOM_STATUS_INVALID_ARGUMENT;
++    }
++    uint64_t bytes = value->resident_bytes();
++    if (bytes > program->live_bytes) {
++        return SD_LOOM_STATUS_NATIVE_ERROR;
++    }
++    program->live_bytes -= bytes;
++    value->live = false;
++    value->bytes.clear();
++    value->tensor.clear();
++    value->shape.clear();
++    value->path.clear();
++    return SD_LOOM_STATUS_OK;
++}
++
++int32_t sd_loom_program_finish_v3(sd_loom_program_v3_t* program,
++                                  bool clear_model_session,
++                                  uint64_t* peak_arena_bytes) {
++    if (peak_arena_bytes != nullptr) {
++        *peak_arena_bytes = 0;
++    }
++    if (!sd_loom_program_live_v3(program) || peak_arena_bytes == nullptr) {
++        return SD_LOOM_STATUS_INVALID_ARGUMENT;
++    }
++    auto* context = program->context;
++    uint64_t peak = program->peak_bytes;
++    int32_t status = SD_LOOM_STATUS_NATIVE_ERROR;
++    try {
++        sd_loom_reset_callbacks(context);
++        context->sd->apply_loras(nullptr, 0);
++        context->sd->reset_cancel_flag();
++        status = SD_LOOM_STATUS_OK;
++        if (clear_model_session) {
++            status = sd_loom_clear_session_v2(context);
++        }
++    } catch (...) {
++        status = SD_LOOM_STATUS_NATIVE_ERROR;
++    }
++    if (status == SD_LOOM_STATUS_OK) {
++        context->sd->loom_program_active = false;
++        *peak_arena_bytes = peak;
++    }
++    program->context = nullptr;
++    delete program;
++    return status;
++}
++
+ static std::optional<ImageGenerationLatents> prepare_video_generation_latents(sd_ctx_t* sd_ctx,
+                                                                               const sd_vid_gen_params_t* sd_vid_gen_params,
+                                                                               GenerationRequest* request) {

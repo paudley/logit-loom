@@ -12,6 +12,7 @@ use std::{
     ptr::NonNull,
     rc::Rc,
     slice,
+    time::Duration,
 };
 
 use logit_loom_diffusion::{
@@ -86,14 +87,14 @@ pub fn probe_companion(path: impl AsRef<Path>) -> Result<CompanionReceipt> {
 /// require_sync::<Sdcpp>();
 /// ```
 pub struct Sdcpp {
-    context: NonNull<c_void>,
-    api: NativeApi,
-    profile: Profile,
-    profile_receipt: ProfileReceipt,
-    native_receipt: NativeRuntimeReceipt,
+    pub(crate) context: NonNull<c_void>,
+    pub(crate) api: NativeApi,
+    pub(crate) profile: Profile,
+    pub(crate) profile_receipt: ProfileReceipt,
+    pub(crate) native_receipt: NativeRuntimeReceipt,
     options: SdcppOptions,
-    state: ExecutorState,
-    session_epoch: u64,
+    pub(crate) state: ExecutorState,
+    pub(crate) session_epoch: u64,
     _single_owner: PhantomData<Rc<()>>,
 }
 
@@ -1266,7 +1267,7 @@ impl LocalExecutor for Sdcpp {
     }
 }
 
-struct CallbackState<'a> {
+pub(crate) struct CallbackState<'a> {
     profile: Profile,
     profile_receipt: &'a ProfileReceipt,
     native_receipt: &'a NativeRuntimeReceipt,
@@ -1301,7 +1302,7 @@ impl CallbackProgram<'_> {
 }
 
 impl<'a> CallbackState<'a> {
-    fn new_full(
+    pub(crate) fn new_full(
         profile: Profile,
         profile_receipt: &'a ProfileReceipt,
         native_receipt: &'a NativeRuntimeReceipt,
@@ -1332,6 +1333,28 @@ impl<'a> CallbackState<'a> {
             next_step: 0,
             error: None,
         })
+    }
+
+    pub(crate) fn take_error(&mut self) -> Option<String> {
+        self.error.take()
+    }
+
+    pub(crate) fn plan(&self) -> Option<&DiffusionPlan> {
+        self.plan.as_ref()
+    }
+
+    pub(crate) fn last_completed_step(&self) -> Option<u32> {
+        self.steps.last().map(|step| step.step_index)
+    }
+
+    pub(crate) fn native_time_ns(&self) -> Option<u64> {
+        self.step_latency_milliseconds
+            .iter()
+            .try_fold(0_u64, |total, value| {
+                let duration = Duration::try_from_secs_f64(*value / 1_000.0).ok()?;
+                let nanoseconds = u64::try_from(duration.as_nanos()).ok()?;
+                total.checked_add(nanoseconds)
+            })
     }
 
     fn new_control(
@@ -1645,7 +1668,10 @@ impl<'a> CallbackState<'a> {
     }
 }
 
-unsafe extern "C" fn condition_callback(raw: *const ConditionTensor, data: *mut c_void) -> i32 {
+pub(crate) unsafe extern "C" fn condition_callback(
+    raw: *const ConditionTensor,
+    data: *mut c_void,
+) -> i32 {
     if raw.is_null() || data.is_null() {
         return ffi::CALLBACK_ERROR;
     }
@@ -1672,7 +1698,7 @@ unsafe extern "C" fn condition_callback(raw: *const ConditionTensor, data: *mut 
     }
 }
 
-unsafe extern "C" fn step_callback(raw: *const Step, data: *mut c_void) -> i32 {
+pub(crate) unsafe extern "C" fn step_callback(raw: *const Step, data: *mut c_void) -> i32 {
     if raw.is_null() || data.is_null() {
         return ffi::CALLBACK_ERROR;
     }
@@ -1942,7 +1968,7 @@ fn require_backend_device(backend: &str, devices: &[String]) -> Result<()> {
     Ok(())
 }
 
-fn path_c_string(path: &Path) -> Result<CString> {
+pub(crate) fn path_c_string(path: &Path) -> Result<CString> {
     let value = path
         .to_str()
         .ok_or_else(|| Error::Invalid("native paths must be valid UTF-8".to_owned()))?;
@@ -2231,7 +2257,7 @@ fn panic_message(payload: &Box<dyn Any + Send>) -> String {
     )
 }
 
-fn native_status_error(status: i32) -> Error {
+pub(crate) fn native_status_error(status: i32) -> Error {
     match status {
         ffi::STATUS_INVALID_ARGUMENT => {
             Error::Invalid("companion rejected the bounded native arguments".to_owned())

@@ -35,16 +35,17 @@ pub use execution_v2::{
 };
 pub use execution_v3::{ImageExecutionPlanV3, ImageExecutionReceiptV3, ImageOutputReceiptV3};
 pub use image_program::{
-    ImageOpaqueValueKindV1, ImageProgramCleanupDispositionV1, ImageProgramInputBindingV1,
-    ImageProgramInputV1, ImageProgramLivenessV1, ImageProgramLoraV1, ImageProgramMeasurementsV1,
-    ImageProgramNativeOutputRoleV1, ImageProgramNativeOutputV1, ImageProgramNativeStageV1,
-    ImageProgramOutputReceiptV1, ImageProgramOutputRouteV1, ImageProgramOutputSourceV1,
-    ImageProgramPlanV1, ImageProgramReceiptV1, ImageProgramReleaseV1, ImageProgramStageOperationV1,
-    ImageProgramStageReceiptV1, ImageProgramStageV1, ImageProgramTerminalV1,
-    ImageProgramValueMeasurementV1, ImageProgramValuePlacementV1, ImageProgramValueReceiptV1,
-    ImageProgramValueSpecV1, ImageProgramValueV1, MAX_IMAGE_PROGRAM_ARENA_BYTES,
-    MAX_IMAGE_PROGRAM_INPUTS, MAX_IMAGE_PROGRAM_OUTPUTS, MAX_IMAGE_PROGRAM_STAGES,
-    MAX_IMAGE_PROGRAM_VALUE_BYTES, MAX_IMAGE_PROGRAM_VALUES, image_program_value_content,
+    ImageOpaqueValueKindV1, ImagePngColorV1, ImageProgramCleanupDispositionV1,
+    ImageProgramInputBindingV1, ImageProgramInputV1, ImageProgramLivenessV1, ImageProgramLoraV1,
+    ImageProgramMeasurementsV1, ImageProgramNativeOutputRoleV1, ImageProgramNativeOutputV1,
+    ImageProgramNativeStageV1, ImageProgramOutputReceiptV1, ImageProgramOutputRouteV1,
+    ImageProgramOutputSourceV1, ImageProgramPlanV1, ImageProgramReceiptV1, ImageProgramReleaseV1,
+    ImageProgramStageOperationV1, ImageProgramStageReceiptV1, ImageProgramStageV1,
+    ImageProgramTerminalV1, ImageProgramValueMeasurementV1, ImageProgramValuePlacementV1,
+    ImageProgramValueReceiptV1, ImageProgramValueSpecV1, ImageProgramValueV1,
+    MAX_IMAGE_PROGRAM_ARENA_BYTES, MAX_IMAGE_PROGRAM_INPUTS, MAX_IMAGE_PROGRAM_OUTPUTS,
+    MAX_IMAGE_PROGRAM_STAGES, MAX_IMAGE_PROGRAM_VALUE_BYTES, MAX_IMAGE_PROGRAM_VALUES,
+    image_program_value_content,
 };
 pub use observer::{ObserverReceipt, ObserverSet, StepObserver};
 pub use pipeline::{ChannelBias, Intervention, Pipeline};

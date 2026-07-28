@@ -1220,7 +1220,8 @@ mod tests {
         let length = match spec {
             ImageProgramValueSpecV1::Utf8 { .. }
             | ImageProgramValueSpecV1::Checkpoint { .. }
-            | ImageProgramValueSpecV1::Opaque { .. } => exact.min(4),
+            | ImageProgramValueSpecV1::Opaque { .. }
+            | ImageProgramValueSpecV1::Png { .. } => exact.min(4),
             _ => exact,
         };
         let mut bytes = vec![0_u8; length];
