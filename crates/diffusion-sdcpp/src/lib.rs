@@ -9,6 +9,7 @@ mod execution;
 mod ffi;
 mod image;
 mod program;
+mod resident;
 mod runtime;
 
 pub use contract::{
@@ -33,6 +34,10 @@ pub use image::{
     VaeTensorOutput,
 };
 pub use program::{ForkProgram, PipelineProgram};
+pub use resident::{
+    ResidentImageProgramBackend, ResidentImageProgramDriver, ResidentImageProgramExecution,
+    ResidentProgramCompletedStage, ResidentProgramFinish, ResidentProgramStageTerminal,
+};
 pub use runtime::{Sdcpp, probe_companion};
 
 /// Companion ABI version implemented by this adapter.

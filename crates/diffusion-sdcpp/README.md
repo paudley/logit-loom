@@ -53,6 +53,17 @@ RGB8 mask-blend graph, preflights every route, performs the requested
 retain/clear cleanup, and only then initializes caller-owned outputs. A cleanup
 failure therefore cannot leave a partially initialized routed output.
 
+`ResidentImageProgramDriver` is the default-built execution state machine for
+`ImageProgramPlanV1`. Its backend seam addresses only validated logical value
+numbers, so native arena handles remain private. The driver owns exact stage
+order, liveness-derived release calls, pre-start/between-stage/post-Euler
+cancellation terminals, clean rejected-stage receipts, output
+materialization checks, fixed-point receipt serialization, atomic output
+publication, cleanup disposition, placement/transfer measurements, and
+poisoning on uncertainty. Model-free fake-arena tests exercise those mechanics
+without loading a companion library or model. The stable-diffusion.cpp
+version-three arena backend remains a separate native implementation step.
+
 Image-v2 success confirms that every requested `LoRA` participated in at least
 one native model tensor. The native stack is cleared before reusable returns;
 uncertain cleanup poisons the single-owner session. Direct bounded Krea VAE

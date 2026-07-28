@@ -28,6 +28,16 @@ pub const MAX_IMAGE_PROGRAM_VALUE_BYTES: u64 = 1024 * 1024 * 1024;
 /// Maximum liveness-derived resident value-arena size.
 pub const MAX_IMAGE_PROGRAM_ARENA_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 
+/// Returns the canonical content identity for one produced program value.
+///
+/// External input identities remain caller-supplied [`BufferSpec`] identities.
+/// Every stage-produced serializable value and the native representation of an
+/// opaque stage-produced value use this domain so materialization can be
+/// checked without interpreting the value.
+pub fn image_program_value_content(bytes: &[u8]) -> Digest {
+    Digest::of_bytes("image-program-value-content-v1", bytes)
+}
+
 /// Exact semantics of one backend-native opaque value.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -615,6 +625,16 @@ pub enum ImageProgramStageOperationV1 {
 }
 
 impl ImageProgramStageOperationV1 {
+    /// Returns logical values consumed by this operation in canonical order.
+    pub fn referenced_values(&self) -> Vec<u16> {
+        self.references()
+    }
+
+    /// Returns logical values produced by this operation in canonical order.
+    pub fn produced_values(&self) -> Vec<u16> {
+        self.outputs()
+    }
+
     fn references(&self) -> Vec<u16> {
         match self {
             Self::Native { plan } => plan.references().collect(),

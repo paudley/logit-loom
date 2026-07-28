@@ -33,7 +33,9 @@ operation-specific type and geometry checks, immutable branching, mutable
 checkpoint-state single consumption, liveness-derived release points, a
 2 GiB arena ceiling, explicit value and receipt routes, completed-stage
 prefix receipts, cleanup uncertainty, and placement/transfer measurements
-outside deterministic identity.
+outside deterministic identity. Stage-produced values use the
+`image-program-value-content-v1` content domain so an executor can verify
+explicit materialization without reinterpreting the value.
 
 `mask_blend_rgb8` validates every length before its first write. These
 contracts contain no paths, transport, queue, native handles, or feature-gated

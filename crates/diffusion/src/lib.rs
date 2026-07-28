@@ -44,7 +44,7 @@ pub use image_program::{
     ImageProgramValueMeasurementV1, ImageProgramValuePlacementV1, ImageProgramValueReceiptV1,
     ImageProgramValueSpecV1, ImageProgramValueV1, MAX_IMAGE_PROGRAM_ARENA_BYTES,
     MAX_IMAGE_PROGRAM_INPUTS, MAX_IMAGE_PROGRAM_OUTPUTS, MAX_IMAGE_PROGRAM_STAGES,
-    MAX_IMAGE_PROGRAM_VALUE_BYTES, MAX_IMAGE_PROGRAM_VALUES,
+    MAX_IMAGE_PROGRAM_VALUE_BYTES, MAX_IMAGE_PROGRAM_VALUES, image_program_value_content,
 };
 pub use observer::{ObserverReceipt, ObserverSet, StepObserver};
 pub use pipeline::{ChannelBias, Intervention, Pipeline};
