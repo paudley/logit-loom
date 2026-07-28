@@ -267,6 +267,9 @@ pub struct ImageProgramNativeStageV1 {
     pub operators: Vec<OperatorInvocation>,
     /// Ordered tensor observations.
     pub observations: Vec<ObservationRequest>,
+    /// Optional zero-based post-Euler boundary at which an input checkpoint
+    /// state replaces the recomputed prefix.
+    pub checkpoint_restore_at_step: Option<u32>,
     /// Optional zero-based post-Euler boundary captured as checkpoint state.
     pub checkpoint_after_step: Option<u32>,
     /// Canonically ordered primary, checkpoint, and snapshot outputs.
@@ -319,30 +322,7 @@ impl ImageProgramNativeStageV1 {
             let spec = value_spec(values, input.value)?;
             validate_role_spec(input.role, spec, self.width, self.height)?;
         }
-        let has = |role| self.inputs.iter().any(|input| input.role == role);
-        let needs_positive = self.operation.uses_diffusion();
-        let needs_source = matches!(
-            self.operation,
-            ImageOperation::ImageToImage
-                | ImageOperation::Inpaint
-                | ImageOperation::Outpaint
-                | ImageOperation::VaeEncode
-        );
-        let needs_mask = matches!(
-            self.operation,
-            ImageOperation::Inpaint | ImageOperation::Outpaint
-        );
-        let needs_tensor = self.operation == ImageOperation::VaeDecode;
-        if (needs_positive && !has(ImageBufferRole::PositiveConditioning))
-            || (needs_source && !has(ImageBufferRole::SourceImage))
-            || (needs_mask && !has(ImageBufferRole::Mask))
-            || (needs_tensor && !has(ImageBufferRole::TensorSnapshot))
-        {
-            return Err(CoreError::invalid(
-                "image program native inputs",
-                "a required operation input is missing",
-            ));
-        }
+        self.validate_required_inputs()?;
         let step_count = self.schedule.as_ref().map_or(0, DiffusionSchedule::steps);
         if self.operation.uses_diffusion() != self.schedule.is_some() {
             return Err(CoreError::invalid(
@@ -368,12 +348,17 @@ impl ImageProgramNativeStageV1 {
             }
             lora.scales.validate_for(step_count)?;
         }
+        self.validate_checkpoint_restore_binding()?;
         if !self.operation.uses_diffusion()
             && (!self.loras.is_empty()
                 || !self.operators.is_empty()
                 || !self.observations.is_empty()
+                || self.checkpoint_restore_at_step.is_some()
                 || self.checkpoint_after_step.is_some()
-                || has(ImageBufferRole::Checkpoint))
+                || self
+                    .inputs
+                    .iter()
+                    .any(|input| input.role == ImageBufferRole::Checkpoint))
         {
             return Err(CoreError::invalid(
                 "image program VAE stage",
@@ -386,16 +371,60 @@ impl ImageProgramNativeStageV1 {
         for observation in &self.observations {
             observation.validate_for(step_count)?;
         }
-        if self
-            .checkpoint_after_step
-            .is_some_and(|step| usize::try_from(step).map_or(true, |step| step >= step_count))
+        if [self.checkpoint_restore_at_step, self.checkpoint_after_step]
+            .into_iter()
+            .flatten()
+            .any(|step| usize::try_from(step).map_or(true, |step| step >= step_count))
         {
             return Err(CoreError::invalid(
                 "image program checkpoint boundary",
                 "must name an in-range post-Euler step",
             ));
         }
-        self.validate_outputs(values)
+        self.validate_outputs(values)?;
+        self.validate_checkpoint_compatibility(values)
+    }
+
+    fn validate_required_inputs(&self) -> Result<(), CoreError> {
+        let has = |role| self.inputs.iter().any(|input| input.role == role);
+        let needs_source = matches!(
+            self.operation,
+            ImageOperation::ImageToImage
+                | ImageOperation::Inpaint
+                | ImageOperation::Outpaint
+                | ImageOperation::VaeEncode
+        );
+        let needs_mask = matches!(
+            self.operation,
+            ImageOperation::Inpaint | ImageOperation::Outpaint
+        );
+        if (self.operation.uses_diffusion() && !has(ImageBufferRole::PositiveConditioning))
+            || (needs_source && !has(ImageBufferRole::SourceImage))
+            || (needs_mask && !has(ImageBufferRole::Mask))
+            || (self.operation == ImageOperation::VaeDecode
+                && !has(ImageBufferRole::TensorSnapshot))
+        {
+            return Err(CoreError::invalid(
+                "image program native inputs",
+                "a required operation input is missing",
+            ));
+        }
+        Ok(())
+    }
+
+    fn validate_checkpoint_restore_binding(&self) -> Result<(), CoreError> {
+        let checkpoint_inputs = self
+            .inputs
+            .iter()
+            .filter(|input| input.role == ImageBufferRole::Checkpoint)
+            .count();
+        if checkpoint_inputs != usize::from(self.checkpoint_restore_at_step.is_some()) {
+            return Err(CoreError::invalid(
+                "image program checkpoint restore",
+                "must bind exactly one state value when a restore boundary is declared",
+            ));
+        }
+        Ok(())
     }
 
     fn validate_scalars(&self) -> Result<(), CoreError> {
@@ -513,6 +542,33 @@ impl ImageProgramNativeStageV1 {
                 ));
             }
             cursor += 1;
+        }
+        Ok(())
+    }
+
+    fn validate_checkpoint_compatibility(
+        &self,
+        values: &[ImageProgramValueV1],
+    ) -> Result<(), CoreError> {
+        let restored = self
+            .inputs
+            .iter()
+            .find(|input| input.role == ImageBufferRole::Checkpoint)
+            .map(|input| checkpoint_state_compatibility(values, input.value))
+            .transpose()?;
+        let captured = self
+            .outputs
+            .iter()
+            .find(|output| output.role == ImageProgramNativeOutputRoleV1::CheckpointState)
+            .map(|output| checkpoint_state_compatibility(values, output.value))
+            .transpose()?;
+        if let (Some(restored), Some(captured)) = (restored, captured)
+            && restored != captured
+        {
+            return Err(CoreError::invalid(
+                "image program checkpoint state",
+                "restored and captured compatibility domains differ",
+            ));
         }
         Ok(())
     }
@@ -1751,6 +1807,24 @@ fn validate_checkpoint_conversion(
     Ok(())
 }
 
+fn checkpoint_state_compatibility(
+    values: &[ImageProgramValueV1],
+    state: u16,
+) -> Result<&Digest, CoreError> {
+    let ImageProgramValueSpecV1::Opaque {
+        opaque_kind: ImageOpaqueValueKindV1::CheckpointState,
+        compatibility,
+        ..
+    } = value_spec(values, state)?
+    else {
+        return Err(CoreError::invalid(
+            "image program checkpoint state",
+            "value has the wrong type",
+        ));
+    };
+    Ok(compatibility)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1806,6 +1880,7 @@ mod tests {
                 loras: Vec::new(),
                 operators: Vec::new(),
                 observations: Vec::new(),
+                checkpoint_restore_at_step: None,
                 checkpoint_after_step: None,
                 outputs: vec![ImageProgramNativeOutputV1 {
                     role: ImageProgramNativeOutputRoleV1::Primary,
@@ -2196,10 +2271,12 @@ mod tests {
         if let ImageProgramStageOperationV1::Native { plan: native } = &mut plan.stages[1].operation
         {
             native.inputs.push(binding(ImageBufferRole::Checkpoint, 9));
+            native.checkpoint_restore_at_step = Some(0);
         }
         if let ImageProgramStageOperationV1::Native { plan: native } = &mut plan.stages[2].operation
         {
             native.inputs.push(binding(ImageBufferRole::Checkpoint, 9));
+            native.checkpoint_restore_at_step = Some(0);
         }
         assert!(plan.validate().is_err());
     }
