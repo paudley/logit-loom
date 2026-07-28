@@ -194,6 +194,22 @@ and selects either eager activation or bounded ordered native regex/token
 triggers for a lazy grammar. Prompt tokens never consume either grammar; every
 admitted generated token is accepted by the complete native sampler chain.
 
+Structured projection adds a controller above that same call boundary. Its
+compiled plan binds caller-owned compiler and validator identities, exact
+constraints, eager/lazy grammar, incremental byte-feedback identity and
+bounds, optional transforms/observers, and a maximum number of
+caller-explicit attempts. The llama.cpp adapter content-identifies every
+tokenizer ID, exact piece byte sequence, and EOG classification. Feedback sees
+the exact piece for every eligible candidate and updates only after the
+selected non-EOG token is causally decoded.
+
+The controller captures one exact boundary before its first attempt. Observer
+cancellation and authoritative validation rejection restore that checkpoint
+before returning. A callback or native error also attempts exact restoration;
+restoration uncertainty poisons the session. There is no automatic retry:
+each subsequent attempt is a separate caller method invocation, and only one
+complete conforming terminal attempt remains causal.
+
 ## Activation transaction boundary
 
 `TextModelTopologyV1` binds exact model bytes, backend build, architecture

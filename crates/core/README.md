@@ -7,7 +7,8 @@ Serializable, backend-neutral contracts for bounded token-stream mechanics.
 This crate defines token identifiers, candidate exposure, sampling plans,
 steering descriptors, checkpoints, bounded audio-prefill contracts,
 topology-bound activation programs, target-authoritative speculation, and
-mechanical receipts. It contains no model runtime or native code.
+structured-projection compiler/validator/feedback lineage and mechanical
+receipts. It contains no model runtime or native code.
 
 ```toml
 [dependencies]
@@ -59,6 +60,9 @@ interpretation is a compatibility change.
   target/draft lineage without naming a native tensor pointer or model path.
 - Provisional speculative telemetry resolves to admitted or rejected target
   positions before entering aggregate capture receipts.
+- `StructuredProjectionPlanV1` binds semantic component identities without
+  implementing their policy. Attempt receipts distinguish cancellation,
+  authoritative rejection, and selected causal state.
 - Receipts record mechanics and causal lineage, not model quality or semantic
   correctness.
 - Checkpoint metadata binds an opaque backend state; it does not make that

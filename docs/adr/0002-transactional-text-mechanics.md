@@ -316,6 +316,14 @@ llama.cpp still has no portable target-sampler encoding. Its receipt is
 serializable; the sampler clone is not. Logit Loom does not misrepresent the
 receipt alone as reconstructible native state.
 
+`GenerationPlanV2` and `StructuredProjectionController` separately complete
+the grammar/projection return without reinterpreting v1. They bind eager or
+lazy native grammar triggers, complete tokenizer piece/EOG identity,
+caller-owned compiler/validator/feedback implementations, byte-exact
+candidate decisions, authoritative validation, exact rejection/cancellation
+restore, and a bounded one-call-per-attempt retry surface. The controller
+contains callback failures and has no automatic retry policy.
+
 One acceptance item remains deliberately open: activation graph execution,
 MTP, EAGLE-3, and capture-restore-capture continuation still require opt-in
 accelerator-backed fixtures using caller-supplied compatible artifacts.

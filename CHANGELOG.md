@@ -177,6 +177,10 @@ include breaking API changes.
 - `GenerationPlanV2` adds bounded eager/lazy grammar activation with exact
   ordered pattern/token triggers while preserving every v1 generation shape
   and digest unchanged.
+- Structured projection now binds caller-owned compiler, validator, grammar,
+  and exact-byte feedback identities; the llama.cpp controller restores one
+  exact boundary after cancellation or rejection and exposes only
+  caller-explicit bounded retries.
 - Transform invocations now require consecutive zero-based steps, and
   backend-selected candidate views reject duplicate token identifiers.
 - Observer delivery now requires a preceding poll, enforces the requested

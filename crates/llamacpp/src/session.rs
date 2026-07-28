@@ -1088,7 +1088,7 @@ impl<'model> Session<'model> {
         Ok(())
     }
 
-    fn decode_tokens(
+    pub(crate) fn decode_tokens(
         &mut self,
         tokens: &[TokenId],
         phase: ActivationPhaseV1,

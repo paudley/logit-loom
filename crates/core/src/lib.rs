@@ -14,6 +14,7 @@ mod sampling;
 mod speculation;
 mod state;
 mod steering;
+mod structured;
 mod text_mechanics;
 mod token;
 mod transform;
@@ -38,6 +39,7 @@ pub use sampling::{
 pub use speculation::*;
 pub use state::CheckpointReceipt;
 pub use steering::{ControlVectorSpec, LoraSpec, SteeringAction, SteeringKind, SteeringReceipt};
+pub use structured::*;
 pub use text_mechanics::{
     MAX_SPECULATIVE_TOKENS, MAX_TEXT_MECHANICS_CAPTURES, MAX_TEXT_MECHANICS_LORAS,
     TextMechanicsCleanupReceiptV2, TextMechanicsPlanV1, TextMechanicsPlanV2,

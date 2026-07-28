@@ -24,6 +24,12 @@ pub enum Error {
     /// A controlled-prefill observer failed.
     #[error(transparent)]
     PrefillObserver(#[from] PrefillObserverError),
+    /// A structured exact-byte feedback callback failed or panicked.
+    #[error("structured byte feedback failed: {0}")]
+    StructuredFeedback(String),
+    /// A structured authoritative validator failed or panicked.
+    #[error("structured validator failed: {0}")]
+    StructuredValidator(String),
     /// A caller supplied an invalid bounded argument.
     #[error("invalid argument: {0}")]
     Invalid(String),

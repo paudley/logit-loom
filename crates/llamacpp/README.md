@@ -67,6 +67,22 @@ when the complete output is expected to be valid UTF-8.
 `Model::tokenize` rejects NUL bytes and inputs larger than
 `MAX_TOKENIZATION_BYTES` before calling the native binding.
 
+## Structured projection
+
+`StructuredProjectionController` captures one exact prefilled causal boundary,
+builds a content-identified table of every tokenizer ID, exact piece bytes, and
+EOG classification, and runs eager or lazy native grammar together with
+caller-identified exact-byte feedback. An installed authoritative validator
+then either selects the complete output or restores the boundary.
+
+`attempt` performs exactly one attempt. It never retries internally.
+Cancellation, validation rejection, feedback errors, validator errors, and
+contained callback panics restore the common checkpoint when native state
+remains recoverable. The caller may then explicitly call `attempt` again
+within the plan bound. Compiler and validator semantics remain outside Logit
+Loom; their exact implementation/configuration identities and content-free
+receipts are inside the public mechanical contract.
+
 ## Activation and speculation
 
 `ActivationConfiguration` validates exact tensor sites, bounded capture plans,

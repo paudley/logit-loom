@@ -10,6 +10,7 @@ mod sampler;
 mod session;
 mod speculation;
 mod steering;
+mod structured;
 
 pub use activation::{
     ActivationCaptureOutput, ActivationConfiguration, ActivationProgramOutput,
@@ -27,6 +28,13 @@ pub use speculation::{
 };
 pub use steering::{
     ControlVector, ControlVectorScope, LoraAdapter, LoraApplication, LoraScope, SteeringScope,
+};
+pub use structured::{
+    ByteFeedback, ByteFeedbackCandidate, ByteFeedbackError, InstalledByteFeedback,
+    InstalledStructuredValidator, MAX_STRUCTURED_TOKENIZER_TABLE_BYTES,
+    MAX_STRUCTURED_VALIDATION_EVIDENCE_BYTES, StructuredAttemptOutput,
+    StructuredProjectionController, StructuredValidationContext, StructuredValidationOutcome,
+    StructuredValidator, StructuredValidatorError,
 };
 
 /// Exact native Rust binding version used by this adapter release.

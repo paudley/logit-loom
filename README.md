@@ -41,6 +41,10 @@ execution, and native details isolated in an adapter.
   bytes only after native admission, then implement logging, counters,
   cooperative stops, or application-specific control flow without assuming
   that each token is valid UTF-8.
+- **Recover structured projection attempts exactly.** Bind caller-owned
+  compiler, validator, grammar, and byte-feedback identities; restore one
+  causal checkpoint after cancellation or rejection; and let the caller
+  explicitly choose each retry without an internal retry loop.
 - **Record mechanical provenance.** Serialize bounded plans and retain
   content-bound receipts for configuration, lineage, and token-accounting
   checks. Receipts describe what mechanics ran; they do not judge the generated
