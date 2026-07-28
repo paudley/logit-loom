@@ -57,11 +57,12 @@ failure therefore cannot leave a partially initialized routed output.
 `ImageProgramPlanV1`. Its backend seam addresses only validated logical value
 numbers, so native arena handles remain private. The driver owns exact stage
 order, liveness-derived release calls, pre-start/between-stage/post-Euler
-cancellation terminals, clean rejected-stage receipts, output
-materialization checks, fixed-point receipt serialization, atomic output
-publication, cleanup disposition, placement/transfer measurements, and
-poisoning on uncertainty. Model-free fake-arena tests exercise those mechanics
-without loading a companion library or model.
+cancellation terminals, clean rejected-stage receipts, direct materialization
+into caller-owned output allocations, fixed-point receipt serialization,
+atomic initialized-prefix publication, cleanup disposition,
+placement/transfer measurements, and poisoning on uncertainty. Model-free
+fake-arena tests exercise those mechanics without loading a companion library
+or model.
 
 `SdcppResidentProgram` implements that backend over the mandatory
 stable-diffusion.cpp program ABI v3. One arena can execute multiple ordered

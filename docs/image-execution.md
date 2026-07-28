@@ -54,6 +54,11 @@ lowering, arena driver, receipts, and failure paths model-free; the retained
 companion build validates the exact C++ patch without loading a model. Live
 execution remains a separate opt-in acceptance boundary.
 
+Routed native values copy directly into their caller-owned output allocations.
+The driver verifies those uncommitted prefixes, confirms cleanup, and only
+then publishes their initialized lengths; it does not stage a second complete
+image or tensor allocation.
+
 ## Whole-plan order
 
 For an accepted `ImageExecutionPlanV3`, the stable-diffusion.cpp executor

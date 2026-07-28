@@ -101,12 +101,22 @@ pub trait ResidentImageProgramBackend {
         cancellation: &dyn CancellationProbe,
     ) -> Result<ResidentProgramStageTerminal>;
 
-    /// Copies one explicitly routed serializable value into host-owned bytes.
+    /// Copies one explicitly routed serializable value directly into the
+    /// caller-owned output allocation and returns its initialized length.
+    ///
+    /// The driver does not publish that initialized prefix until every value
+    /// is verified and program cleanup succeeds.
     ///
     /// # Errors
     ///
-    /// Returns an error for an absent, stale, released, or incompatible value.
-    fn materialize_value(&mut self, plan: &ImageProgramPlanV1, value: u16) -> Result<Vec<u8>>;
+    /// Returns an error for an absent, stale, released, incompatible, or
+    /// under-sized output allocation.
+    fn materialize_value(
+        &mut self,
+        plan: &ImageProgramPlanV1,
+        value: u16,
+        output: &mut [u8],
+    ) -> Result<usize>;
 
     /// Releases one logical value at its canonical final-consumer boundary.
     ///
@@ -255,8 +265,8 @@ impl<B: ResidentImageProgramBackend> ResidentImageProgramDriver<B> {
             }
         }
 
-        let payloads = match self.materialize_outputs(plan, inputs, &state) {
-            Ok(payloads) => payloads,
+        let initialized = match self.materialize_outputs(plan, inputs, outputs, &state) {
+            Ok(initialized) => initialized,
             Err(error) => {
                 if let Err(cleanup) = self.backend.finish_program(plan.cleanup) {
                     self.backend.poison();
@@ -283,20 +293,30 @@ impl<B: ResidentImageProgramBackend> ResidentImageProgramDriver<B> {
             }
         };
         state.finish(finish);
-        complete_outputs(plan, outputs, payloads, state)
+        complete_outputs(plan, outputs, initialized, state)
     }
 
     fn materialize_outputs(
         &mut self,
         plan: &ImageProgramPlanV1,
         inputs: &[InputBuffer<'_>],
+        outputs: &mut [OutputBuffer<'_>],
         state: &DriverState,
-    ) -> Result<Vec<Option<Vec<u8>>>> {
-        let mut payloads = Vec::with_capacity(plan.outputs.len());
-        for route in &plan.outputs {
+    ) -> Result<Vec<Option<usize>>> {
+        let mut initialized = Vec::with_capacity(plan.outputs.len());
+        for (route, output) in plan.outputs.iter().zip(outputs) {
             match route.source {
                 ImageProgramOutputSourceV1::Value { value } => {
-                    let bytes = self.backend.materialize_value(plan, value)?;
+                    let written =
+                        self.backend
+                            .materialize_value(plan, value, output.bytes_mut())?;
+                    if written == 0 || written > output.bytes_mut().len() {
+                        return Err(Error::Output(format!(
+                            "program output route {} has an invalid initialized length",
+                            route.route
+                        )));
+                    }
+                    let bytes = &output.bytes_mut()[..written];
                     let expected = state.contents.get(&value).ok_or_else(|| {
                         Error::Incompatible(format!(
                             "program output value {value} has no published content"
@@ -307,7 +327,7 @@ impl<B: ResidentImageProgramBackend> ResidentImageProgramDriver<B> {
                         .iter()
                         .position(|input| input.value == value)
                         .map_or_else(
-                            || image_program_value_content(&bytes) == *expected,
+                            || image_program_value_content(bytes) == *expected,
                             |input| inputs[input].bytes() == bytes,
                         );
                     if !content_matches {
@@ -323,12 +343,12 @@ impl<B: ResidentImageProgramBackend> ResidentImageProgramDriver<B> {
                             route.route
                         )));
                     }
-                    payloads.push(Some(bytes));
+                    initialized.push(Some(written));
                 }
-                ImageProgramOutputSourceV1::ProgramReceipt => payloads.push(None),
+                ImageProgramOutputSourceV1::ProgramReceipt => initialized.push(None),
             }
         }
-        Ok(payloads)
+        Ok(initialized)
     }
 
     fn finish_terminal(
@@ -613,14 +633,14 @@ fn release_after<B: ResidentImageProgramBackend>(
 fn complete_outputs(
     plan: &ImageProgramPlanV1,
     outputs: &mut [OutputBuffer<'_>],
-    mut payloads: Vec<Option<Vec<u8>>>,
+    mut initialized: Vec<Option<usize>>,
     mut state: DriverState,
 ) -> Result<ResidentImageProgramExecution> {
-    for (route, payload) in plan.outputs.iter().zip(&payloads) {
-        if let Some(payload) = payload {
+    for (route, written) in plan.outputs.iter().zip(&initialized) {
+        if let Some(written) = written {
             let ImageProgramOutputSourceV1::Value { value } = route.source else {
                 return Err(Error::Incompatible(
-                    "program receipt route unexpectedly carried a value payload".to_owned(),
+                    "program receipt route unexpectedly carried an initialized prefix".to_owned(),
                 ));
             };
             let content = state.contents.get(&value).cloned().ok_or_else(|| {
@@ -632,7 +652,7 @@ fn complete_outputs(
                 route: route.route,
                 allocation: route.buffer.identity.clone(),
                 content: Some(content),
-                bytes_written: u64::try_from(payload.len())
+                bytes_written: u64::try_from(*written)
                     .map_err(|_| Error::Output("program output exceeds u64".to_owned()))?,
             });
         } else {
@@ -655,21 +675,21 @@ fn complete_outputs(
             "serialized program receipt exceeds its output allocation".to_owned(),
         ));
     }
-    payloads[receipt_route] = Some(receipt_bytes);
+    outputs[receipt_route].bytes_mut()[..receipt_bytes.len()].copy_from_slice(&receipt_bytes);
+    initialized[receipt_route] = Some(receipt_bytes.len());
     let output_receipts = state.outputs.clone();
     let execution = state.outcome(plan, ImageProgramTerminalV1::Completed, output_receipts)?;
-    for (output, payload) in outputs.iter_mut().zip(payloads) {
-        let payload = payload.ok_or_else(|| {
-            Error::Incompatible("completed program output payload is absent".to_owned())
+    for (output, written) in outputs.iter_mut().zip(initialized) {
+        let written = written.ok_or_else(|| {
+            Error::Incompatible("completed program output prefix is absent".to_owned())
         })?;
-        if payload.len() > output.bytes_mut().len() {
+        if written > output.bytes_mut().len() {
             return Err(Error::Output(
                 "program output exceeds its caller-owned allocation".to_owned(),
             ));
         }
-        output.bytes_mut()[..payload.len()].copy_from_slice(&payload);
         output
-            .set_written(payload.len())
+            .set_written(written)
             .map_err(|error| Error::Output(error.to_string()))?;
     }
     Ok(execution)
@@ -953,12 +973,23 @@ mod tests {
             ))
         }
 
-        fn materialize_value(&mut self, _plan: &ImageProgramPlanV1, value: u16) -> Result<Vec<u8>> {
-            let mut bytes = self.value(value)?.to_vec();
-            if self.fault == FakeFault::Materialization {
-                bytes[0] ^= 1;
+        fn materialize_value(
+            &mut self,
+            _plan: &ImageProgramPlanV1,
+            value: u16,
+            output: &mut [u8],
+        ) -> Result<usize> {
+            let bytes = self.value(value)?;
+            if bytes.len() > output.len() {
+                return Err(Error::Output(
+                    "fake materialization output is undersized".to_owned(),
+                ));
             }
-            Ok(bytes)
+            output[..bytes.len()].copy_from_slice(bytes);
+            if self.fault == FakeFault::Materialization {
+                output[0] ^= 1;
+            }
+            Ok(bytes.len())
         }
 
         fn release_value(&mut self, value: u16) -> Result<()> {
@@ -1433,6 +1464,6 @@ mod tests {
         backend
             .finish_program(ImageCleanupPolicy::ClearSession)
             .unwrap();
-        assert!(backend.materialize_value(&plan, 1).is_err());
+        assert!(backend.materialize_value(&plan, 1, &mut [0_u8; 3]).is_err());
     }
 }

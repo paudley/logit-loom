@@ -115,6 +115,11 @@ The executor computes value liveness before execution. A native value is
 released immediately after its final stage or output consumer unless an
 explicit retained output requires materialization.
 
+Explicitly routed values materialize directly into caller-owned output
+allocations. Their initialized prefixes remain unpublished until content
+verification and program cleanup both succeed; the driver does not allocate a
+second complete routed-value buffer.
+
 ### Branching and deterministic joins
 
 Independent repairs may consume the same earlier image. Their outputs are

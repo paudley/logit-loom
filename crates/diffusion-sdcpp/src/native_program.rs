@@ -776,8 +776,13 @@ impl<R: ResidentArtifactPathResolver> ResidentImageProgramBackend for SdcppResid
         ))
     }
 
-    fn materialize_value(&mut self, _plan: &ImageProgramPlanV1, value: u16) -> Result<Vec<u8>> {
-        self.copy_handle(self.handle(value)?)
+    fn materialize_value(
+        &mut self,
+        _plan: &ImageProgramPlanV1,
+        value: u16,
+        output: &mut [u8],
+    ) -> Result<usize> {
+        self.copy_handle_into(self.handle(value)?, output)
     }
 
     fn release_value(&mut self, value: u16) -> Result<()> {
@@ -1698,6 +1703,24 @@ impl<R: ResidentArtifactPathResolver> SdcppResidentProgram<'_, R> {
         let length = usize::try_from(descriptor.bytes)
             .map_err(|_| Error::Invalid("resident value exceeds usize".to_owned()))?;
         let mut bytes = vec![0_u8; length];
+        let written = self.copy_handle_into(handle, &mut bytes)?;
+        if written != length {
+            return Err(Error::Incompatible(
+                "resident value materialization length differs".to_owned(),
+            ));
+        }
+        Ok(bytes)
+    }
+
+    fn copy_handle_into(&self, handle: ValueHandleV3, output: &mut [u8]) -> Result<usize> {
+        let descriptor = self.descriptor(handle)?;
+        let length = usize::try_from(descriptor.bytes)
+            .map_err(|_| Error::Invalid("resident value exceeds usize".to_owned()))?;
+        if output.len() < length {
+            return Err(Error::Output(
+                "resident caller-owned output allocation is undersized".to_owned(),
+            ));
+        }
         let mut written = 0;
         // SAFETY: The exact-sized writable allocation and live handle remain
         // valid for this synchronous copy.
@@ -1705,7 +1728,7 @@ impl<R: ResidentArtifactPathResolver> SdcppResidentProgram<'_, R> {
             self.runtime.api.program_copy_v3(
                 self.arena()?.as_ptr(),
                 handle,
-                &mut bytes,
+                &mut output[..length],
                 &mut written,
             )
         };
@@ -1714,7 +1737,7 @@ impl<R: ResidentArtifactPathResolver> SdcppResidentProgram<'_, R> {
                 "resident value materialization length differs".to_owned(),
             ));
         }
-        Ok(bytes)
+        Ok(written)
     }
 
     fn require_import_status(status: i32, value: u16) -> Result<()> {
