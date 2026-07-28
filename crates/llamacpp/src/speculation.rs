@@ -324,18 +324,12 @@ fn validate_request(
         ));
     }
     validate_native_model_pair(target, draft, request.speculation.mechanism)?;
-    let verify_rows = request
-        .speculation
-        .maximum_draft_tokens
-        .checked_add(1)
-        .ok_or_else(|| Error::Invalid("verification batch bound overflowed".to_owned()))?;
-    if request.options.target.batch_size < verify_rows
-        || request.options.draft.batch_size < verify_rows
-    {
-        return Err(Error::Invalid(format!(
-            "target and draft batch sizes must each hold {verify_rows} verification rows"
-        )));
-    }
+    validate_speculative_context_capacities(
+        request.speculation.maximum_draft_tokens,
+        request.options,
+        target.native.is_recurrent() || target.native.is_hybrid(),
+        draft.native.is_recurrent() || draft.native.is_hybrid(),
+    )?;
     let prompt = u64::try_from(request.prompt.len())
         .map_err(|_| Error::Invalid("prompt length exceeds u64".to_owned()))?;
     let required_context = prompt
@@ -347,6 +341,30 @@ fn validate_request(
     {
         return Err(Error::Invalid(format!(
             "target and draft contexts must each hold prompt + generation + draft headroom ({required_context} tokens)"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_speculative_context_capacities(
+    maximum_draft_tokens: u32,
+    options: SpeculativeSessionOptions,
+    target_recurrent_or_hybrid: bool,
+    draft_recurrent_or_hybrid: bool,
+) -> Result<(), Error> {
+    let verify_rows = maximum_draft_tokens
+        .checked_add(1)
+        .ok_or_else(|| Error::Invalid("verification batch bound overflowed".to_owned()))?;
+    if options.target.batch_size < verify_rows || options.draft.batch_size < verify_rows {
+        return Err(Error::Invalid(format!(
+            "target and draft batch sizes must each hold {verify_rows} verification rows"
+        )));
+    }
+    if (target_recurrent_or_hybrid && options.target.micro_batch_size < verify_rows)
+        || (draft_recurrent_or_hybrid && options.draft.micro_batch_size < verify_rows)
+    {
+        return Err(Error::Invalid(format!(
+            "recurrent target or draft micro-batches must each hold {verify_rows} rollback rows"
         )));
     }
     Ok(())
@@ -1392,6 +1410,40 @@ mod tests {
         let options = SpeculativeSessionOptions::default();
         assert_eq!(options.target.context_size, NonZeroU32::new(4_096).unwrap());
         assert_eq!(options.target, options.draft);
+    }
+
+    #[test]
+    fn speculative_decode_capacity_is_validated_before_context_allocation() {
+        let options = SpeculativeSessionOptions {
+            target: SessionOptions {
+                batch_size: 4,
+                micro_batch_size: 1,
+                ..SessionOptions::default()
+            },
+            draft: SessionOptions {
+                batch_size: 4,
+                micro_batch_size: 4,
+                ..SessionOptions::default()
+            },
+        };
+        assert!(validate_speculative_context_capacities(3, options, false, false).is_ok());
+        assert!(validate_speculative_context_capacities(3, options, true, false).is_err());
+        assert!(
+            validate_speculative_context_capacities(
+                3,
+                SpeculativeSessionOptions {
+                    target: SessionOptions {
+                        batch_size: 3,
+                        ..options.target
+                    },
+                    ..options
+                },
+                false,
+                false,
+            )
+            .is_err()
+        );
+        assert!(validate_speculative_context_capacities(u32::MAX, options, false, false).is_err());
     }
 
     #[test]
