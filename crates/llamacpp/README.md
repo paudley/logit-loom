@@ -151,6 +151,15 @@ expose persistent speculative checkpoint restore because llama.cpp provides
 target sampler continuation only as an opaque in-process clone. It does not
 emit a partial serializable checkpoint.
 
+## Coordinator integration
+
+`Runtime::native_backend` and `Model::native_model` provide read-only borrows
+for an in-process coordinator that must compose other llama.cpp mechanics,
+such as multimodal projection or embeddings, with the same backend and loaded
+model. Logit Loom retains backend and model lifecycle ownership. Calls made
+through those handles are outside Logit Loom's plan and receipt surface; a
+coordinator must give those calls their own bounded contract and evidence.
+
 Checkpoints bind the model bytes, exact safe-binding source, literal llama.cpp
 revision, adapter build identity, and exact session allocation options; native
 state is opaque and is not a portable interchange format. A failed automatic

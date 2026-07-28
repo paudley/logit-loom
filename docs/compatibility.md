@@ -14,6 +14,13 @@ separate compatibility authority. Its `LoomSession` preserves the adapter's
 single-owner lifetime and checkpoint rules. Applications needing independent
 native runtime/model ownership should use `logit-loom-llamacpp` directly.
 
+The llama.cpp adapter also exposes read-only native backend and model borrows
+for coordinators that must compose non-Logit-Loom mechanics in the same
+process without initializing or loading a second native owner. Those calls
+remain outside Logit Loom's plan and receipt identities. The adapter retains
+backend/model lifecycle ownership, and no raw pointer or mutable native handle
+is exposed.
+
 `logit-loom-diffusion` is the backend-neutral image mechanics layer.
 `logit-loom-diffusion-sdcpp` is a separate native adapter; it is not hidden
 behind the text runtime.

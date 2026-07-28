@@ -58,6 +58,16 @@ impl Runtime {
         &self.compatibility
     }
 
+    /// Borrows the initialized native backend for coordinator-owned mechanics
+    /// that are outside Logit Loom's text receipt surface.
+    ///
+    /// This does not transfer backend lifecycle authority. Operations issued
+    /// through the returned handle are not covered by Logit Loom plans or
+    /// receipts.
+    pub const fn native_backend(&self) -> &LlamaBackend {
+        &self.native
+    }
+
     /// Suppresses llama.cpp log output for this process.
     pub fn silence_native_logs(&mut self) {
         self.native.void_logs();
@@ -243,6 +253,16 @@ impl Model {
     /// Returns content- and backend-bound text topology.
     pub const fn topology(&self) -> &TextModelTopologyV1 {
         &self.topology
+    }
+
+    /// Borrows the loaded native model for coordinator-owned mechanics that
+    /// are outside Logit Loom's text receipt surface.
+    ///
+    /// This does not transfer model lifecycle authority. Operations issued
+    /// through the returned handle are not covered by Logit Loom plans or
+    /// receipts.
+    pub const fn native_model(&self) -> &LlamaModel {
+        &self.native
     }
 
     /// Returns the exact llama.cpp graph-selector implementation identity.
