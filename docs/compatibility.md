@@ -230,12 +230,16 @@ because its resulting backend state is unknown.
 
 The successor binding can capture target sequence state, draft sequence state,
 and versioned MTP or EAGLE-3 implementation state at a quiescent boundary.
-`SpeculativeCheckpointReceiptV1` describes the complete envelope that a
-higher-level owner must authenticate. The current `generate_speculative`
-operation does not expose persistent checkpoint restore because llama.cpp
-offers an exact in-process sampler clone but no portable encoding for that
-sampler state. Logit Loom does not substitute an incomplete serializable
-checkpoint.
+`generate_speculative_checkpointed` adds the exact in-process target-sampler
+clone, activation configuration, stop-prefix state, causal history, completed
+boundaries, and parent lineage. `resume_speculative_checkpointed` authenticates
+that complete envelope before allocation and clones the sampler for each
+independent branch.
+
+`SpeculativeCheckpointReceiptV1` is portable evidence, not a portable
+checkpoint container. The opaque sampler has no encoding and the snapshot is
+therefore process-local and thread-affine. Logit Loom does not substitute the
+serializable receipt for unavailable native sampler state.
 
 Diffusion checkpoints are exact post-Euler host `f32` bytes bound to the full
 `DiffusionPlan`, companion/runtime identity, and completed step. Restore is

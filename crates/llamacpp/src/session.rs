@@ -308,7 +308,7 @@ impl StateSnapshot {
         (self.bytes, self.tokens, self.receipt)
     }
 
-    fn validate_contents(&self) -> Result<(), Error> {
+    pub(crate) fn validate_contents(&self) -> Result<(), Error> {
         if self.bytes.is_empty() {
             return Err(Error::Incompatible(
                 "checkpoint state bytes must not be empty".to_owned(),
@@ -844,6 +844,23 @@ impl<'model> Session<'model> {
                 "clear active steering before capturing a checkpoint".to_owned(),
             ));
         }
+        self.capture_state_inner()
+    }
+
+    pub(crate) fn capture_envelope_state(&mut self) -> Result<StateSnapshot, Error> {
+        self.ensure_healthy()?;
+        if !self.active_steering.is_empty() {
+            return Err(Error::Invalid(
+                "clear active steering before capturing an aggregate checkpoint".to_owned(),
+            ));
+        }
+        if let Some(activation) = self.activation.as_mut() {
+            activation.reset()?;
+        }
+        self.capture_state_inner()
+    }
+
+    fn capture_state_inner(&mut self) -> Result<StateSnapshot, Error> {
         let size = self.context.state_get_size();
         if size == 0 {
             return Err(Error::Native(
@@ -888,6 +905,46 @@ impl<'model> Session<'model> {
                 "clear active steering before restoring a checkpoint".to_owned(),
             ));
         }
+        self.restore_state_inner(snapshot)?;
+        if let Some(last_token) = snapshot.tokens.last().copied()
+            && let Err(error) =
+                self.refresh_logits_after_restore(last_token, snapshot.receipt.position, None)
+        {
+            self.record_poison(&error);
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    pub(crate) fn restore_envelope_state(
+        &mut self,
+        snapshot: &StateSnapshot,
+        refresh_phase: Option<ActivationPhaseV1>,
+    ) -> Result<(), Error> {
+        self.ensure_healthy()?;
+        if !self.active_steering.is_empty() {
+            return Err(Error::Invalid(
+                "clear active steering before restoring an aggregate checkpoint".to_owned(),
+            ));
+        }
+        self.restore_state_inner(snapshot)?;
+        if let Some(last_token) = snapshot.tokens.last().copied()
+            && let Err(error) = self.refresh_logits_after_restore(
+                last_token,
+                snapshot.receipt.position,
+                refresh_phase,
+            )
+        {
+            self.record_poison(&error);
+            return Err(error);
+        }
+        if let Some(activation) = self.activation.as_mut() {
+            activation.reset()?;
+        }
+        Ok(())
+    }
+
+    fn restore_state_inner(&mut self, snapshot: &StateSnapshot) -> Result<(), Error> {
         snapshot.validate_contents()?;
         if snapshot.receipt.model != *self.model.artifact_digest()
             || snapshot.receipt.backend != self.backend
@@ -911,13 +968,6 @@ impl<'model> Session<'model> {
             self.record_poison(&error);
             return Err(error);
         }
-        if let Some(last_token) = snapshot.tokens.last().copied()
-            && let Err(error) =
-                self.refresh_logits_after_restore(last_token, snapshot.receipt.position)
-        {
-            self.record_poison(&error);
-            return Err(error);
-        }
         self.token_history.clone_from(&snapshot.tokens);
         self.position = snapshot.receipt.position;
         Ok(())
@@ -927,6 +977,7 @@ impl<'model> Session<'model> {
         &mut self,
         last_token: TokenId,
         position: u64,
+        activation_phase: Option<ActivationPhaseV1>,
     ) -> Result<(), Error> {
         let Some((last_position, end_position)) = checkpoint_logit_refresh_range(position)? else {
             return Ok(());
@@ -953,7 +1004,39 @@ impl<'model> Session<'model> {
                 true,
             )
             .map_err(native)?;
-        self.context.decode(&mut batch).map_err(native)
+        if let (Some(activation), Some(phase)) = (self.activation.as_ref(), activation_phase) {
+            activation.begin_decode(phase, false, ActivationTelemetryDispositionV1::Admitted)?;
+        }
+        let decode_result = self.context.decode(&mut batch);
+        let callback_state = match (self.activation.as_ref(), activation_phase) {
+            (Some(activation), Some(_)) => Some(activation.end_decode()),
+            _ => None,
+        };
+        if let Err(error) = decode_result {
+            return Err(native(error));
+        }
+        let active_decode = match callback_state {
+            Some(result) => Some(result?),
+            None => None,
+        };
+        if let Some(active_decode) = active_decode {
+            let captures = self
+                .context
+                .tensor_transactions_mut()
+                .ok_or_else(|| {
+                    Error::Poisoned(
+                        "activation context lost its tensor transaction state".to_owned(),
+                    )
+                })?
+                .take_captures();
+            self.activation
+                .as_mut()
+                .ok_or_else(|| {
+                    Error::Poisoned("activation controller became unavailable".to_owned())
+                })?
+                .consume_captures(captures, active_decode)?;
+        }
+        Ok(())
     }
 
     fn decode_tokens(

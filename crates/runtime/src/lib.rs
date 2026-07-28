@@ -25,9 +25,11 @@ pub use logit_loom_llamacpp::{
     DevicePolicy, GenerationOutput, LLAMA_CPP_BINDING_SOURCE_REVISION, LLAMA_CPP_BINDING_VERSION,
     LLAMA_CPP_REVISION, LlamaCppTensorProfile, LoraAdapter, LoraApplication,
     MAX_TOKENIZATION_BYTES, ModelOptions, PrefillOutput, SessionOptions,
-    SpeculativeActivationOutput, SpeculativeActivations, SpeculativeGenerationOutput,
-    SpeculativeRequest, SpeculativeSessionOptions, StateSnapshot, SteeringScope, Tokenization,
-    generate_speculative, speculation_implementation_identity,
+    SpeculativeActivationOutput, SpeculativeActivations, SpeculativeCheckpointOutput,
+    SpeculativeCheckpointRequest, SpeculativeContinuationRequest, SpeculativeGenerationOutput,
+    SpeculativeRequest, SpeculativeSessionOptions, SpeculativeStateSnapshot, StateSnapshot,
+    SteeringScope, Tokenization, generate_speculative, generate_speculative_checkpointed,
+    resume_speculative_checkpointed, speculation_implementation_identity,
 };
 pub use logit_loom_models::ArtifactReceipt as ModelArtifactReceipt;
 

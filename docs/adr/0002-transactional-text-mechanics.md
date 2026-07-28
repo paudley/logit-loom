@@ -2,8 +2,7 @@
 
 # ADR 0002: transactional text mechanics over llama.cpp
 
-- Status: accepted; source implementation complete except persistent
-  speculative checkpoint restore; live acceptance pending
+- Status: accepted; source implementation complete; live acceptance pending
 - Decision date: 2026-07-27
 - Reviewed binding: local `llama-cpp-4` 0.4.2 successor at
   `d76356b9725a3736212b3bfd16c66fc80c995c29`
@@ -301,16 +300,26 @@ above. It owns bounded tensor transactions, native begin/end decode hooks,
 exclusive-lifetime speculative wrappers, contained C++ lifecycle failures,
 and versioned MTP/EAGLE-3 implementation-state capture and restore.
 
-Two acceptance items remain deliberately open:
+`generate_speculative_checkpointed` now captures the complete quiescent
+process-local envelope. It retains target and draft context state, versioned
+MTP/EAGLE-3 implementation state, an independent opaque target-sampler clone,
+cross-operation stop-prefix state, exact activation configuration, causal
+history, completed-boundary accounting, and parent lineage.
+`resume_speculative_checkpointed` validates every identity, state byte count,
+model, topology, activation, context option, generation plan, and parent
+before context allocation. It restores contexts, reconstructs the target
+logit boundary, restores native speculative state, and clones the sampler so
+one checkpoint can create independent branches.
 
-1. `generate_speculative` does not yet expose a persistent checkpoint/restore
-   façade. The complete envelope is specified and the native target, draft,
-   and implementation state is available, but llama.cpp exposes target sampler
-   continuation only as an opaque in-process clone. No incomplete portable
-   checkpoint is advertised.
-2. Activation graph execution, MTP, and EAGLE-3 still require opt-in
-   accelerator-backed fixtures using caller-supplied compatible artifacts.
-   Model-free tests and adapter compilation are not live-model evidence.
+The checkpoint object is deliberately thread-affine and process-local because
+llama.cpp still has no portable target-sampler encoding. Its receipt is
+serializable; the sampler clone is not. Logit Loom does not misrepresent the
+receipt alone as reconstructible native state.
+
+One acceptance item remains deliberately open: activation graph execution,
+MTP, EAGLE-3, and capture-restore-capture continuation still require opt-in
+accelerator-backed fixtures using caller-supplied compatible artifacts.
+Model-free tests and adapter compilation are not live-model evidence.
 
 The local adjacent-path binding is suitable for implementation review, not a
 public crate release. It must land at an immutable public source for a
@@ -335,9 +344,9 @@ fails the operation; it does not make the compiled capability optional.
 
 ## Consequences
 
-- Logit Loom gains exact contracts for capture, runtime activation programs,
-  MTP, EAGLE-3, and their checkpoint envelope, plus one-shot native execution
-  for the first four mechanics.
+- Logit Loom gains exact contracts and native execution for capture, runtime
+  activation programs, MTP, EAGLE-3, and reusable process-local speculative
+  checkpoint branches.
 - The safe binding must land and be pinned before the adapter releases the new
   capability.
 - Exact graph-site profiles are renewed when llama.cpp or a model architecture

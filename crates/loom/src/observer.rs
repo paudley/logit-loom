@@ -124,6 +124,21 @@ impl ObserverSet {
         }
     }
 
+    /// Returns the identity of the exact ordered observer implementations.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when identity serialization fails.
+    pub fn identity(&self) -> Result<Digest, ObserverError> {
+        let implementations = self
+            .entries
+            .iter()
+            .map(|entry| &entry.implementation)
+            .collect::<Vec<_>>();
+        Digest::of_serializable("observer-set-v1", &implementations)
+            .map_err(|error| ObserverError::new(error.to_string()))
+    }
+
     /// Resets every observer for a new generation call.
     ///
     /// # Errors
@@ -898,6 +913,29 @@ mod tests {
             )
         });
         assert!(ObserverSet::new(observers).is_err());
+    }
+
+    #[test]
+    fn observer_set_identity_binds_dispatch_order() {
+        let first = Digest::of_bytes("test-observer", b"first");
+        let second = Digest::of_bytes("test-observer", b"second");
+        let forward = ObserverSet::new([
+            (
+                first.clone(),
+                Box::new(Recorder(Vec::new())) as Box<dyn Observer>,
+            ),
+            (
+                second.clone(),
+                Box::new(Recorder(Vec::new())) as Box<dyn Observer>,
+            ),
+        ])
+        .unwrap();
+        let reverse = ObserverSet::new([
+            (second, Box::new(Recorder(Vec::new())) as Box<dyn Observer>),
+            (first, Box::new(Recorder(Vec::new())) as Box<dyn Observer>),
+        ])
+        .unwrap();
+        assert_ne!(forward.identity().unwrap(), reverse.identity().unwrap());
     }
 
     #[test]

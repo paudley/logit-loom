@@ -19,8 +19,10 @@ pub use error::Error;
 pub use model::{DevicePolicy, MAX_TOKENIZATION_BYTES, Model, ModelOptions, Runtime, Tokenization};
 pub use session::{GenerationOutput, PrefillOutput, Session, SessionOptions, StateSnapshot};
 pub use speculation::{
-    SpeculativeActivationOutput, SpeculativeActivations, SpeculativeGenerationOutput,
-    SpeculativeRequest, SpeculativeSessionOptions, generate_speculative,
+    SpeculativeActivationOutput, SpeculativeActivations, SpeculativeCheckpointOutput,
+    SpeculativeCheckpointRequest, SpeculativeContinuationRequest, SpeculativeGenerationOutput,
+    SpeculativeRequest, SpeculativeSessionOptions, SpeculativeStateSnapshot, generate_speculative,
+    generate_speculative_checkpointed, resume_speculative_checkpointed,
     speculation_implementation_identity,
 };
 pub use steering::{

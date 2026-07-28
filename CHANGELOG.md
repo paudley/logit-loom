@@ -88,6 +88,12 @@ include breaking API changes.
   admitted/rejected proposal receipts.
 - A caller-supplied-model MTP example that writes arbitrary generated token
   bytes without assuming UTF-8.
+- Reusable process-local MTP/EAGLE-3 checkpoints with exact target, draft,
+  implementation, opaque sampler, activation, stop-prefix, causal, boundary,
+  and parent lineage plus fail-before-allocation branch restore.
+- Ordered aggregate text steering that applies multiple `LoRA`s and an
+  optional control vector as one scope, rolls back partial application,
+  removes resources in reverse order, and poisons cleanup uncertainty.
 
 ### Changed
 

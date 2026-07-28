@@ -192,9 +192,11 @@ should construct the lower-level runtime and both `Model` values directly.
 
 No high-level call chooses tensor sites, mirrors a target activation program
 onto a draft, changes context allocation, or falls back to ordinary
-generation. The current speculative operation supports one sequence and does
-not expose persistent checkpoint restore; see the adapter guide and
-compatibility policy for the exact boundary.
+generation. The speculative operation supports one sequence. Its checkpoint
+façade creates reusable process-local branches from complete target, draft,
+implementation, sampler, activation, stop-prefix, and causal state; it does
+not claim a portable sampler encoding. See the adapter guide and compatibility
+policy for the exact boundary.
 
 ## Identities and escape hatches
 

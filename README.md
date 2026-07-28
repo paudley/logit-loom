@@ -205,13 +205,14 @@ receipts suitable for inspection or replay checks.
 - Exact byte token pieces rather than assumed UTF-8 fragments.
 - Native sampling plans for greedy, temperature, top-k, top-p, min-p, typical,
   repetition, DRY, Mirostat, logit bias, and grammar composition.
-- llama.cpp causal prefill, generation, checkpoint/restore, scoped LoRA, and
-  scoped control-vector integration.
+- llama.cpp causal prefill, generation, checkpoint/restore, ordered aggregate
+  LoRA/control-vector scopes, and fail-closed cleanup.
 - Topology-bound activation capture, deterministic content-free vector
   accumulation, and transactional scaled-add/projection-removal programs.
 - One-sequence target-authoritative MTP and EAGLE-3 generation with exact
   proposal boundaries, rejected-suffix rollback, optional independent
-  target/draft activation programs, and no ordinary-generation fallback.
+  target/draft activation programs, reusable process-local checkpoint
+  branches, and no ordinary-generation fallback.
 - An explicit higher-level local runtime with separate replace/append
   admission, bounded one-shot and stateful generation, control builders, and
   compatibility identity access.

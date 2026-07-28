@@ -251,12 +251,17 @@ prefix; the unobserved suffix is rolled back before the boundary receipt is
 committed. There is no fallback to ordinary generation.
 
 At every completed boundary the successor binding can expose exact target,
-draft, and versioned MTP/EAGLE-3 implementation state. The backend-neutral
-`SpeculativeCheckpointReceiptV1` defines the full authenticated envelope.
-`generate_speculative` is currently one-shot and does not expose persistent
-restore because target sampler continuation is available only as an opaque
-in-process native clone; it never labels the remaining native state as a
-complete portable checkpoint.
+draft, and versioned MTP/EAGLE-3 implementation state.
+`generate_speculative_checkpointed` retains those bytes with the opaque target
+sampler, activation configuration, stop-prefix state, causal history, boundary
+count, and parent lineage. `resume_speculative_checkpointed` validates the
+complete envelope before allocation and clones the sampler for an independent
+branch.
+
+`SpeculativeCheckpointReceiptV1` authenticates the envelope but cannot
+reconstruct it. Target sampler continuation remains an opaque in-process
+native clone, so the snapshot is thread-affine and process-local rather than a
+falsely portable checkpoint.
 
 ## Transactional transforms
 

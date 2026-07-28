@@ -145,11 +145,19 @@ cargo run -p logit-loom-llamacpp --example speculative_mtp \
   --features vulkan -- /path/to/mtp-model.gguf "Draft from here:"
 ```
 
-The successor binding exposes exact target, draft, and MTP/EAGLE-3
-implementation state at quiescent boundaries. This one-shot API does not yet
-expose persistent speculative checkpoint restore because llama.cpp provides
-target sampler continuation only as an opaque in-process clone. It does not
-emit a partial serializable checkpoint.
+`generate_speculative_checkpointed` captures exact target, draft, and
+MTP/EAGLE-3 implementation state at a quiescent boundary together with an
+opaque target-sampler clone, activation configuration, cross-operation stop
+state, and causal lineage. `resume_speculative_checkpointed` validates the
+complete parent before allocation, clones the sampler for an independent
+branch, restores contexts and implementation state, and captures the next
+boundary.
+
+The checkpoint object is process-local and thread-affine because llama.cpp
+provides no portable target-sampler encoding. Its
+`SpeculativeCheckpointReceiptV1` is serializable mechanical evidence, but the
+receipt alone cannot reconstruct the native sampler. No partial portable
+checkpoint is advertised.
 
 ## Coordinator integration
 

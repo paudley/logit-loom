@@ -19,10 +19,10 @@ It intentionally makes no model-quality or research-efficacy claims.
 | Topology-bound activation capture | `ActivationConfiguration`, `ActivationCaptureOutput` | Model-free topology/site/bound/retention tests plus compilation against the reviewed callback owner; graph execution is opt-in |
 | Transactional activation programs | `ActivationProgramV1`, `ActivationVectorBankV1`, llama.cpp activation runtime | Model-free accumulation, ordering, numeric, provisional-resolution, and transaction-staging tests; native tensor mutation and write-back are opt-in |
 | Target-authoritative speculation | `generate_speculative`, `SpeculationPlanV1`, MTP/EAGLE-3 receipts | Zero/partial/complete acceptance contracts, exact lifecycle unit tests, and adapter compilation against pinned llama.cpp HEAD; compatible-model execution is opt-in |
-| Speculative checkpoint envelope | `SpeculativeCheckpointReceiptV1`, successor binding state APIs | Model-free identity/bound checks and exact native target/draft/implementation-state APIs; the high-level persistent restore façade and sampler continuation fixture remain open |
+| Speculative checkpoint envelope | `generate_speculative_checkpointed`, `resume_speculative_checkpointed`, `SpeculativeCheckpointReceiptV1` | Complete process-local target/draft/implementation/sampler/activation/stop/lineage state, model-free identity and bound checks, and exact native state APIs; compatible-model continuation remains opt-in |
 | Checkpoint capture/restore | `StateSnapshot` | Reconstruction/accounting unit tests; native capture/restore is opt-in |
-| Scoped `LoRA` | `LoraScope` | Type/API compilation; model/adapter execution is opt-in |
-| Scoped control vectors | `ControlVectorScope` | Dimension/lifecycle code and type/API compilation; model execution is opt-in |
+| Scoped and ordered `LoRA` | `LoraScope`, `SteeringScope` | Aggregate preflight, ordered application, reverse cleanup, rollback, and type/API compilation; model/adapter execution is opt-in |
+| Scoped control vectors | `ControlVectorScope`, `SteeringScope` | Dimension/lifecycle, aggregate composition, rollback, and type/API compilation; model execution is opt-in |
 | Higher-level request and control construction | `GenerationRequest`, `PipelineBuilder`, `ObserversBuilder` | Model-free bounds, identity, transform, observer, and exact-byte tests |
 | Higher-level one-shot and stateful workflows | `Loom`, `LoomSession` | Complete type/API compilation and doctests; model execution is opt-in |
 | Typed higher-level steering scopes | `LoraSession`, `ControlVectorSession` | Type/API compilation; resource execution is opt-in |
