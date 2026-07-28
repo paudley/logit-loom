@@ -220,6 +220,11 @@ receipts suitable for inspection or replay checks.
 - Serializable whole-image plans plus a transport-neutral local-executor seam
   over exact borrowed inputs, caller-owned outputs, lifecycle state, cleanup
   receipts, and classified failures.
+- A default-built resident image-program contract over typed single-assignment
+  values, multiple native/VAE stages, deterministic joins, checkpoint
+  conversion, liveness-derived arena bounds, stage-prefix receipts, and
+  deployment measurements kept outside deterministic identity. Native
+  resident-program execution remains a separate adapter acceptance boundary.
 - An exact dynamic companion ABI for MiniT2I and Krea with transactional
   post-Euler state callbacks, deterministic-prefix checkpoints, explicit
   accelerator placement, per-step native timing outside deterministic

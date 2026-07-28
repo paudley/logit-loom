@@ -7,6 +7,8 @@ in [ADR 0001](adr/0001-stable-diffusion-runtime.md).
 Topology-bound text activation and target-authoritative speculation are
 recorded in
 [ADR 0002](adr/0002-transactional-text-mechanics.md).
+Bounded resident staged image programs are recorded in
+[ADR 0003](adr/0003-resident-image-programs.md).
 
 Logit Loom separates stable mechanics contracts from callback execution and
 from fast-moving model backends. Token candidates and diffusion tensors remain
@@ -89,6 +91,17 @@ owning a tensor runtime. Whole-image plans bind exact input slots and layouts,
 output format, placement, seed policy, schedule, ordered LoRAs, installed
 operators, and batched observations. They never represent pixels or latent
 elements as token IDs or logits.
+
+The default-built `ImageProgramPlanV1` family is a separate multi-native-stage
+contract. It numbers typed values canonically, requires one producer per
+value, permits only earlier-stage references, validates operation-specific
+types and geometry, derives release points and a conservative arena peak from
+value liveness, and binds exact output and receipt allocations. Deterministic
+receipts retain the completed-stage prefix and cleanup result; wall time,
+native time, placement, and transfers remain in a separate measurements
+record. No native pointer or arena handle enters a serialized value. The
+backend-neutral implementation and tests do not establish that the current
+stable-diffusion.cpp adapter executes this program family.
 
 The stable-diffusion.cpp adapter supports only the exact catalogued MiniT2I and
 Krea 2 component layouts. It dynamically loads companion ABI version 1 plus

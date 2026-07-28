@@ -44,7 +44,7 @@ pub enum ImageOperation {
 }
 
 impl ImageOperation {
-    const fn uses_diffusion(self) -> bool {
+    pub(crate) const fn uses_diffusion(self) -> bool {
         matches!(
             self,
             Self::TextToImage | Self::ImageToImage | Self::Inpaint | Self::Outpaint
@@ -457,7 +457,7 @@ pub struct OperatorInvocation {
 }
 
 impl OperatorInvocation {
-    fn validate_for(&self, step_count: usize) -> Result<(), CoreError> {
+    pub(crate) fn validate_for(&self, step_count: usize) -> Result<(), CoreError> {
         self.selector.validate()?;
         self.steps.validate_for(step_count)?;
         if self.controls.len() > MAX_OPERATOR_CONTROL_BYTES {
@@ -495,7 +495,7 @@ pub struct ObservationRequest {
 }
 
 impl ObservationRequest {
-    fn validate_for(&self, step_count: usize) -> Result<(), CoreError> {
+    pub(crate) fn validate_for(&self, step_count: usize) -> Result<(), CoreError> {
         self.selector.validate()?;
         self.steps.validate_for(step_count)
     }

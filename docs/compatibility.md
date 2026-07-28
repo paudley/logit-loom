@@ -63,7 +63,11 @@ Diffusion contracts use distinct domains including
 `diffusion-channel-bias-v1`, and
 `sdcpp-deterministic-prefix-replay-v1`. Whole-image and worker-local contracts
 add `executor-buffer-spec-v1`, `image-execution-plan-v1`, and
-`image-execution-receipt-v1`. Image ABI v2 requests use
+`image-execution-receipt-v1`. Resident staged programs add
+`image-program-stage-operation-v1`, `image-program-plan-v1`, and
+`image-program-receipt-v1`; their deployment measurements are deliberately
+excluded from those deterministic identities. Existing image-execution
+domains are not reinterpreted. Image ABI v2 requests use
 `sdcpp-image-request-v2`; source, mask, reference, LoRA, and VAE byte
 identities have separate versioned domains rather than incorporating local
 paths. Image experiment reports identify an exact serialized native generation

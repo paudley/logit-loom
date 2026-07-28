@@ -11,8 +11,7 @@ post-step observers. A pipeline copies one finite `f32` state, applies stages
 in declared order, and commits to the caller's slice only after every stage
 succeeds. Callback errors and panics are contained before commit.
 
-The crate also defines two compatible generations of worker-local whole-image
-contracts:
+The crate also defines compatible worker-local whole-image contract families:
 
 - `ImageExecutionPlan` and `ImageExecutionReceipt` preserve the version-one
   operation, buffer, placement, seed, schedule, `LoRA`, operator,
@@ -21,13 +20,24 @@ contracts:
   checkpoint restore/capture, an ordered deterministic compositing graph,
   explicit caller-owned output routes, and request-scope cleanup disposition
   under new identity domains.
+- `ImageExecutionPlanV3` and `ImageExecutionReceiptV3` preserve the current
+  single-native-primary lowering under their own identity domains.
+- `ImageProgramPlanV1` and `ImageProgramReceiptV1` define a separate bounded
+  resident program over typed single-assignment values and multiple ordered
+  native, mask-blend, checkpoint-restore, and checkpoint-capture stages.
 
-Version two currently defines one bounded RGB8 diffusion primary followed by
-zero or more exact integer `MaskBlend` stages. It validates the complete graph,
-all references, aggregate retained-image scratch, checkpoint consumption, and
-output allocations before execution. `mask_blend_rgb8` validates every length
-before its first write. These contracts contain no paths, transport, queue, or
-native handles. An adapter must reject plan mechanics it cannot implement
+The single-primary contracts define one bounded RGB8 diffusion primary
+followed by zero or more exact integer `MaskBlend` stages. The resident-program
+contract adds canonical value producers, earlier-stage-only references,
+operation-specific type and geometry checks, immutable branching, mutable
+checkpoint-state single consumption, liveness-derived release points, a
+2 GiB arena ceiling, explicit value and receipt routes, completed-stage
+prefix receipts, cleanup uncertainty, and placement/transfer measurements
+outside deterministic identity.
+
+`mask_blend_rgb8` validates every length before its first write. These
+contracts contain no paths, transport, queue, native handles, or feature-gated
+availability. An adapter must reject plan mechanics it cannot implement
 exactly.
 
 The crate owns no tensor runtime and performs no model inference. An adapter

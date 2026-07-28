@@ -50,6 +50,11 @@ include breaking API changes.
   authenticated checkpoint envelopes, installed scheduler-state operators,
   observations, exact post-step cancellation, bounded deterministic RGB8
   compositing, explicit output routes, and cleanup disposition.
+- A default-built `ImageProgramPlanV1` family for bounded resident staged image
+  graphs, with typed single-assignment values, multi-native and VAE chaining,
+  deterministic joins, checkpoint conversion, liveness-derived arena limits,
+  completed-stage receipts, cleanup uncertainty, and deployment measurements
+  outside deterministic identity.
 - A reproducible native companion patch/build script, model-free ABI probe,
   complete MiniT2I and Krea checkpoint experiments, and an output-free
   model-acceptance report schema.

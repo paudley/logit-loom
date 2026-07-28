@@ -2,7 +2,7 @@
 
 # ADR 0003: resident staged image programs
 
-- Status: accepted for implementation
+- Status: accepted; backend-neutral contract implemented, native execution pending
 - Decision date: 2026-07-27
 - Builds on: [ADR 0001](0001-stable-diffusion-runtime.md)
 - Initial runtime family: pinned stable-diffusion.cpp companion

@@ -16,7 +16,8 @@ semantic evaluation.
   and adds `ImageExecutionPlanV3`/`ImageExecutionReceiptV3` under new digest
   domains. Version two binds checkpoint restore/capture, an ordered
   deterministic compositing graph, explicit output routes, and request-scope
-  cleanup.
+  cleanup. The separately versioned `ImageProgramPlanV1` family describes
+  multiple resident native/VAE stages over typed single-assignment values.
 - `logit-loom-diffusion-sdcpp` implements a strict version-two subset over a
   pinned stable-diffusion.cpp companion. `ImagePlanExecutor` is a
   single-owner, synchronous, in-process `LocalExecutor`.
@@ -25,6 +26,32 @@ The generic plan is intentionally broader than one adapter. A lowerer must
 reject any mechanic it cannot implement exactly; silently approximating a
 schedule, target selector, tensor site, format, or cleanup boundary is a
 contract failure.
+
+## Resident program preflight
+
+`ImageProgramPlanV1` is built in the default diffusion crate with no feature or
+configuration switch. Before allocation or native execution it validates:
+
+- canonically numbered values and stages with exactly one producer per value;
+- external or earlier-stage-only references and complete value consumption;
+- native operation roles, image geometry, tensor representation, schedules,
+  scheduled `LoRA` values, checkpoint state, and snapshot output types;
+- deterministic RGB8 join inputs and checkpoint conversion compatibility;
+- unique non-aliasing output allocations, one final program-receipt route, and
+  non-routable mutable checkpoint state; and
+- liveness-derived releases under the public 2 GiB arena ceiling.
+
+`ImageProgramReceiptV1` binds the exact plan, backend, runtime epoch, completed
+stage prefix, produced value identities, output prefixes, terminal boundary,
+and cleanup disposition. `ImageProgramMeasurementsV1` separately reports
+stage timing, placement, transfers, and observed peak arena bytes so those
+deployment observations do not alter deterministic plan or receipt identity.
+
+This is currently a backend-neutral, model-free capability. The existing
+stable-diffusion.cpp `ImagePlanExecutor` still implements only the
+single-primary support matrix below; it must reject the resident program
+family until the new companion ABI and safe executor are implemented and
+accepted.
 
 ## Whole-plan order
 
