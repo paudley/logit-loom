@@ -344,7 +344,7 @@ pub struct Session<'model> {
     pub(crate) backend: Digest,
     pub(crate) token_history: Vec<TokenId>,
     pub(crate) position: u64,
-    pub(crate) active_steering: Option<SteeringKind>,
+    pub(crate) active_steering: Vec<SteeringKind>,
     pub(crate) activation: Option<ActivationController>,
     pub(crate) poison_reason: Option<String>,
     thread_affinity: PhantomData<Rc<()>>,
@@ -450,7 +450,7 @@ impl<'model> Session<'model> {
             ),
             token_history: Vec::new(),
             position: 0,
-            active_steering: None,
+            active_steering: Vec::new(),
             activation,
             poison_reason: None,
             thread_affinity: PhantomData,
@@ -482,9 +482,9 @@ impl<'model> Session<'model> {
         self.poison_reason.as_deref()
     }
 
-    /// Returns the session-scoped steering resource currently active.
-    pub const fn active_steering(&self) -> Option<SteeringKind> {
-        self.active_steering
+    /// Returns the ordered session-scoped steering resources currently active.
+    pub fn active_steering(&self) -> &[SteeringKind] {
+        &self.active_steering
     }
 
     /// Returns whether this session owns a transactional activation runtime.
@@ -839,7 +839,7 @@ impl<'model> Session<'model> {
                 "activation sessions require an activation-bound checkpoint envelope".to_owned(),
             ));
         }
-        if self.active_steering.is_some() {
+        if !self.active_steering.is_empty() {
             return Err(Error::Invalid(
                 "clear active steering before capturing a checkpoint".to_owned(),
             ));
@@ -883,7 +883,7 @@ impl<'model> Session<'model> {
                 "activation sessions require an activation-bound checkpoint envelope".to_owned(),
             ));
         }
-        if self.active_steering.is_some() {
+        if !self.active_steering.is_empty() {
             return Err(Error::Invalid(
                 "clear active steering before restoring a checkpoint".to_owned(),
             ));
@@ -1040,20 +1040,26 @@ impl<'model> Session<'model> {
 
     pub(crate) fn ensure_steering_available(&self) -> Result<(), Error> {
         self.ensure_healthy()?;
-        if self.active_steering.is_some() {
+        if !self.active_steering.is_empty() {
             return Err(Error::Invalid(
-                "only one steering resource may be active per session".to_owned(),
+                "clear active steering before applying another steering scope".to_owned(),
             ));
         }
         Ok(())
     }
 
     pub(crate) fn mark_steering_active(&mut self, kind: SteeringKind) {
-        self.active_steering = Some(kind);
+        self.active_steering.push(kind);
+    }
+
+    pub(crate) fn mark_steering_stack_active(&mut self, kinds: Vec<SteeringKind>) {
+        debug_assert!(!kinds.is_empty());
+        debug_assert!(self.active_steering.is_empty());
+        self.active_steering = kinds;
     }
 
     pub(crate) fn mark_steering_cleared(&mut self) {
-        self.active_steering = None;
+        self.active_steering.clear();
     }
 
     pub(crate) fn record_cleanup_failure(&mut self, error: &Error) {

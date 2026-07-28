@@ -23,7 +23,9 @@ pub use speculation::{
     SpeculativeRequest, SpeculativeSessionOptions, generate_speculative,
     speculation_implementation_identity,
 };
-pub use steering::{ControlVector, ControlVectorScope, LoraAdapter, LoraScope};
+pub use steering::{
+    ControlVector, ControlVectorScope, LoraAdapter, LoraApplication, LoraScope, SteeringScope,
+};
 
 /// Exact native Rust binding version used by this adapter release.
 pub const LLAMA_CPP_BINDING_VERSION: &str = "llama-cpp-4:0.4.2+logit-loom-adr0002";
