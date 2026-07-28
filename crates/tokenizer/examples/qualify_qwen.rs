@@ -10,8 +10,9 @@ use std::str::FromStr;
 use logit_loom_core::{Digest, TokenId};
 use logit_loom_tokenizer::{
     BoundaryTokenPolicy, BpeBoundaryTokens, CancellationToken, OffsetPolicy, QwenRankedBpe,
-    QwenTokenizerConfig, SourceSpecialTokenPolicy, TokenSpan, TokenizationOracleCase,
-    TokenizationOracleReceipt, TokenizationPolicy, qualify_tokenizer_oracle,
+    QwenTokenizerConfig, SourceSpecialTokenPolicy, TokenSpan, TokenizationIdentity,
+    TokenizationIdentityV2, TokenizationOracleCase, TokenizationOracleReceipt, TokenizationPolicy,
+    qualify_tokenizer_oracle,
 };
 use serde::Serialize;
 use tokenizers::Tokenizer;
@@ -41,6 +42,8 @@ struct Qualification {
     tokenizer_json_bytes: u64,
     tokenizer_json_blake3: String,
     pretokenizer: logit_loom_tokenizer::QwenPretokenizer,
+    legacy_identity: TokenizationIdentity,
+    identity: TokenizationIdentityV2,
     ordinary_text: TokenizationOracleReceipt,
     configured_specials: TokenizationOracleReceipt,
     hostile_nul_rejected: bool,
@@ -103,6 +106,10 @@ fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         tokenizer_json_bytes: u64::try_from(tokenizer_json.len())?,
         tokenizer_json_blake3: blake3::hash(&tokenizer_json).to_hex().to_string(),
         pretokenizer: ranked.pretokenizer(),
+        legacy_identity: logit_loom_tokenizer::ExactTokenizer::identity(&ranked).clone(),
+        identity: logit_loom_tokenizer::ExactTokenizer::identity_v2(&ranked)
+            .expect("Qwen adapter always exposes split identity")
+            .clone(),
         ordinary_text,
         configured_specials,
         hostile_nul_rejected,
