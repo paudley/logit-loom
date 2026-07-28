@@ -4,8 +4,8 @@
 
 - Status: accepted; source implementation complete; live acceptance pending
 - Decision date: 2026-07-27
-- Reviewed binding: local `llama-cpp-4` 0.4.2 successor at
-  `d76356b9725a3736212b3bfd16c66fc80c995c29`
+- Reviewed binding: public `llama-cpp-4` 0.4.2 successor at
+  `paudley/llama-cpp-rs@d76356b9725a3736212b3bfd16c66fc80c995c29`
 - Reviewed llama.cpp revision: `f87067841bac583bc089a225382248d857791ca8`
 - Delivery order: before ADR 0003
 
@@ -341,10 +341,9 @@ MTP, EAGLE-3, and capture-restore-capture continuation still require opt-in
 accelerator-backed fixtures using caller-supplied compatible artifacts.
 Model-free tests and adapter compilation are not live-model evidence.
 
-The local adjacent-path binding is suitable for implementation review, not a
-public crate release. It must land at an immutable public source for a
-source-only revision and as a registry package before the crates.io adapter
-can be published.
+The binding is pinned to an exact public source revision for reproducible
+source builds. It must also be available as a registry package before the
+crates.io adapter can be published.
 
 ## Coordinator and availability boundary
 
@@ -367,8 +366,8 @@ fails the operation; it does not make the compiled capability optional.
 - Logit Loom gains exact contracts and native execution for capture, runtime
   activation programs, MTP, EAGLE-3, and reusable process-local speculative
   checkpoint branches.
-- The safe binding must land and be pinned before the adapter releases the new
-  capability.
+- The safe binding is landed and pinned for source builds; it must be
+  registry-published before the crates.io adapter releases the new capability.
 - Exact graph-site profiles are renewed when llama.cpp or a model architecture
   changes.
 - Full speculative checkpoints are larger and more conservative than target

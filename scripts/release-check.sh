@@ -21,9 +21,9 @@ if [[ "${allow_dirty}" == false ]] && [[ -n "$(git status --porcelain)" ]]; then
 fi
 
 if rg -q \
-    '^llama-cpp-4[[:space:]]*=[[:space:]]*\{[^}]*path[[:space:]]*=' \
+    '^llama-cpp-4[[:space:]]*=[[:space:]]*\{[^}]*(path|git)[[:space:]]*=' \
     Cargo.toml; then
-    echo "release check requires a registry-published llama-cpp-4 successor, not a local path" >&2
+    echo "release check requires a registry-published llama-cpp-4 successor, not a path or Git source" >&2
     exit 1
 fi
 

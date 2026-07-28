@@ -86,14 +86,15 @@ and does not reinterpret version 1 identities. Final pixel bytes retain the
 timing, schedule interpretation, state-byte encoding, or serialized-shape
 changes require new domains rather than reinterpretation.
 
-`logit-loom-llamacpp` currently develops against local `llama-cpp-4` 0.4.2
-successor revision `d76356b9725a3736212b3bfd16c66fc80c995c29`,
-carrying literal llama.cpp revision
+`logit-loom-llamacpp` pins public `llama-cpp-4` 0.4.2 successor revision
+`d76356b9725a3736212b3bfd16c66fc80c995c29` from
+`https://github.com/paudley/llama-cpp-rs`, carrying literal llama.cpp revision
 `f87067841bac583bc089a225382248d857791ca8`. The successor adds bounded tensor
 transactions, native decode-lifecycle hooks, lifetime-bound MTP and EAGLE-3
 sessions, versioned exact implementation state, allocation-reusing
 tokenization and raw-piece sinks, and a count-only tokenizer query. During
-review, the workspace resolves that source from the adjacent binding checkout.
+review, the workspace resolves that exact Git revision rather than a mutable
+branch or adjacent checkout.
 
 At this revision an EAGLE-3 v3 draft for `gpt-oss` may name the terminal
 target `NextN` extraction site as layer index `n_layer`. The adapter admits
@@ -101,11 +102,10 @@ that otherwise-out-of-range index only for the exact `gpt-oss` architecture
 profile. Missing target or draft extraction output returns a native process
 failure instead of aborting the host process.
 
-This is not a publishable dependency arrangement. A public source revision can
-use an immutable public binding source, but a crates.io Logit Loom release
-requires the successor as a registry package. In both cases the workspace
-manifest must no longer require the adjacent path. Changing the binding source,
-llama.cpp revision, graph-selector profile, decode hooks, or
+This arrangement supports reproducible source builds but is not publishable to
+crates.io. A crates.io Logit Loom release requires the successor as a registry
+package, and the release check rejects both path and Git sources. Changing the
+binding source, llama.cpp revision, graph-selector profile, decode hooks, or
 speculative-state envelope is a reviewed compatibility event: compile the
 complete workspace, inspect changed native semantics, rerun the opt-in model
 fixtures, and update this document and `CHANGELOG.md`.
