@@ -121,6 +121,9 @@ include breaking API changes.
   literal llama.cpp revisions through new binding and session digest domains.
 - Release validation now rejects path and Git `llama-cpp-4` successors so the
   adapter cannot be mistaken for a crates.io-ready package.
+- The RustSec gate records one narrow informational exception for the
+  unmaintained `paste` dependency inherited through pinned `tokenizers`
+  0.23.1; vulnerabilities and every other warning remain denied.
 - Prepared the publishable workspace crates and exact internal dependencies
   for the coordinated `0.2.0` release; the partial tokenizer crate remains
   explicitly unpublished.

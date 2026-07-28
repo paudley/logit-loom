@@ -40,6 +40,12 @@ The hosted publishing workflow explicitly installs its pinned `cargo-audit`
 version. Record the tool and advisory snapshot used for the release, and review
 any ignored or withdrawn advisory explicitly.
 
+The repository currently ignores only `RUSTSEC-2024-0436`, an informational
+unmaintained notice for `paste` inherited through pinned `tokenizers` 0.23.1.
+RustSec lists no patched `paste` release. Re-evaluate this exception whenever
+the tokenizer dependency changes; vulnerabilities and all other audit warnings
+remain denied.
+
 Dependent package verification may require the exact foundational version to
 exist on crates.io. Use `cargo publish --dry-run` again immediately before each
 real publication; do not bypass verification for a release.

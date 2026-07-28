@@ -1,0 +1,6 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+
+[advisories]
+# Informational unmaintained notice inherited through tokenizers 0.23.1.
+# RustSec lists no patched paste release; revisit with each tokenizer upgrade.
+ignore = ["RUSTSEC-2024-0436"]
