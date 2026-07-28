@@ -10,6 +10,7 @@ mod chunk;
 mod operator;
 mod oracle;
 mod pool;
+mod qwen;
 mod sink;
 
 pub use batch::{
@@ -31,6 +32,7 @@ pub use oracle::{TokenizationOracleCase, TokenizationOracleReceipt, qualify_toke
 pub use pool::{
     DedicatedPool, MAX_POOL_QUEUE, MAX_POOL_WORKERS, PoolConfig, PoolError, PoolJob, PoolReceipt,
 };
+pub use qwen::{QwenPretokenizer, QwenRankedBpe, QwenTokenizerConfig};
 pub use sink::{
     CountingSink, SinkFlow, TokenIdSliceSink, TokenOutputSink, VecTokenSink, tokenize_via_scratch,
     validate_sink_policy,
