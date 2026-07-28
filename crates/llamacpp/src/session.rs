@@ -215,6 +215,23 @@ mod tests {
     }
 
     #[test]
+    fn ordinary_checkpoint_stop_tail_preserves_cross_operation_matches() {
+        let plan = GenerationPlan {
+            sampling: logit_loom::SamplingPlan::default(),
+            max_tokens: 4,
+            biases: Vec::new(),
+            grammar: None,
+            stops: vec![b"abcd".to_vec()],
+        };
+        let mut window = b"ab".to_vec();
+        extend_stop_window(&plan, &mut window, b"cd");
+        assert_eq!(matching_stop(&plan.stops, &window), Some(0));
+        assert_eq!(checkpoint_stop_tail(&plan, b"zabc"), b"abc");
+        assert!(validate_stop_tail(&plan, b"abc").is_ok());
+        assert!(validate_stop_tail(&plan, b"abcd").is_err());
+    }
+
+    #[test]
     fn checkpoint_logit_refresh_targets_only_the_last_position() {
         assert_eq!(checkpoint_logit_refresh_range(0).unwrap(), None);
         assert_eq!(checkpoint_logit_refresh_range(1).unwrap(), Some((0, 1)));
@@ -246,6 +263,12 @@ pub struct GenerationOutput {
     pub tokens: Vec<TokenId>,
     /// Complete mechanical receipt.
     pub receipt: GenerationReceipt,
+}
+
+pub(crate) struct StatefulGenerationOutput {
+    pub(crate) output: GenerationOutput,
+    pub(crate) sampler: LlamaSampler,
+    pub(crate) stop_tail: Vec<u8>,
 }
 
 impl GenerationOutput {
@@ -703,7 +726,15 @@ impl<'model> Session<'model> {
         self.ensure_generation_ready()?;
         let plan_identity = plan.digest()?;
         let sampler = build_sampler(&self.model.native, plan, &self.token_history)?;
-        self.generate_inner(plan, plan_identity, sampler, pipeline, observers)
+        self.generate_inner(
+            plan,
+            plan_identity,
+            sampler,
+            Vec::new(),
+            pipeline,
+            observers,
+        )
+        .map(|output| output.output)
     }
 
     /// Generates with an explicit eager or lazy version-two grammar.
@@ -730,9 +761,34 @@ impl<'model> Session<'model> {
             &plan.generation,
             plan_identity,
             sampler,
+            Vec::new(),
             pipeline,
             observers,
         )
+        .map(|output| output.output)
+    }
+
+    pub(crate) fn generate_stateful(
+        &mut self,
+        plan: &GenerationPlan,
+        continuation: Option<(LlamaSampler, Vec<u8>)>,
+        pipeline: Option<&mut Pipeline>,
+        observers: Option<&mut ObserverSet>,
+    ) -> Result<StatefulGenerationOutput, Error> {
+        plan.validate()?;
+        self.ensure_generation_ready()?;
+        let plan_identity = plan.digest()?;
+        let (sampler, stop_tail) = match continuation {
+            Some((sampler, stop_tail)) => {
+                validate_stop_tail(plan, &stop_tail)?;
+                (sampler, stop_tail)
+            }
+            None => (
+                build_sampler(&self.model.native, plan, &self.token_history)?,
+                Vec::new(),
+            ),
+        };
+        self.generate_inner(plan, plan_identity, sampler, stop_tail, pipeline, observers)
     }
 
     fn ensure_generation_ready(&self) -> Result<(), Error> {
@@ -750,9 +806,10 @@ impl<'model> Session<'model> {
         plan: &GenerationPlan,
         plan_identity: Digest,
         mut sampler: LlamaSampler,
+        mut stop_window: Vec<u8>,
         mut pipeline: Option<&mut Pipeline>,
         mut observers: Option<&mut ObserverSet>,
-    ) -> Result<GenerationOutput, Error> {
+    ) -> Result<StatefulGenerationOutput, Error> {
         let initial_position = self.position;
         if let Some(active) = pipeline.as_deref_mut() {
             active.begin(&self.token_history)?;
@@ -795,6 +852,7 @@ impl<'model> Session<'model> {
             }
             output_tokens.push(token);
             output_bytes.extend_from_slice(&piece);
+            extend_stop_window(plan, &mut stop_window, &piece);
             let mut observer_stop = false;
             if let Some(active) = observers.as_deref_mut()
                 && active.observe(ObservedToken {
@@ -809,7 +867,7 @@ impl<'model> Session<'model> {
                 finish = GenerationFinish::ObserverStop;
                 break;
             }
-            if let Some(index) = matching_stop(&plan.stops, &output_bytes) {
+            if let Some(index) = matching_stop(&plan.stops, &stop_window) {
                 let index = u32::try_from(index)
                     .map_err(|_| Error::Invalid("stop sequence index overflowed".to_owned()))?;
                 finish = GenerationFinish::StopSequence { index };
@@ -840,10 +898,14 @@ impl<'model> Session<'model> {
             observer_receipts,
         };
         receipt.digest()?;
-        Ok(GenerationOutput {
-            bytes: output_bytes,
-            tokens: output_tokens,
-            receipt,
+        Ok(StatefulGenerationOutput {
+            output: GenerationOutput {
+                bytes: output_bytes,
+                tokens: output_tokens,
+                receipt,
+            },
+            sampler,
+            stop_tail: checkpoint_stop_tail(plan, &stop_window),
         })
     }
 
@@ -989,6 +1051,34 @@ impl<'model> Session<'model> {
         }
         if let Some(activation) = self.activation.as_mut() {
             activation.reset()?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn refresh_restored_logits_with_active_steering(
+        &mut self,
+        activation_phase: Option<ActivationPhaseV1>,
+    ) -> Result<(), Error> {
+        self.ensure_healthy()?;
+        if self.active_steering.is_empty() {
+            return Ok(());
+        }
+        let Some(last_token) = self.token_history.last().copied() else {
+            return Err(Error::Incompatible(
+                "an actively steered checkpoint must contain a causal token".to_owned(),
+            ));
+        };
+        if let Err(error) =
+            self.refresh_logits_after_restore(last_token, self.position, activation_phase)
+        {
+            self.record_poison(&error);
+            return Err(error);
+        }
+        if let Some(activation) = self.activation.as_mut()
+            && let Err(error) = activation.reset()
+        {
+            self.record_poison(&error);
+            return Err(error);
         }
         Ok(())
     }
@@ -1212,6 +1302,42 @@ impl<'model> Session<'model> {
 
 fn matching_stop(stops: &[Vec<u8>], output: &[u8]) -> Option<usize> {
     stops.iter().position(|stop| output.ends_with(stop))
+}
+
+fn validate_stop_tail(plan: &GenerationPlan, tail: &[u8]) -> Result<(), Error> {
+    let maximum = maximum_stop_bytes(plan).saturating_sub(1);
+    if tail.len() > maximum {
+        return Err(Error::Incompatible(
+            "ordinary checkpoint stop-prefix state exceeds the generation plan".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+fn extend_stop_window(plan: &GenerationPlan, window: &mut Vec<u8>, piece: &[u8]) {
+    let maximum = maximum_stop_bytes(plan);
+    if maximum == 0 {
+        window.clear();
+        return;
+    }
+    if piece.len() >= maximum {
+        window.clear();
+        window.extend_from_slice(&piece[piece.len() - maximum..]);
+        return;
+    }
+    window.extend_from_slice(piece);
+    if window.len() > maximum {
+        window.drain(..window.len() - maximum);
+    }
+}
+
+fn checkpoint_stop_tail(plan: &GenerationPlan, window: &[u8]) -> Vec<u8> {
+    let maximum = maximum_stop_bytes(plan).saturating_sub(1);
+    window[window.len().saturating_sub(maximum)..].to_vec()
+}
+
+fn maximum_stop_bytes(plan: &GenerationPlan) -> usize {
+    plan.stops.iter().map(Vec::len).max().unwrap_or(0)
 }
 
 fn checkpoint_logit_refresh_range(position: u64) -> Result<Option<(u32, u32)>, Error> {

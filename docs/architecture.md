@@ -339,6 +339,23 @@ retains every chunk that native decode already accepted. With `clear_first`,
 the prior context is cleared before the first observer poll; this mutation is
 part of the requested replacement operation.
 
+`execute_text_mechanics` owns the complete V2 operation boundary. It validates
+the plan, exact target/draft topology, prompt bound, callback identities,
+activation runtimes, steering resources, and parent state before allocating a
+context. Ordinary and MTP/EAGLE-3 paths do not substitute for one another.
+Cooperative prefill stop returns terminal prefill evidence at a complete
+target/draft chunk boundary and suppresses generation and checkpoint output.
+
+For successful generation, ordered target `LoRA`s and the optional control
+vector remain active across prefill, generation, activation, and target
+verification. They are explicitly cleared in reverse native order before
+checkpoint capture. Aggregate receipts bind generation or terminal prefill,
+activation and speculation evidence, checkpoint lineage, and complete cleanup.
+Ordinary aggregate checkpoints retain the opaque native sampler and bounded
+cross-operation stop prefix as well as causal context state, so stateful
+sampling is not reconstructed from token history. Like speculative snapshots,
+they are process-local and thread-affine.
+
 ## Checkpoints
 
 A `StateSnapshot` combines opaque llama.cpp state bytes with exact token
@@ -368,8 +385,10 @@ sampling from stale logits.
 ## Steering scopes
 
 `LoRA` adapters and control vectors are applied through scopes that exclusively
-borrow the session. Only one steering resource may be active. Explicit
-`clear()` returns a lifecycle receipt; dropping a scope also attempts cleanup.
+borrow the session. One aggregate scope may own an ordered bounded `LoRA`
+stack followed by one control vector; another steering scope cannot overlap it.
+Explicit `clear()` returns lifecycle receipts in reverse native order, while
+dropping a scope also attempts cleanup.
 
 The safe upstream control-vector binding cannot pass a null slice to the native
 clear operation. Logit Loom therefore validates a complete model-sized vector

@@ -83,6 +83,32 @@ within the plan bound. Compiler and validator semantics remain outside Logit
 Loom; their exact implementation/configuration identities and content-free
 receipts are inside the public mechanical contract.
 
+## Aggregate execution
+
+`execute_text_mechanics` is the complete `TextMechanicsPlanV2` lowering. A
+`TextMechanicsRequest` supplies exact prompt tokens, target/draft context
+geometry, installed activation runtimes, borrowed transform and observer
+sets, loaded target `LoRA`s, an optional target control vector, and optional
+process-local parent state. Every identity and bound is checked before context
+allocation.
+
+The ordinary and MTP/EAGLE-3 paths share one lifecycle: apply ordered target
+steering, admit bounded prompt chunks, generate under the selected activation
+and callback mechanics, explicitly clear steering in reverse order, then
+optionally capture a quiescent checkpoint. A `PrefillMonitor` may stop either
+fresh path at a complete synchronized chunk boundary. That terminal result
+contains prefill and cleanup evidence, publishes neither generation nor a
+partial checkpoint, and performs no retry or fallback.
+
+Ordinary aggregate checkpoints use
+`TextMechanicsCheckpointReceiptV2` and retain the opaque native sampler plus
+cross-operation stop prefix; speculative snapshots retain their complete
+aggregate plan and native sampler. Both forms are process-local and
+thread-affine. A continuation must preserve every mechanic apart from its
+explicit parent-checkpoint field. Because native state omits the next-token
+logits, exact steering is reapplied while reconstructing the restored boundary
+and cleared again before successor capture.
+
 ## Activation and speculation
 
 `ActivationConfiguration` validates exact tensor sites, bounded capture plans,
@@ -169,7 +195,9 @@ opaque target-sampler clone, activation configuration, cross-operation stop
 state, and causal lineage. `resume_speculative_checkpointed` validates the
 complete parent before allocation, clones the sampler for an independent
 branch, restores contexts and implementation state, and captures the next
-boundary.
+boundary. Target steering selected through `SpeculativeRequest` or
+`SpeculativeContinuationRequest` spans the native operation and is cleared
+before that boundary is captured.
 
 The checkpoint object is process-local and thread-affine because llama.cpp
 provides no portable target-sampler encoding. Its

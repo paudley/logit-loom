@@ -94,6 +94,15 @@ include breaking API changes.
 - Ordered aggregate text steering that applies multiple `LoRA`s and an
   optional control vector as one scope, rolls back partial application,
   removes resources in reverse order, and poisons cleanup uncertainty.
+- `execute_text_mechanics`, a whole-operation llama.cpp lowerer for
+  `TextMechanicsPlanV2` that preflights every topology, callback, activation,
+  steering, and checkpoint identity; composes ordinary or target-authoritative
+  speculative execution; supports controlled-prefill cancellation; and emits
+  exact terminal and cleanup evidence.
+- Aggregate ordinary checkpoints that retain an opaque native sampler and
+  cross-operation stop prefix while binding causal state to the complete
+  mechanics which built it, plus speculative continuation that reapplies and
+  clears exact target steering before quiescent successor capture.
 
 ### Changed
 

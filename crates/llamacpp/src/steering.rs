@@ -50,6 +50,15 @@ impl<'adapter> LoraApplication<'adapter> {
     pub const fn new(adapter: &'adapter mut LoraAdapter, scale: f32) -> Self {
         Self { adapter, scale }
     }
+
+    /// Returns the exact public application descriptor.
+    #[must_use]
+    pub fn specification(&self) -> LoraSpec {
+        LoraSpec {
+            artifact: self.adapter.artifact.clone(),
+            scale: self.scale,
+        }
+    }
 }
 
 impl Model {
@@ -571,7 +580,7 @@ impl Drop for ControlVectorScope<'_, '_> {
 }
 
 impl ControlVector {
-    fn validate_for_model(&self, model: &Model) -> Result<(), Error> {
+    pub(crate) fn validate_for_model(&self, model: &Model) -> Result<(), Error> {
         let native_width = u32::try_from(model.native.n_embd())
             .map_err(|_| Error::Native("model returned an invalid embedding width".to_owned()))?;
         let native_layers = u32::try_from(model.native.n_layer())
@@ -602,6 +611,54 @@ impl ControlVector {
             )));
         }
         Ok(())
+    }
+}
+
+pub(crate) fn validate_steering_resources(
+    model: &Model,
+    loras: &[LoraApplication<'_>],
+    vector: Option<&ControlVector>,
+) -> Result<Vec<LoraSpec>, Error> {
+    if loras.len() > MAX_TEXT_MECHANICS_LORAS {
+        return Err(Error::Invalid(format!(
+            "aggregate steering exceeds {MAX_TEXT_MECHANICS_LORAS} LoRA applications"
+        )));
+    }
+    let specifications = loras
+        .iter()
+        .map(LoraApplication::specification)
+        .collect::<Vec<_>>();
+    for specification in &specifications {
+        specification.validate()?;
+    }
+    if let Some(vector) = vector {
+        vector.specification().validate()?;
+        vector.validate_for_model(model)?;
+    }
+    Ok(specifications)
+}
+
+pub(crate) fn execute_with_steering<'model, T>(
+    session: &mut Session<'model>,
+    loras: Vec<LoraApplication<'_>>,
+    vector: Option<&ControlVector>,
+    operation: impl FnOnce(&mut Session<'model>) -> Result<T, Error>,
+) -> Result<(T, Vec<SteeringReceipt>, Vec<SteeringReceipt>), Error> {
+    if loras.is_empty() && vector.is_none() {
+        return operation(session).map(|output| (output, Vec::new(), Vec::new()));
+    }
+
+    let mut scope = session.steering_scope(loras, vector)?;
+    let applied = scope.applied_receipts().cloned().collect::<Vec<_>>();
+    let operation_result = operation(scope.session_mut());
+    let cleanup_result = scope.clear();
+    match (operation_result, cleanup_result) {
+        (Ok(output), Ok(cleared)) => Ok((output, applied, cleared)),
+        (Err(operation_error), Ok(_)) => Err(operation_error),
+        (Ok(_), Err(cleanup_error)) => Err(cleanup_error),
+        (Err(operation_error), Err(cleanup_error)) => Err(Error::Poisoned(format!(
+            "text operation failed ({operation_error}); steering cleanup also failed ({cleanup_error})"
+        ))),
     }
 }
 

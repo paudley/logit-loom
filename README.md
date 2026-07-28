@@ -211,6 +211,10 @@ receipts suitable for inspection or replay checks.
   repetition, DRY, Mirostat, logit bias, and grammar composition.
 - llama.cpp causal prefill, generation, checkpoint/restore, ordered aggregate
   LoRA/control-vector scopes, and fail-closed cleanup.
+- Whole-operation `TextMechanicsPlanV2` execution across bounded prefill,
+  transforms, observers, ordered target steering, activation, ordinary or
+  target-authoritative speculative generation, exact branch restore,
+  cooperative cancellation, checkpoint capture, and aggregate receipts.
 - Topology-bound activation capture, deterministic content-free vector
   accumulation, and transactional scaled-add/projection-removal programs.
 - One-sequence target-authoritative MTP and EAGLE-3 generation with exact

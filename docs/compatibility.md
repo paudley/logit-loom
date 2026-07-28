@@ -60,9 +60,10 @@ Transactional text mechanics use distinct domains including
 `activation-vector-bank-v1`, `activation-program-v1`,
 `activation-invocation-receipt-v1`, `speculation-plan-v1`,
 `speculation-boundary-receipt-v1`, `speculation-receipt-v1`,
-`text-mechanics-plan-v2`, and `text-mechanics-receipt-v2`. Provisional and
-resolved activation rows have different receipt identities. No version-one
-aggregate text-mechanics value is reinterpreted.
+`text-mechanics-plan-v2`, `text-mechanics-checkpoint-receipt-v2`, and
+`text-mechanics-receipt-v2`. Provisional and resolved activation rows have
+different receipt identities. No version-one aggregate text-mechanics value is
+reinterpreted.
 
 Diffusion contracts use distinct domains including
 `diffusion-tensor-spec-v1`, `diffusion-schedule-v1`,

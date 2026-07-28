@@ -5,8 +5,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    ActivationProgramV1, ControlVectorSpec, CoreError, Digest, GenerationPlan, LoraSpec,
-    MAX_ACTIVATION_OBSERVATIONS, SpeculationPlanV1, TextModelTopologyV1,
+    ActivationProgramV1, CheckpointReceipt, ControlVectorSpec, CoreError, Digest, GenerationPlan,
+    LoraSpec, MAX_ACTIVATION_OBSERVATIONS, SpeculationPlanV1, TextModelTopologyV1,
 };
 
 /// Maximum `LoRA` applications bound into one text-mechanics plan.
@@ -326,6 +326,92 @@ impl TextMechanicsCleanupReceiptV2 {
     }
 }
 
+/// Exact ordinary-context state captured at an aggregate operation boundary.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TextMechanicsCheckpointReceiptV2 {
+    /// Complete aggregate mechanics active while the causal state was built.
+    pub mechanics: Digest,
+    /// Opaque native state receipt identity.
+    pub state: Digest,
+    /// Exact generation-plan identity for the retained native sampler.
+    pub generation: Digest,
+    /// Cross-operation stop-prefix identity.
+    pub stop_tail: Digest,
+    /// Retained stop-prefix bytes.
+    pub stop_tail_bytes: u32,
+    /// Native sampler and causal-history lineage.
+    pub sampler_lineage: Digest,
+    /// Exact causal position.
+    pub position: u64,
+    /// Parent aggregate checkpoint, when this state completed a branch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<Digest>,
+}
+
+impl TextMechanicsCheckpointReceiptV2 {
+    /// Validates an ordinary aggregate checkpoint and returns its identity.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when speculation was selected, or when mechanics,
+    /// state, position, or parent lineage differs from the supplied plan and
+    /// opaque state receipt.
+    pub fn digest_for(
+        &self,
+        plan: &TextMechanicsPlanV2,
+        topology: &TextModelTopologyV1,
+        state: &CheckpointReceipt,
+        stop_tail: &[u8],
+    ) -> Result<Digest, CoreError> {
+        let mechanics = plan.digest_for(topology, None)?;
+        let generation = plan.generation.digest()?;
+        let maximum_stop_tail = plan
+            .generation
+            .stops
+            .iter()
+            .map(Vec::len)
+            .max()
+            .unwrap_or(0)
+            .saturating_sub(1);
+        let stop_tail_bytes = u32::try_from(stop_tail.len()).map_err(|_| {
+            CoreError::invalid(
+                "text mechanics checkpoint receipt v2",
+                "stop-prefix byte count exceeds u32",
+            )
+        })?;
+        let stop_tail_identity = Digest::of_bytes("ordinary-checkpoint-stop-tail-v2", stop_tail);
+        let sampler_lineage = Digest::of_serializable(
+            "ordinary-text-sampler-lineage-v2",
+            &(
+                &mechanics,
+                &generation,
+                &state.token_history,
+                state.position,
+                &stop_tail_identity,
+                &plan.branch_checkpoint,
+            ),
+        )?;
+        if plan.speculation.is_some()
+            || stop_tail.len() > maximum_stop_tail
+            || self.mechanics != mechanics
+            || self.state != state.digest()?
+            || self.generation != generation
+            || self.stop_tail != stop_tail_identity
+            || self.stop_tail_bytes != stop_tail_bytes
+            || self.sampler_lineage != sampler_lineage
+            || self.position != state.position
+            || self.parent != plan.branch_checkpoint
+        {
+            return Err(CoreError::invalid(
+                "text mechanics checkpoint receipt v2",
+                "mechanics, state, position, or parent lineage differs",
+            ));
+        }
+        Digest::of_serializable("text-mechanics-checkpoint-receipt-v2", self)
+    }
+}
+
 /// Content-free terminal evidence for [`TextMechanicsPlanV2`].
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -535,5 +621,44 @@ mod tests {
         assert!(receipt.digest_for(&plan, &topology, None).is_ok());
         receipt.cleanup.control_vector_removed = true;
         assert!(receipt.digest_for(&plan, &topology, None).is_err());
+    }
+
+    #[test]
+    fn ordinary_v2_checkpoint_binds_mechanics_state_and_parent() {
+        let topology = topology();
+        let plan = plan_v2(&topology);
+        let identity = Digest::of_bytes("test-state", b"one");
+        let state = CheckpointReceipt {
+            model: topology.model.clone(),
+            backend: topology.backend.clone(),
+            state: identity.clone(),
+            state_bytes: 1,
+            token_history: identity,
+            position: 7,
+        };
+        let mut receipt = TextMechanicsCheckpointReceiptV2 {
+            mechanics: plan.digest_for(&topology, None).unwrap(),
+            state: state.digest().unwrap(),
+            generation: plan.generation.digest().unwrap(),
+            stop_tail: Digest::of_bytes("ordinary-checkpoint-stop-tail-v2", b""),
+            stop_tail_bytes: 0,
+            sampler_lineage: Digest::of_serializable(
+                "ordinary-text-sampler-lineage-v2",
+                &(
+                    plan.digest_for(&topology, None).unwrap(),
+                    plan.generation.digest().unwrap(),
+                    state.token_history.clone(),
+                    state.position,
+                    Digest::of_bytes("ordinary-checkpoint-stop-tail-v2", b""),
+                    plan.branch_checkpoint.clone(),
+                ),
+            )
+            .unwrap(),
+            position: state.position,
+            parent: None,
+        };
+        assert!(receipt.digest_for(&plan, &topology, &state, b"").is_ok());
+        receipt.position += 1;
+        assert!(receipt.digest_for(&plan, &topology, &state, b"").is_err());
     }
 }

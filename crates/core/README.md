@@ -58,6 +58,9 @@ interpretation is a compatibility change.
 - `TextModelTopologyV1`, activation capture/vector/program contracts,
   `SpeculationPlanV1`, and their receipts describe exact mechanics and
   target/draft lineage without naming a native tensor pointer or model path.
+- `TextMechanicsPlanV2` composes those mechanics, while
+  `TextMechanicsCheckpointReceiptV2` binds an ordinary opaque state receipt to
+  the exact aggregate mechanics and parent lineage which produced it.
 - Provisional speculative telemetry resolves to admitted or rejected target
   positions before entering aggregate capture receipts.
 - `StructuredProjectionPlanV1` binds semantic component identities without

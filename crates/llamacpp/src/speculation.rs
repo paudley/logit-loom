@@ -17,17 +17,22 @@ use llama_cpp_4::token::data::LlamaTokenData;
 use llama_cpp_4::token::data_array::LlamaTokenDataArray;
 use logit_loom::{
     ActivationPhaseV1, ActivationTelemetryDispositionV1, ControlFlow, Digest, GenerationFinish,
-    GenerationPlan, GenerationReceipt, ObservedToken, ObserverSet, Pipeline,
-    SpeculationActivationPolicyV1, SpeculationBoundaryReceiptV1, SpeculationPlanV1,
-    SpeculationReceiptV1, SpeculativeCheckpointReceiptV1, TextMechanicsPlanV2,
-    TextSpeculativeMechanismV1, TokenId,
+    GenerationPlan, GenerationReceipt, ObservedToken, ObserverSet, Pipeline, PrefillFinish,
+    PrefillMonitor, PrefillProgress, SpeculationActivationPolicyV1, SpeculationBoundaryReceiptV1,
+    SpeculationPlanV1, SpeculationReceiptV1, SpeculativeCheckpointReceiptV1, SteeringReceipt,
+    TextMechanicsPlanV2, TextSpeculativeMechanismV1, TokenId,
 };
 
 use crate::{
     ActivationCaptureOutput, ActivationConfiguration, ActivationProgramOutput, Error,
     GenerationOutput, LLAMA_CPP_BINDING_SOURCE_REVISION, LLAMA_CPP_BINDING_VERSION,
-    LLAMA_CPP_REVISION, Model, Runtime, Session, SessionOptions, StateSnapshot,
-    activation::ActivationController, error::native, sampler::build_sampler,
+    LLAMA_CPP_REVISION, Model, PrefillOutput, Runtime, Session, SessionOptions, StateSnapshot,
+    activation::ActivationController,
+    error::native,
+    sampler::build_sampler,
+    steering::{
+        ControlVector, LoraApplication, execute_with_steering, validate_steering_resources,
+    },
 };
 
 const SPECULATION_IMPLEMENTATION_DOMAIN: &str = "llamacpp-speculation-implementation-v1";
@@ -111,6 +116,8 @@ pub struct SpeculativeRequest<'a> {
     speculation: &'a SpeculationPlanV1,
     options: SpeculativeSessionOptions,
     activations: SpeculativeActivations,
+    target_loras: Vec<LoraApplication<'a>>,
+    target_control_vector: Option<&'a ControlVector>,
     pipeline: Option<&'a mut Pipeline>,
     observers: Option<&'a mut ObserverSet>,
 }
@@ -129,6 +136,8 @@ impl<'a> SpeculativeRequest<'a> {
             speculation,
             options: SpeculativeSessionOptions::default(),
             activations: SpeculativeActivations::none(),
+            target_loras: Vec::new(),
+            target_control_vector: None,
             pipeline: None,
             observers: None,
         }
@@ -145,6 +154,19 @@ impl<'a> SpeculativeRequest<'a> {
     #[must_use]
     pub fn with_activations(mut self, activations: SpeculativeActivations) -> Self {
         self.activations = activations;
+        self
+    }
+
+    /// Applies exact ordered steering to the target context for the complete
+    /// operation.
+    #[must_use]
+    pub fn with_target_steering(
+        mut self,
+        loras: Vec<LoraApplication<'a>>,
+        control_vector: Option<&'a ControlVector>,
+    ) -> Self {
+        self.target_loras = loras;
+        self.target_control_vector = control_vector;
         self
     }
 
@@ -175,6 +197,8 @@ pub struct SpeculativeActivationOutput {
 /// Complete successful output of one target-authoritative operation.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SpeculativeGenerationOutput {
+    /// Fresh-prompt prefill accounting. Restored continuations have no prefill.
+    pub prefill: Option<PrefillOutput>,
     /// Causally admitted generated tokens, bytes, and generation receipt.
     pub generation: GenerationOutput,
     /// Exact completed proposal boundaries in execution order.
@@ -185,6 +209,20 @@ pub struct SpeculativeGenerationOutput {
     pub target_activation: Option<SpeculativeActivationOutput>,
     /// Independently selected draft activation evidence.
     pub draft_activation: Option<SpeculativeActivationOutput>,
+    /// Successful target-steering applications in exact native order.
+    pub steering_applied: Vec<SteeringReceipt>,
+    /// Successful target-steering cleanup in exact reverse native order.
+    pub steering_cleared: Vec<SteeringReceipt>,
+}
+
+/// Successful cooperative stop at a complete speculative prefill boundary.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct SpeculativePrefillStoppedOutput {
+    pub(crate) prefill: PrefillOutput,
+    pub(crate) target_activation: Option<SpeculativeActivationOutput>,
+    pub(crate) draft_activation: Option<SpeculativeActivationOutput>,
+    pub(crate) steering_applied: Vec<SteeringReceipt>,
+    pub(crate) steering_cleared: Vec<SteeringReceipt>,
 }
 
 /// Aggregate-plan lineage selected for one quiescent speculative checkpoint.
@@ -205,6 +243,7 @@ impl SpeculativeCheckpointRequest {
 #[derive(Clone, Debug)]
 struct ValidatedCheckpointRequest {
     mechanics: Digest,
+    plan: TextMechanicsPlanV2,
     parent: Option<Digest>,
 }
 
@@ -224,6 +263,7 @@ pub struct SpeculativeStateSnapshot {
     stop_tail: Vec<u8>,
     activations: SpeculativeActivations,
     options: SpeculativeSessionOptions,
+    mechanics: TextMechanicsPlanV2,
     receipt: SpeculativeCheckpointReceiptV1,
     thread_affinity: PhantomData<Rc<()>>,
 }
@@ -243,6 +283,11 @@ impl SpeculativeStateSnapshot {
     /// Returns serializable, content-bound checkpoint accounting.
     pub const fn receipt(&self) -> &SpeculativeCheckpointReceiptV1 {
         &self.receipt
+    }
+
+    /// Returns the complete mechanics used to build this causal state.
+    pub const fn mechanics(&self) -> &TextMechanicsPlanV2 {
+        &self.mechanics
     }
 
     /// Returns the opaque target-context state.
@@ -276,6 +321,7 @@ impl SpeculativeStateSnapshot {
             stop_tail: self.stop_tail.clone(),
             activations: self.activations.clone(),
             options: self.options,
+            mechanics: self.mechanics.clone(),
             receipt: self.receipt.clone(),
             thread_affinity: PhantomData,
         })
@@ -296,6 +342,8 @@ pub struct SpeculativeContinuationRequest<'a> {
     generation: &'a GenerationPlan,
     speculation: &'a SpeculationPlanV1,
     options: SpeculativeSessionOptions,
+    target_loras: Vec<LoraApplication<'a>>,
+    target_control_vector: Option<&'a ControlVector>,
     pipeline: Option<&'a mut Pipeline>,
     observers: Option<&'a mut ObserverSet>,
 }
@@ -309,6 +357,8 @@ impl<'a> SpeculativeContinuationRequest<'a> {
             generation,
             speculation,
             options: SpeculativeSessionOptions::default(),
+            target_loras: Vec::new(),
+            target_control_vector: None,
             pipeline: None,
             observers: None,
         }
@@ -318,6 +368,19 @@ impl<'a> SpeculativeContinuationRequest<'a> {
     #[must_use]
     pub const fn with_options(mut self, options: SpeculativeSessionOptions) -> Self {
         self.options = options;
+        self
+    }
+
+    /// Reapplies exact ordered target steering after checkpoint restoration
+    /// and clears it before the next quiescent boundary is captured.
+    #[must_use]
+    pub fn with_target_steering(
+        mut self,
+        loras: Vec<LoraApplication<'a>>,
+        control_vector: Option<&'a ControlVector>,
+    ) -> Self {
+        self.target_loras = loras;
+        self.target_control_vector = control_vector;
         self
     }
 
@@ -355,7 +418,12 @@ pub fn generate_speculative(
     draft_model: &Model,
     request: SpeculativeRequest<'_>,
 ) -> Result<SpeculativeGenerationOutput, Error> {
-    Ok(generate_speculative_inner(runtime, target_model, draft_model, request, None)?.generation)
+    match generate_speculative_inner(runtime, target_model, draft_model, request, None, None)? {
+        SpeculativeExecutionOutcome::Generated(execution) => Ok(execution.generation),
+        SpeculativeExecutionOutcome::PrefillStopped(_) => Err(Error::Poisoned(
+            "unmonitored speculative generation stopped during prefill".to_owned(),
+        )),
+    }
 }
 
 /// Runs one bounded speculative operation and captures complete quiescent
@@ -383,13 +451,66 @@ pub fn generate_speculative_checkpointed(
         draft_model,
         request,
         Some(checkpoint),
+        None,
     )?;
+    let SpeculativeExecutionOutcome::Generated(execution) = execution else {
+        return Err(Error::Poisoned(
+            "unmonitored speculative generation stopped during prefill".to_owned(),
+        ));
+    };
     Ok(SpeculativeCheckpointOutput {
         generation: execution.generation,
         checkpoint: execution.checkpoint.ok_or_else(|| {
             Error::Poisoned("checkpoint capture completed without checkpoint state".to_owned())
         })?,
     })
+}
+
+pub(crate) fn generate_speculative_controlled(
+    runtime: &Runtime,
+    target_model: &Model,
+    draft_model: &Model,
+    request: SpeculativeRequest<'_>,
+    checkpoint: Option<&SpeculativeCheckpointRequest>,
+    monitor: &mut PrefillMonitor,
+) -> Result<SpeculativeExecutionOutcome, Error> {
+    generate_speculative_inner(
+        runtime,
+        target_model,
+        draft_model,
+        request,
+        checkpoint,
+        Some(monitor),
+    )
+}
+
+/// Continues one compatible quiescent checkpoint without capturing a
+/// successor boundary.
+///
+/// The input checkpoint remains reusable because its opaque target sampler is
+/// cloned before execution.
+///
+/// # Errors
+///
+/// Returns before context allocation for any plan, model, topology,
+/// activation, option, state, or capacity mismatch. Restore, sampler cloning,
+/// and generation also fail closed.
+pub fn resume_speculative(
+    runtime: &Runtime,
+    target_model: &Model,
+    draft_model: &Model,
+    checkpoint: &SpeculativeStateSnapshot,
+    request: SpeculativeContinuationRequest<'_>,
+) -> Result<SpeculativeGenerationOutput, Error> {
+    Ok(resume_speculative_inner(
+        runtime,
+        target_model,
+        draft_model,
+        checkpoint,
+        request,
+        None,
+    )?
+    .generation)
 }
 
 /// Continues one compatible quiescent checkpoint and captures the next
@@ -405,31 +526,61 @@ pub fn generate_speculative_checkpointed(
 /// activation, option, parent-lineage, state, or capacity mismatch. Native
 /// restore, sampler cloning, generation, and next-checkpoint capture also fail
 /// closed.
-#[allow(
-    clippy::too_many_lines,
-    reason = "restore order and the two native mechanisms remain adjacent for state-audit review"
-)]
 pub fn resume_speculative_checkpointed(
     runtime: &Runtime,
     target_model: &Model,
     draft_model: &Model,
     checkpoint: &SpeculativeStateSnapshot,
-    mut request: SpeculativeContinuationRequest<'_>,
+    request: SpeculativeContinuationRequest<'_>,
     next_checkpoint: &SpeculativeCheckpointRequest,
 ) -> Result<SpeculativeCheckpointOutput, Error> {
-    let parent =
-        validate_continuation_request(runtime, target_model, draft_model, checkpoint, &request)?;
-    let next_checkpoint = validate_checkpoint_request(
-        next_checkpoint,
+    let execution = resume_speculative_inner(
+        runtime,
         target_model,
         draft_model,
-        request.generation,
-        request.speculation,
-        &checkpoint.activations,
-        request.pipeline.as_deref(),
-        request.observers.as_deref(),
-        Some(&parent),
+        checkpoint,
+        request,
+        Some(next_checkpoint),
     )?;
+    Ok(SpeculativeCheckpointOutput {
+        generation: execution.generation,
+        checkpoint: execution.checkpoint.ok_or_else(|| {
+            Error::Poisoned("continuation completed without checkpoint state".to_owned())
+        })?,
+    })
+}
+
+#[allow(
+    clippy::too_many_lines,
+    reason = "restore order and the two native mechanisms remain adjacent for state-audit review"
+)]
+fn resume_speculative_inner(
+    runtime: &Runtime,
+    target_model: &Model,
+    draft_model: &Model,
+    checkpoint: &SpeculativeStateSnapshot,
+    mut request: SpeculativeContinuationRequest<'_>,
+    next_checkpoint: Option<&SpeculativeCheckpointRequest>,
+) -> Result<SpeculativeExecution, Error> {
+    let parent =
+        validate_continuation_request(runtime, target_model, draft_model, checkpoint, &request)?;
+    let next_checkpoint = next_checkpoint
+        .map(|next_checkpoint| {
+            validate_checkpoint_request(
+                next_checkpoint,
+                target_model,
+                draft_model,
+                request.generation,
+                request.speculation,
+                &checkpoint.activations,
+                &request.target_loras,
+                request.target_control_vector,
+                request.pipeline.as_deref(),
+                request.observers.as_deref(),
+                Some(&parent),
+            )
+        })
+        .transpose()?;
     let sampler = clone_sampler(&checkpoint.sampler)?;
     let plan = request.speculation;
     let recurrent_slots = plan.maximum_draft_tokens;
@@ -464,110 +615,135 @@ pub fn resume_speculative_checkpointed(
     let minimum_draft = i32::try_from(plan.minimum_draft_tokens)
         .map_err(|_| Error::Invalid("minimum draft tokens exceed i32".to_owned()))?;
     let probability_floor = plan.probability_floor()?;
-    let (run, implementation_state) = match plan.mechanism {
+    let loras = std::mem::take(&mut request.target_loras);
+    let control_vector = request.target_control_vector;
+    let ((mut run, implementation_state), steering_applied, steering_cleared) =
+        execute_with_steering(&mut target, loras, control_vector, |target| {
+            run_restored_native(
+                target,
+                &mut draft,
+                checkpoint,
+                sampler,
+                request.generation,
+                plan,
+                request.pipeline.as_deref_mut(),
+                request.observers.as_deref_mut(),
+                next_checkpoint.is_some(),
+                maximum_draft,
+                minimum_draft,
+                probability_floor,
+            )
+        })?;
+    run.output.steering_applied = steering_applied;
+    run.output.steering_cleared = steering_cleared;
+    finish_speculative_execution(
+        &mut target,
+        &mut draft,
+        run,
+        implementation_state,
+        next_checkpoint,
+        checkpoint_activations,
+        request.generation,
+        plan,
+        checkpoint.receipt.completed_boundaries,
+    )
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "native continuation lowering receives every prevalidated mechanic explicitly"
+)]
+fn run_restored_native<'model>(
+    target: &mut Session<'model>,
+    draft: &mut Session<'model>,
+    checkpoint: &SpeculativeStateSnapshot,
+    sampler: LlamaSampler,
+    generation: &GenerationPlan,
+    plan: &SpeculationPlanV1,
+    pipeline: Option<&mut Pipeline>,
+    observers: Option<&mut ObserverSet>,
+    capture_state: bool,
+    maximum_draft: i32,
+    minimum_draft: i32,
+    probability_floor: f32,
+) -> Result<(SpeculativeRunState, Option<Vec<u8>>), Error> {
+    target.refresh_restored_logits_with_active_steering(Some(ActivationPhaseV1::Verification))?;
+    let start = SpeculativeRunStart::Restored {
+        sampler,
+        stop_tail: checkpoint.stop_tail.clone(),
+    };
+    match plan.mechanism {
         TextSpeculativeMechanismV1::Mtp => {
             let config = MtpSessionConfig::new(plan.sequences, maximum_draft)
                 .with_n_min(minimum_draft)
                 .with_p_min(probability_floor);
-            let target_side = SpeculativeSide {
-                model: target.model,
-                options: target.options,
-                history: &mut target.token_history,
-                position: &mut target.position,
-                activation: &mut target.activation,
-                poison: &mut target.poison_reason,
-            };
-            let draft_side = SpeculativeSide {
-                model: draft.model,
-                options: draft.options,
-                history: &mut draft.token_history,
-                position: &mut draft.position,
-                activation: &mut draft.activation,
-                poison: &mut draft.poison_reason,
-            };
-            let mut backend =
-                MtpSession::new_with_config(&mut target.context, &mut draft.context, config)
-                    .map_err(native)?;
+            let (target_context, target_side) = speculative_parts(target);
+            let (draft_context, draft_side) = speculative_parts(draft);
+            let mut backend = MtpSession::new_with_config(target_context, draft_context, config)
+                .map_err(native)?;
             backend.restore_implementation_state(&checkpoint.implementation_state)?;
             let run = run_backend(
                 &mut backend,
                 target_side,
                 draft_side,
-                SpeculativeRunStart::Restored {
-                    sampler,
-                    stop_tail: checkpoint.stop_tail.clone(),
-                },
-                request.generation,
+                start,
+                generation,
                 plan,
-                request.pipeline.as_deref_mut(),
-                request.observers.as_deref_mut(),
+                None,
+                pipeline,
+                observers,
             )?;
-            let implementation_state = backend.capture_implementation_state()?;
-            (run, implementation_state)
+            let SpeculativeRunOutcome::Generated(run) = run else {
+                return Err(Error::Poisoned(
+                    "restored speculation stopped during nonexistent prefill".to_owned(),
+                ));
+            };
+            let implementation_state = capture_state
+                .then(|| backend.capture_implementation_state())
+                .transpose()?;
+            Ok((*run, implementation_state))
         }
         TextSpeculativeMechanismV1::Eagle3 => {
             let config = Eagle3SessionConfig::new(plan.sequences, maximum_draft)
                 .with_n_min(minimum_draft)
                 .with_p_min(probability_floor);
-            let target_side = SpeculativeSide {
-                model: target.model,
-                options: target.options,
-                history: &mut target.token_history,
-                position: &mut target.position,
-                activation: &mut target.activation,
-                poison: &mut target.poison_reason,
-            };
-            let draft_side = SpeculativeSide {
-                model: draft.model,
-                options: draft.options,
-                history: &mut draft.token_history,
-                position: &mut draft.position,
-                activation: &mut draft.activation,
-                poison: &mut draft.poison_reason,
-            };
-            let mut backend =
-                Eagle3Session::new_with_config(&mut target.context, &mut draft.context, config)
-                    .map_err(native)?;
+            let (target_context, target_side) = speculative_parts(target);
+            let (draft_context, draft_side) = speculative_parts(draft);
+            let mut backend = Eagle3Session::new_with_config(target_context, draft_context, config)
+                .map_err(native)?;
             backend.restore_implementation_state(&checkpoint.implementation_state)?;
             let run = run_backend(
                 &mut backend,
                 target_side,
                 draft_side,
-                SpeculativeRunStart::Restored {
-                    sampler,
-                    stop_tail: checkpoint.stop_tail.clone(),
-                },
-                request.generation,
+                start,
+                generation,
                 plan,
-                request.pipeline.as_deref_mut(),
-                request.observers.as_deref_mut(),
+                None,
+                pipeline,
+                observers,
             )?;
-            let implementation_state = backend.capture_implementation_state()?;
-            (run, implementation_state)
+            let SpeculativeRunOutcome::Generated(run) = run else {
+                return Err(Error::Poisoned(
+                    "restored speculation stopped during nonexistent prefill".to_owned(),
+                ));
+            };
+            let implementation_state = capture_state
+                .then(|| backend.capture_implementation_state())
+                .transpose()?;
+            Ok((*run, implementation_state))
         }
-    };
-    let execution = finish_speculative_execution(
-        &mut target,
-        &mut draft,
-        run,
-        Some(implementation_state),
-        Some(next_checkpoint),
-        checkpoint_activations,
-        request.generation,
-        plan,
-        checkpoint.receipt.completed_boundaries,
-    )?;
-    Ok(SpeculativeCheckpointOutput {
-        generation: execution.generation,
-        checkpoint: execution.checkpoint.ok_or_else(|| {
-            Error::Poisoned("continuation completed without checkpoint state".to_owned())
-        })?,
-    })
+    }
 }
 
-struct SpeculativeExecution {
-    generation: SpeculativeGenerationOutput,
-    checkpoint: Option<SpeculativeStateSnapshot>,
+pub(crate) struct SpeculativeExecution {
+    pub(crate) generation: SpeculativeGenerationOutput,
+    pub(crate) checkpoint: Option<SpeculativeStateSnapshot>,
+}
+
+pub(crate) enum SpeculativeExecutionOutcome {
+    Generated(Box<SpeculativeExecution>),
+    PrefillStopped(Box<SpeculativePrefillStoppedOutput>),
 }
 
 #[allow(
@@ -580,7 +756,8 @@ fn generate_speculative_inner(
     draft_model: &Model,
     mut request: SpeculativeRequest<'_>,
     checkpoint: Option<&SpeculativeCheckpointRequest>,
-) -> Result<SpeculativeExecution, Error> {
+    prefill_monitor: Option<&mut PrefillMonitor>,
+) -> Result<SpeculativeExecutionOutcome, Error> {
     validate_request(runtime, target_model, draft_model, &request)?;
     let plan = request.speculation;
     let checkpoint = checkpoint
@@ -592,6 +769,8 @@ fn generate_speculative_inner(
                 request.generation,
                 plan,
                 &request.activations,
+                &request.target_loras,
+                request.target_control_vector,
                 request.pipeline.as_deref(),
                 request.observers.as_deref(),
                 None,
@@ -627,97 +806,154 @@ fn generate_speculative_inner(
     let minimum_draft = i32::try_from(plan.minimum_draft_tokens)
         .map_err(|_| Error::Invalid("minimum draft tokens exceed i32".to_owned()))?;
     let probability_floor = plan.probability_floor()?;
+    let loras = std::mem::take(&mut request.target_loras);
+    let control_vector = request.target_control_vector;
+    let ((run, implementation_state), steering_applied, steering_cleared) =
+        execute_with_steering(&mut target, loras, control_vector, |target| {
+            run_fresh_native(
+                target,
+                &mut draft,
+                request.prompt,
+                request.generation,
+                plan,
+                prefill_monitor,
+                request.pipeline.as_deref_mut(),
+                request.observers.as_deref_mut(),
+                checkpoint.is_some(),
+                maximum_draft,
+                minimum_draft,
+                probability_floor,
+            )
+        })?;
+    match run {
+        SpeculativeRunOutcome::Generated(mut run) => {
+            run.output.steering_applied = steering_applied;
+            run.output.steering_cleared = steering_cleared;
+            Ok(SpeculativeExecutionOutcome::Generated(Box::new(
+                finish_speculative_execution(
+                    &mut target,
+                    &mut draft,
+                    *run,
+                    implementation_state,
+                    checkpoint,
+                    checkpoint_activations,
+                    request.generation,
+                    plan,
+                    0,
+                )?,
+            )))
+        }
+        SpeculativeRunOutcome::PrefillStopped(mut output) => {
+            if implementation_state.is_some() {
+                return Err(Error::Poisoned(
+                    "controlled prefill stop unexpectedly captured speculative state".to_owned(),
+                ));
+            }
+            output.steering_applied = steering_applied;
+            output.steering_cleared = steering_cleared;
+            Ok(SpeculativeExecutionOutcome::PrefillStopped(output))
+        }
+    }
+}
 
-    let (run, implementation_state) = match plan.mechanism {
+#[allow(
+    clippy::too_many_arguments,
+    reason = "native speculative lowering receives every prevalidated mechanic explicitly"
+)]
+fn run_fresh_native<'model>(
+    target: &mut Session<'model>,
+    draft: &mut Session<'model>,
+    prompt: &[TokenId],
+    generation: &GenerationPlan,
+    plan: &SpeculationPlanV1,
+    prefill_monitor: Option<&mut PrefillMonitor>,
+    pipeline: Option<&mut Pipeline>,
+    observers: Option<&mut ObserverSet>,
+    capture_state: bool,
+    maximum_draft: i32,
+    minimum_draft: i32,
+    probability_floor: f32,
+) -> Result<(SpeculativeRunOutcome, Option<Vec<u8>>), Error> {
+    match plan.mechanism {
         TextSpeculativeMechanismV1::Mtp => {
             let config = MtpSessionConfig::new(plan.sequences, maximum_draft)
                 .with_n_min(minimum_draft)
                 .with_p_min(probability_floor);
-            let target_side = SpeculativeSide {
-                model: target.model,
-                options: target.options,
-                history: &mut target.token_history,
-                position: &mut target.position,
-                activation: &mut target.activation,
-                poison: &mut target.poison_reason,
-            };
-            let draft_side = SpeculativeSide {
-                model: draft.model,
-                options: draft.options,
-                history: &mut draft.token_history,
-                position: &mut draft.position,
-                activation: &mut draft.activation,
-                poison: &mut draft.poison_reason,
-            };
-            let mut backend =
-                MtpSession::new_with_config(&mut target.context, &mut draft.context, config)
-                    .map_err(native)?;
+            let (target_context, target_side) = speculative_parts(target);
+            let (draft_context, draft_side) = speculative_parts(draft);
+            let mut backend = MtpSession::new_with_config(target_context, draft_context, config)
+                .map_err(native)?;
             let run = run_backend(
                 &mut backend,
                 target_side,
                 draft_side,
-                SpeculativeRunStart::Fresh(request.prompt),
-                request.generation,
+                SpeculativeRunStart::Fresh(prompt),
+                generation,
                 plan,
-                request.pipeline.as_deref_mut(),
-                request.observers.as_deref_mut(),
+                prefill_monitor,
+                pipeline,
+                observers,
             )?;
-            let implementation_state = checkpoint
-                .as_ref()
-                .map(|_| backend.capture_implementation_state())
-                .transpose()?;
-            (run, implementation_state)
+            let implementation_state = (capture_state
+                && matches!(run, SpeculativeRunOutcome::Generated(_)))
+            .then(|| backend.capture_implementation_state())
+            .transpose()?;
+            Ok((run, implementation_state))
         }
         TextSpeculativeMechanismV1::Eagle3 => {
             let config = Eagle3SessionConfig::new(plan.sequences, maximum_draft)
                 .with_n_min(minimum_draft)
                 .with_p_min(probability_floor);
-            let target_side = SpeculativeSide {
-                model: target.model,
-                options: target.options,
-                history: &mut target.token_history,
-                position: &mut target.position,
-                activation: &mut target.activation,
-                poison: &mut target.poison_reason,
-            };
-            let draft_side = SpeculativeSide {
-                model: draft.model,
-                options: draft.options,
-                history: &mut draft.token_history,
-                position: &mut draft.position,
-                activation: &mut draft.activation,
-                poison: &mut draft.poison_reason,
-            };
-            let mut backend =
-                Eagle3Session::new_with_config(&mut target.context, &mut draft.context, config)
-                    .map_err(native)?;
+            let (target_context, target_side) = speculative_parts(target);
+            let (draft_context, draft_side) = speculative_parts(draft);
+            let mut backend = Eagle3Session::new_with_config(target_context, draft_context, config)
+                .map_err(native)?;
             let run = run_backend(
                 &mut backend,
                 target_side,
                 draft_side,
-                SpeculativeRunStart::Fresh(request.prompt),
-                request.generation,
+                SpeculativeRunStart::Fresh(prompt),
+                generation,
                 plan,
-                request.pipeline.as_deref_mut(),
-                request.observers.as_deref_mut(),
+                prefill_monitor,
+                pipeline,
+                observers,
             )?;
-            let implementation_state = checkpoint
-                .as_ref()
-                .map(|_| backend.capture_implementation_state())
-                .transpose()?;
-            (run, implementation_state)
+            let implementation_state = (capture_state
+                && matches!(run, SpeculativeRunOutcome::Generated(_)))
+            .then(|| backend.capture_implementation_state())
+            .transpose()?;
+            Ok((run, implementation_state))
         }
-    };
-    finish_speculative_execution(
-        &mut target,
-        &mut draft,
-        run,
-        implementation_state,
-        checkpoint,
-        checkpoint_activations,
-        request.generation,
-        plan,
-        0,
+    }
+}
+
+fn speculative_parts<'borrow, 'model>(
+    session: &'borrow mut Session<'model>,
+) -> (
+    &'borrow mut LlamaContext<'model>,
+    SpeculativeSide<'borrow, 'model>,
+) {
+    let Session {
+        context,
+        model,
+        options,
+        token_history,
+        position,
+        activation,
+        poison_reason,
+        ..
+    } = session;
+    (
+        context,
+        SpeculativeSide {
+            model,
+            options: *options,
+            history: token_history,
+            position,
+            activation,
+            poison: poison_reason,
+        },
     )
 }
 
@@ -732,6 +968,8 @@ fn validate_checkpoint_request(
     generation: &GenerationPlan,
     speculation: &SpeculationPlanV1,
     activations: &SpeculativeActivations,
+    target_loras: &[LoraApplication<'_>],
+    target_control_vector: Option<&ControlVector>,
     pipeline: Option<&Pipeline>,
     observers: Option<&ObserverSet>,
     expected_parent: Option<&Digest>,
@@ -748,10 +986,13 @@ fn validate_checkpoint_request(
                 .to_owned(),
         ));
     }
-    if !request.mechanics.loras.is_empty() || request.mechanics.control_vector.is_some() {
-        return Err(Error::Invalid(
-            "apply and clear aggregate steering outside the speculative checkpoint operation"
-                .to_owned(),
+    let loras = validate_steering_resources(target, target_loras, target_control_vector)?;
+    let control_vector = target_control_vector.map(ControlVector::specification);
+    if loras != request.mechanics.loras
+        || control_vector != request.mechanics.control_vector.as_ref()
+    {
+        return Err(Error::Incompatible(
+            "checkpoint target steering differs from the aggregate plan".to_owned(),
         ));
     }
     let pipeline_identity = pipeline
@@ -791,6 +1032,7 @@ fn validate_checkpoint_request(
     }
     Ok(ValidatedCheckpointRequest {
         mechanics,
+        plan: request.mechanics.clone(),
         parent: request.mechanics.branch_checkpoint.clone(),
     })
 }
@@ -890,6 +1132,7 @@ fn finish_speculative_execution(
             target: target.options,
             draft: draft.options,
         },
+        mechanics: checkpoint.plan,
         receipt,
         thread_affinity: PhantomData,
     };
@@ -911,6 +1154,32 @@ fn validate_continuation_request(
     request: &SpeculativeContinuationRequest<'_>,
 ) -> Result<Digest, Error> {
     request.generation.validate()?;
+    let target_loras =
+        validate_steering_resources(target, &request.target_loras, request.target_control_vector)?;
+    let target_control = request
+        .target_control_vector
+        .map(ControlVector::specification);
+    let pipeline = request
+        .pipeline
+        .as_deref()
+        .map(|pipeline| pipeline.specification().digest())
+        .transpose()?;
+    let observers = request
+        .observers
+        .as_deref()
+        .map(ObserverSet::identity)
+        .transpose()?;
+    if request.generation != &checkpoint.mechanics.generation
+        || checkpoint.mechanics.speculation.as_ref() != Some(request.speculation)
+        || target_loras != checkpoint.mechanics.loras
+        || target_control != checkpoint.mechanics.control_vector.as_ref()
+        || pipeline != checkpoint.mechanics.transform_pipeline
+        || observers != checkpoint.mechanics.observer_set
+    {
+        return Err(Error::Incompatible(
+            "continuation mechanics differ from the checkpoint mechanics".to_owned(),
+        ));
+    }
     request
         .speculation
         .digest_for(target.topology(), draft.topology())?;
@@ -943,7 +1212,11 @@ fn validate_continuation_request(
     }
     checkpoint.target.validate_contents()?;
     checkpoint.draft.validate_contents()?;
-    if checkpoint.target.tokens() != checkpoint.draft.tokens()
+    if checkpoint
+        .mechanics
+        .digest_for(target.topology(), Some(draft.topology()))?
+        != checkpoint.receipt.mechanics
+        || checkpoint.target.tokens() != checkpoint.draft.tokens()
         || checkpoint.target.receipt().position != checkpoint.draft.receipt().position
         || checkpoint.receipt.target_state != checkpoint.target.receipt().digest()?
         || checkpoint.receipt.draft_state != checkpoint.draft.receipt().digest()?
@@ -1028,6 +1301,7 @@ fn validate_request(
     request: &SpeculativeRequest<'_>,
 ) -> Result<(), Error> {
     request.generation.validate()?;
+    validate_steering_resources(target, &request.target_loras, request.target_control_vector)?;
     if request.prompt.is_empty() {
         return Err(Error::Invalid(
             "speculative prefill tokens must not be empty".to_owned(),
@@ -1442,6 +1716,11 @@ struct SpeculativeRunState {
     stop_tail: Vec<u8>,
 }
 
+enum SpeculativeRunOutcome {
+    Generated(Box<SpeculativeRunState>),
+    PrefillStopped(Box<SpeculativePrefillStoppedOutput>),
+}
+
 #[allow(
     clippy::too_many_arguments,
     clippy::too_many_lines,
@@ -1454,20 +1733,55 @@ fn run_backend(
     start: SpeculativeRunStart<'_>,
     generation: &GenerationPlan,
     speculation: &SpeculationPlanV1,
+    mut prefill_monitor: Option<&mut PrefillMonitor>,
     mut pipeline: Option<&mut Pipeline>,
     mut observers: Option<&mut ObserverSet>,
-) -> Result<SpeculativeRunState, Error> {
-    let (restored_sampler, mut stop_window) = match start {
+) -> Result<SpeculativeRunOutcome, Error> {
+    let (restored_sampler, mut stop_window, prefill_output) = match start {
         SpeculativeRunStart::Fresh(prompt) => {
-            prefill(backend, &mut target, &mut draft, prompt)?;
+            let prefill = prefill(
+                backend,
+                &mut target,
+                &mut draft,
+                prompt,
+                prefill_monitor.as_deref_mut(),
+            )?;
+            if prefill
+                .receipt
+                .as_ref()
+                .is_some_and(|receipt| receipt.finish == PrefillFinish::Stopped)
+            {
+                if !backend.is_quiescent() {
+                    let error = Error::Poisoned(
+                        "speculation was not quiescent after controlled prefill stop".to_owned(),
+                    );
+                    target.poison(&error);
+                    draft.poison(&error);
+                    return Err(error);
+                }
+                return Ok(SpeculativeRunOutcome::PrefillStopped(Box::new(
+                    SpeculativePrefillStoppedOutput {
+                        prefill,
+                        target_activation: take_activation_output(target.activation)?,
+                        draft_activation: take_activation_output(draft.activation)?,
+                        steering_applied: Vec::new(),
+                        steering_cleared: Vec::new(),
+                    },
+                )));
+            }
             let native_prompt = prompt
                 .iter()
                 .map(|token| LlamaToken::new(token.get()))
                 .collect::<Vec<_>>();
             backend.begin(&native_prompt)?;
-            (None, Vec::new())
+            (None, Vec::new(), Some(prefill))
         }
         SpeculativeRunStart::Restored { sampler, stop_tail } => {
+            if prefill_monitor.is_some() {
+                return Err(Error::Invalid(
+                    "a restored speculative boundary has no prefill to monitor".to_owned(),
+                ));
+            }
             if target.history.is_empty()
                 || target.history != draft.history
                 || target.position != draft.position
@@ -1477,7 +1791,7 @@ fn run_backend(
                 ));
             }
             validate_stop_tail(generation, &stop_tail)?;
-            (Some(sampler), stop_tail)
+            (Some(sampler), stop_tail, None)
         }
     };
 
@@ -1853,29 +2167,51 @@ fn run_backend(
     let target_activation = take_activation_output(target.activation)?;
     let draft_activation = take_activation_output(draft.activation)?;
     let stop_tail = checkpoint_stop_tail(generation, &stop_window);
-    Ok(SpeculativeRunState {
-        output: SpeculativeGenerationOutput {
-            generation: GenerationOutput {
-                bytes: output_bytes,
-                tokens: output_tokens,
-                receipt: generation_receipt,
+    Ok(SpeculativeRunOutcome::Generated(Box::new(
+        SpeculativeRunState {
+            output: SpeculativeGenerationOutput {
+                prefill: prefill_output,
+                generation: GenerationOutput {
+                    bytes: output_bytes,
+                    tokens: output_tokens,
+                    receipt: generation_receipt,
+                },
+                boundaries,
+                speculation: speculation_receipt,
+                target_activation,
+                draft_activation,
+                steering_applied: Vec::new(),
+                steering_cleared: Vec::new(),
             },
-            boundaries,
-            speculation: speculation_receipt,
-            target_activation,
-            draft_activation,
+            sampler: target_sampler,
+            stop_tail,
         },
-        sampler: target_sampler,
-        stop_tail,
-    })
+    )))
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "target and draft chunk admission plus cooperative accounting stay adjacent"
+)]
 fn prefill(
     backend: &mut impl NativeSpeculation,
     target: &mut SpeculativeSide<'_, '_>,
     draft: &mut SpeculativeSide<'_, '_>,
     prompt: &[TokenId],
-) -> Result<(), Error> {
+    mut monitor: Option<&mut PrefillMonitor>,
+) -> Result<PrefillOutput, Error> {
+    let requested_tokens = u64::try_from(prompt.len())
+        .map_err(|_| Error::Invalid("speculative prefill token count exceeds u64".to_owned()))?;
+    let mut progress = PrefillProgress {
+        initial_position: *target.position,
+        requested_tokens,
+        admitted_tokens: 0,
+        admitted_chunks: 0,
+        position: *target.position,
+    };
+    if let Some(active) = monitor.as_deref_mut() {
+        active.begin(progress)?;
+    }
     let target_isolates = target
         .activation
         .as_ref()
@@ -1900,6 +2236,15 @@ fn prefill(
             prompt.len()
         };
         let chunk = &prompt[offset..end];
+        if let Some(active) = monitor.as_deref_mut()
+            && active.poll(progress)? == ControlFlow::Stop
+        {
+            return Ok(PrefillOutput {
+                admitted_tokens: progress.admitted_tokens,
+                position: *target.position,
+                receipt: Some(active.finish(PrefillFinish::Stopped)?),
+            });
+        }
         let mut batch = build_prefill_batch(*target.position, chunk, end == prompt.len())?;
         begin_activation(
             target.activation.as_ref(),
@@ -1935,9 +2280,38 @@ fn prefill(
             return Err(error);
         }
         append_causal_slice(target, draft, chunk)?;
+        let chunk_tokens = u64::try_from(chunk.len())
+            .map_err(|_| Error::Invalid("speculative prefill chunk exceeds u64".to_owned()))?;
+        progress.admitted_tokens = progress
+            .admitted_tokens
+            .checked_add(chunk_tokens)
+            .ok_or_else(|| {
+                Error::Invalid("speculative prefill token accounting overflowed".to_owned())
+            })?;
+        progress.admitted_chunks = progress.admitted_chunks.checked_add(1).ok_or_else(|| {
+            Error::Invalid("speculative prefill chunk accounting overflowed".to_owned())
+        })?;
+        progress.position = *target.position;
+        if let Some(active) = monitor.as_deref_mut()
+            && active.observe_chunk(progress)? == ControlFlow::Stop
+            && progress.admitted_tokens < progress.requested_tokens
+        {
+            return Ok(PrefillOutput {
+                admitted_tokens: progress.admitted_tokens,
+                position: *target.position,
+                receipt: Some(active.finish(PrefillFinish::Stopped)?),
+            });
+        }
         offset = end;
     }
-    Ok(())
+    let receipt = monitor
+        .map(|active| active.finish(PrefillFinish::Complete))
+        .transpose()?;
+    Ok(PrefillOutput {
+        admitted_tokens: progress.admitted_tokens,
+        position: *target.position,
+        receipt,
+    })
 }
 
 fn build_prefill_batch(
@@ -2051,7 +2425,7 @@ fn sample_candidate(
     })
 }
 
-fn clone_sampler(sampler: &LlamaSampler) -> Result<LlamaSampler, Error> {
+pub(crate) fn clone_sampler(sampler: &LlamaSampler) -> Result<LlamaSampler, Error> {
     catch_unwind(AssertUnwindSafe(|| sampler.clone_sampler()))
         .map_err(|_| Error::Native("native sampler clone panicked".to_owned()))
 }

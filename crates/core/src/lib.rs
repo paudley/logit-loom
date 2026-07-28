@@ -42,8 +42,8 @@ pub use steering::{ControlVectorSpec, LoraSpec, SteeringAction, SteeringKind, St
 pub use structured::*;
 pub use text_mechanics::{
     MAX_SPECULATIVE_TOKENS, MAX_TEXT_MECHANICS_CAPTURES, MAX_TEXT_MECHANICS_LORAS,
-    TextMechanicsCleanupReceiptV2, TextMechanicsPlanV1, TextMechanicsPlanV2,
-    TextMechanicsReceiptV1, TextMechanicsReceiptV2,
+    TextMechanicsCheckpointReceiptV2, TextMechanicsCleanupReceiptV2, TextMechanicsPlanV1,
+    TextMechanicsPlanV2, TextMechanicsReceiptV1, TextMechanicsReceiptV2,
 };
 pub use token::{CandidateMode, MAX_SPARSE_CANDIDATES, TokenId};
 pub use transform::{

@@ -324,6 +324,18 @@ candidate decisions, authoritative validation, exact rejection/cancellation
 restore, and a bounded one-call-per-attempt retry surface. The controller
 contains callback failures and has no automatic retry policy.
 
+`execute_text_mechanics` now lowers the complete aggregate V2 plan. It
+preflights target/draft topology, callback, activation, steering, prompt, and
+parent-checkpoint identities before context allocation. Ordered target
+steering spans fresh or restored ordinary and MTP/EAGLE-3 execution, is
+explicitly cleared before checkpoint capture, and is checked against exact
+apply/reverse-cleanup receipts. Controlled prefill can terminate either path
+at a complete synchronized chunk boundary without generation or partial
+checkpoint publication. Ordinary aggregate checkpoints bind native state to
+the full mechanics plan and retain the opaque native sampler plus bounded stop
+prefix; speculative snapshots retain that plan and reject a successor whose
+mechanics differ apart from parent lineage.
+
 One acceptance item remains deliberately open: activation graph execution,
 MTP, EAGLE-3, and capture-restore-capture continuation still require opt-in
 accelerator-backed fixtures using caller-supplied compatible artifacts.

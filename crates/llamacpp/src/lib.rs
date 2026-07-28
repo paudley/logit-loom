@@ -5,6 +5,7 @@
 
 mod activation;
 mod error;
+mod mechanics;
 mod model;
 mod sampler;
 mod session;
@@ -17,13 +18,17 @@ pub use activation::{
     LlamaCppTensorProfile,
 };
 pub use error::Error;
+pub use mechanics::{
+    OrdinaryTextMechanicsSnapshot, TextMechanicsCheckpoint, TextMechanicsExecutionOutput,
+    TextMechanicsOutput, TextMechanicsRequest, TextMechanicsResume, execute_text_mechanics,
+};
 pub use model::{DevicePolicy, MAX_TOKENIZATION_BYTES, Model, ModelOptions, Runtime, Tokenization};
 pub use session::{GenerationOutput, PrefillOutput, Session, SessionOptions, StateSnapshot};
 pub use speculation::{
     SpeculativeActivationOutput, SpeculativeActivations, SpeculativeCheckpointOutput,
     SpeculativeCheckpointRequest, SpeculativeContinuationRequest, SpeculativeGenerationOutput,
     SpeculativeRequest, SpeculativeSessionOptions, SpeculativeStateSnapshot, generate_speculative,
-    generate_speculative_checkpointed, resume_speculative_checkpointed,
+    generate_speculative_checkpointed, resume_speculative, resume_speculative_checkpointed,
     speculation_implementation_identity,
 };
 pub use steering::{
