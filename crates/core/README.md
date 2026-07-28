@@ -5,7 +5,8 @@
 Serializable, backend-neutral contracts for bounded token-stream mechanics.
 
 This crate defines token identifiers, candidate exposure, sampling plans,
-steering descriptors, checkpoints, bounded audio-prefill contracts, and
+steering descriptors, checkpoints, bounded audio-prefill contracts,
+topology-bound activation programs, target-authoritative speculation, and
 mechanical receipts. It contains no model runtime or native code.
 
 ```toml
@@ -53,6 +54,11 @@ interpretation is a compatibility change.
   a caller-provided audio identity and causal accounting; it never serializes
   PCM bytes.
 - Public collections and native strings have documented bounds.
+- `TextModelTopologyV1`, activation capture/vector/program contracts,
+  `SpeculationPlanV1`, and their receipts describe exact mechanics and
+  target/draft lineage without naming a native tensor pointer or model path.
+- Provisional speculative telemetry resolves to admitted or rejected target
+  positions before entering aggregate capture receipts.
 - Receipts record mechanics and causal lineage, not model quality or semantic
   correctness.
 - Checkpoint metadata binds an opaque backend state; it does not make that

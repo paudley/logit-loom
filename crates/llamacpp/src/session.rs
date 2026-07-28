@@ -8,19 +8,22 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::rc::Rc;
 
 use llama_cpp_4::context::LlamaContext;
-use llama_cpp_4::context::params::LlamaContextParams;
+use llama_cpp_4::context::params::{LlamaContextParams, LlamaContextType};
 use llama_cpp_4::llama_batch::LlamaBatch;
 use llama_cpp_4::sampling::LlamaSampler;
 use llama_cpp_4::token::LlamaToken;
 use llama_cpp_4::token::data::LlamaTokenData;
 use llama_cpp_4::token::data_array::LlamaTokenDataArray;
 use logit_loom::{
-    CheckpointReceipt, ControlFlow, Digest, GenerationFinish, GenerationPlan, GenerationReceipt,
-    ObservedToken, ObserverSet, Pipeline, PrefillFinish, PrefillMonitor, PrefillProgress,
-    PrefillReceipt, SteeringKind, TokenId,
+    ActivationPhaseV1, ActivationTelemetryDispositionV1, CheckpointReceipt, ControlFlow, Digest,
+    GenerationFinish, GenerationPlan, GenerationReceipt, ObservedToken, ObserverSet, Pipeline,
+    PrefillFinish, PrefillMonitor, PrefillProgress, PrefillReceipt, SteeringKind, TokenId,
 };
 
-use crate::{Error, Model, Runtime, error::native, sampler::build_sampler};
+use crate::{
+    ActivationCaptureOutput, ActivationConfiguration, ActivationProgramOutput, Error, Model,
+    Runtime, activation::ActivationController, error::native, sampler::build_sampler,
+};
 
 const STATE_BYTES_DOMAIN: &str = "llamacpp-state-bytes-v1";
 const TOKEN_HISTORY_DOMAIN: &str = "llamacpp-state-token-history-v1";
@@ -115,14 +118,29 @@ mod tests {
             threads: defaults.threads + 1,
             ..defaults
         };
-        let identity = session_compatibility_identity(&runtime, defaults);
+        let identity =
+            session_compatibility_identity(&runtime, defaults, LlamaContextType::Default, 0);
         assert_ne!(
             identity,
-            session_compatibility_identity(&runtime, different_context)
+            session_compatibility_identity(
+                &runtime,
+                different_context,
+                LlamaContextType::Default,
+                0
+            )
         );
         assert_ne!(
             identity,
-            session_compatibility_identity(&runtime, different_threads)
+            session_compatibility_identity(
+                &runtime,
+                different_threads,
+                LlamaContextType::Default,
+                0
+            )
+        );
+        assert_ne!(
+            identity,
+            session_compatibility_identity(&runtime, defaults, LlamaContextType::Mtp, 4)
         );
     }
 
@@ -322,12 +340,13 @@ impl StateSnapshot {
 pub struct Session<'model> {
     pub(crate) context: LlamaContext<'model>,
     pub(crate) model: &'model Model,
-    options: SessionOptions,
-    backend: Digest,
-    token_history: Vec<TokenId>,
-    position: u64,
-    active_steering: Option<SteeringKind>,
-    poison_reason: Option<String>,
+    pub(crate) options: SessionOptions,
+    pub(crate) backend: Digest,
+    pub(crate) token_history: Vec<TokenId>,
+    pub(crate) position: u64,
+    pub(crate) active_steering: Option<SteeringKind>,
+    pub(crate) activation: Option<ActivationController>,
+    pub(crate) poison_reason: Option<String>,
     thread_affinity: PhantomData<Rc<()>>,
 }
 
@@ -339,6 +358,7 @@ impl std::fmt::Debug for Session<'_> {
             .field("position", &self.position)
             .field("tokens", &self.token_history.len())
             .field("active_steering", &self.active_steering)
+            .field("has_activation", &self.activation.is_some())
             .field("healthy", &self.poison_reason.is_none())
             .finish_non_exhaustive()
     }
@@ -350,14 +370,70 @@ impl<'model> Session<'model> {
         runtime: &Runtime,
         options: SessionOptions,
     ) -> Result<Self, Error> {
+        Self::new_inner(model, runtime, options, LlamaContextType::Default, 0, None)
+    }
+
+    pub(crate) fn new_with_activation(
+        model: &'model Model,
+        runtime: &Runtime,
+        options: SessionOptions,
+        activation: ActivationConfiguration,
+    ) -> Result<Self, Error> {
+        Self::new_inner(
+            model,
+            runtime,
+            options,
+            LlamaContextType::Default,
+            0,
+            Some(activation),
+        )
+    }
+
+    pub(crate) fn new_speculative(
+        model: &'model Model,
+        runtime: &Runtime,
+        options: SessionOptions,
+        context_type: LlamaContextType,
+        recurrent_state_slots: u32,
+        activation: Option<ActivationConfiguration>,
+    ) -> Result<Self, Error> {
+        Self::new_inner(
+            model,
+            runtime,
+            options,
+            context_type,
+            recurrent_state_slots,
+            activation,
+        )
+    }
+
+    fn new_inner(
+        model: &'model Model,
+        runtime: &Runtime,
+        options: SessionOptions,
+        context_type: LlamaContextType,
+        recurrent_state_slots: u32,
+        activation: Option<ActivationConfiguration>,
+    ) -> Result<Self, Error> {
         options.validate()?;
-        let params = LlamaContextParams::default()
+        let (activation, transactions) = activation
+            .map(|configuration| configuration.lower(options.batch_size))
+            .transpose()?
+            .map_or((None, None), |(controller, transactions)| {
+                (Some(controller), Some(transactions))
+            });
+        let mut params = LlamaContextParams::default()
             .with_n_ctx(Some(options.context_size))
             .with_n_batch(options.batch_size)
             .with_n_ubatch(options.micro_batch_size)
             .with_n_threads(options.threads)
             .with_n_threads_batch(options.threads)
+            .with_ctx_type(context_type)
+            .with_n_rs_seq(recurrent_state_slots)
             .with_offload_kqv(true);
+        if let Some(transactions) = transactions {
+            params = params.with_tensor_transactions(transactions);
+        }
         let context = model
             .native
             .new_context(&runtime.native, params)
@@ -366,10 +442,16 @@ impl<'model> Session<'model> {
             context,
             model,
             options,
-            backend: session_compatibility_identity(runtime.identity(), options),
+            backend: session_compatibility_identity(
+                runtime.identity(),
+                options,
+                context_type,
+                recurrent_state_slots,
+            ),
             token_history: Vec::new(),
             position: 0,
             active_steering: None,
+            activation,
             poison_reason: None,
             thread_affinity: PhantomData,
         })
@@ -405,6 +487,40 @@ impl<'model> Session<'model> {
         self.active_steering
     }
 
+    /// Returns whether this session owns a transactional activation runtime.
+    pub const fn has_activation_runtime(&self) -> bool {
+        self.activation.is_some()
+    }
+
+    /// Drains captured activation records and aggregate per-plan receipts.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when no activation runtime is installed or callback
+    /// evidence is unavailable.
+    pub fn take_activation_captures(&mut self) -> Result<ActivationCaptureOutput, Error> {
+        self.ensure_healthy()?;
+        self.activation
+            .as_mut()
+            .ok_or_else(|| Error::Invalid("session has no activation runtime".to_owned()))?
+            .take_capture_output()
+    }
+
+    /// Drains successful activation write-back records and aggregate program
+    /// accounting.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when no activation runtime is installed or callback
+    /// evidence is unavailable.
+    pub fn take_activation_program_output(&mut self) -> Result<ActivationProgramOutput, Error> {
+        self.ensure_healthy()?;
+        self.activation
+            .as_ref()
+            .ok_or_else(|| Error::Invalid("session has no activation runtime".to_owned()))?
+            .take_program_output()
+    }
+
     /// Clears native causal memory and local lineage.
     ///
     /// # Errors
@@ -412,6 +528,9 @@ impl<'model> Session<'model> {
     /// Returns the retained reason when the session is poisoned.
     pub fn clear(&mut self) -> Result<(), Error> {
         self.ensure_healthy()?;
+        if let Some(activation) = self.activation.as_mut() {
+            activation.reset()?;
+        }
         self.context.clear_kv_cache();
         self.token_history.clear();
         self.position = 0;
@@ -491,7 +610,23 @@ impl<'model> Session<'model> {
 
         let chunk_limit = usize::try_from(self.options.batch_size)
             .map_err(|_| Error::Invalid("batch size exceeds usize".to_owned()))?;
-        for chunk in tokens.chunks(chunk_limit) {
+        let isolate_last = self
+            .activation
+            .as_ref()
+            .is_some_and(ActivationController::has_last_prefill_capture);
+        let prefix_end = if isolate_last {
+            tokens.len().saturating_sub(1)
+        } else {
+            tokens.len()
+        };
+        let mut offset = 0_usize;
+        while offset < tokens.len() {
+            let end = if offset < prefix_end {
+                offset.saturating_add(chunk_limit).min(prefix_end)
+            } else {
+                tokens.len()
+            };
+            let chunk = &tokens[offset..end];
             if let Some(active) = monitor.as_deref_mut()
                 && active.poll(progress)? == ControlFlow::Stop
             {
@@ -502,7 +637,12 @@ impl<'model> Session<'model> {
                     receipt: Some(receipt),
                 });
             }
-            self.decode_tokens(chunk)?;
+            self.decode_tokens(
+                chunk,
+                ActivationPhaseV1::Prefill,
+                isolate_last && end == tokens.len(),
+                ActivationTelemetryDispositionV1::Admitted,
+            )?;
             let chunk_tokens = u64::try_from(chunk.len())
                 .map_err(|_| Error::Invalid("prefill chunk size overflowed".to_owned()))?;
             progress.admitted_tokens = progress
@@ -525,6 +665,7 @@ impl<'model> Session<'model> {
                     receipt: Some(receipt),
                 });
             }
+            offset = end;
         }
         let receipt = monitor
             .map(|active| active.finish(PrefillFinish::Complete))
@@ -593,7 +734,12 @@ impl<'model> Session<'model> {
             }
 
             let piece = self.model.token_piece(token)?;
-            self.decode_tokens(std::slice::from_ref(&token))?;
+            self.decode_tokens(
+                std::slice::from_ref(&token),
+                ActivationPhaseV1::Generation,
+                false,
+                ActivationTelemetryDispositionV1::Admitted,
+            )?;
             sampler.accept(LlamaToken::new(token.get()));
             if let Some(active) = pipeline.as_deref_mut() {
                 active.accept(token)?;
@@ -688,6 +834,11 @@ impl<'model> Session<'model> {
     /// Returns an error when native state capture or identity encoding fails.
     pub fn capture_state(&mut self) -> Result<StateSnapshot, Error> {
         self.ensure_healthy()?;
+        if self.activation.is_some() {
+            return Err(Error::Invalid(
+                "activation sessions require an activation-bound checkpoint envelope".to_owned(),
+            ));
+        }
         if self.active_steering.is_some() {
             return Err(Error::Invalid(
                 "clear active steering before capturing a checkpoint".to_owned(),
@@ -727,6 +878,11 @@ impl<'model> Session<'model> {
     /// after llama.cpp accepts the complete state bytes.
     pub fn restore_state(&mut self, snapshot: &StateSnapshot) -> Result<(), Error> {
         self.ensure_healthy()?;
+        if self.activation.is_some() {
+            return Err(Error::Invalid(
+                "activation sessions require an activation-bound checkpoint envelope".to_owned(),
+            ));
+        }
         if self.active_steering.is_some() {
             return Err(Error::Invalid(
                 "clear active steering before restoring a checkpoint".to_owned(),
@@ -800,7 +956,13 @@ impl<'model> Session<'model> {
         self.context.decode(&mut batch).map_err(native)
     }
 
-    fn decode_tokens(&mut self, tokens: &[TokenId]) -> Result<(), Error> {
+    fn decode_tokens(
+        &mut self,
+        tokens: &[TokenId],
+        phase: ActivationPhaseV1,
+        last_prefill: bool,
+        disposition: ActivationTelemetryDispositionV1,
+    ) -> Result<(), Error> {
         self.model.validate_tokens(tokens)?;
         let token_count = u64::try_from(tokens.len())
             .map_err(|_| Error::Invalid("native batch token count overflowed".to_owned()))?;
@@ -823,12 +985,56 @@ impl<'model> Session<'model> {
                 )
                 .map_err(native)?;
         }
-        self.context.decode(&mut batch).map_err(native)?;
+        if let Some(activation) = self.activation.as_ref() {
+            activation.begin_decode(phase, last_prefill, disposition)?;
+        }
+        let decode_result = self.context.decode(&mut batch);
+        let callback_state = self
+            .activation
+            .as_ref()
+            .map(ActivationController::end_decode);
+        if let Err(error) = decode_result {
+            let error = native(error);
+            if self.activation.is_some() {
+                self.record_poison(&error);
+            }
+            return Err(error);
+        }
         self.token_history.extend_from_slice(tokens);
         self.position = self
             .position
             .checked_add(token_count)
             .ok_or_else(|| Error::Invalid("causal position overflowed".to_owned()))?;
+        let active_decode = match callback_state {
+            Some(Ok(active)) => Some(active),
+            Some(Err(error)) => {
+                self.record_poison(&error);
+                return Err(error);
+            }
+            None => None,
+        };
+        if let Some(active_decode) = active_decode {
+            let captures = self
+                .context
+                .tensor_transactions_mut()
+                .ok_or_else(|| {
+                    Error::Poisoned(
+                        "activation context lost its tensor transaction state".to_owned(),
+                    )
+                })?
+                .take_captures();
+            let result = self
+                .activation
+                .as_mut()
+                .ok_or_else(|| {
+                    Error::Poisoned("activation controller became unavailable".to_owned())
+                })?
+                .consume_captures(captures, active_decode);
+            if let Err(error) = result {
+                self.record_poison(&error);
+                return Err(error);
+            }
+        }
         Ok(())
     }
 
@@ -854,11 +1060,11 @@ impl<'model> Session<'model> {
         self.record_poison(error);
     }
 
-    fn record_poison(&mut self, error: &Error) {
+    pub(crate) fn record_poison(&mut self, error: &Error) {
         self.poison_reason.get_or_insert_with(|| error.to_string());
     }
 
-    fn ensure_healthy(&self) -> Result<(), Error> {
+    pub(crate) fn ensure_healthy(&self) -> Result<(), Error> {
         if let Some(reason) = &self.poison_reason {
             return Err(Error::Poisoned(reason.clone()));
         }
@@ -882,12 +1088,23 @@ fn checkpoint_logit_refresh_range(position: u64) -> Result<Option<(u32, u32)>, E
     Ok(Some((last_position, end_position)))
 }
 
-fn session_compatibility_identity(runtime: &Digest, options: SessionOptions) -> Digest {
-    let mut bytes = Vec::with_capacity(runtime.as_str().len() + 16);
+fn session_compatibility_identity(
+    runtime: &Digest,
+    options: SessionOptions,
+    context_type: LlamaContextType,
+    recurrent_state_slots: u32,
+) -> Digest {
+    let mut bytes = Vec::with_capacity(runtime.as_str().len() + 24);
     bytes.extend_from_slice(runtime.as_str().as_bytes());
     bytes.extend_from_slice(&options.context_size.get().to_le_bytes());
     bytes.extend_from_slice(&options.batch_size.to_le_bytes());
     bytes.extend_from_slice(&options.micro_batch_size.to_le_bytes());
     bytes.extend_from_slice(&options.threads.to_le_bytes());
-    Digest::of_bytes("llamacpp-session-compatibility-v1", &bytes)
+    let context_type = match context_type {
+        LlamaContextType::Default => 0_u32,
+        LlamaContextType::Mtp => 1_u32,
+    };
+    bytes.extend_from_slice(&context_type.to_le_bytes());
+    bytes.extend_from_slice(&recurrent_state_slots.to_le_bytes());
+    Digest::of_bytes("llamacpp-session-compatibility-v2", &bytes)
 }

@@ -48,6 +48,15 @@ the corresponding built-in mechanics or normalized configuration shape
 requires a new domain. Custom transforms and observers retain caller-defined
 implementation identities.
 
+Transactional text mechanics use distinct domains including
+`text-model-topology-v1`, `activation-capture-plan-v1`,
+`activation-vector-bank-v1`, `activation-program-v1`,
+`activation-invocation-receipt-v1`, `speculation-plan-v1`,
+`speculation-boundary-receipt-v1`, `speculation-receipt-v1`,
+`text-mechanics-plan-v2`, and `text-mechanics-receipt-v2`. Provisional and
+resolved activation rows have different receipt identities. No version-one
+aggregate text-mechanics value is reinterpreted.
+
 Diffusion contracts use distinct domains including
 `diffusion-tensor-spec-v1`, `diffusion-schedule-v1`,
 `diffusion-plan-v1`, `diffusion-intervention-spec-v1`,
@@ -65,10 +74,21 @@ and does not reinterpret version 1 identities. Final pixel bytes retain the
 timing, schedule interpretation, state-byte encoding, or serialized-shape
 changes require new domains rather than reinterpretation.
 
-`logit-loom-llamacpp` pins `llama-cpp-4` exactly to version 0.4.2. A binding
-upgrade is a reviewed compatibility change: compile the complete workspace,
-inspect changed native semantics, rerun opt-in model fixtures, and update this
-document and `CHANGELOG.md`.
+`logit-loom-llamacpp` currently develops against a local `llama-cpp-4` 0.4.2
+successor carrying literal llama.cpp revision
+`91f8c9c5fb038c086e13e9cd823c29b33b07ba54`. The successor adds bounded tensor
+transactions, native decode-lifecycle hooks, lifetime-bound MTP and EAGLE-3
+sessions, and versioned exact implementation state. During review, the
+workspace resolves that source from the adjacent binding checkout.
+
+This is not a publishable dependency arrangement. A public source revision can
+use an immutable public binding source, but a crates.io Logit Loom release
+requires the successor as a registry package. In both cases the workspace
+manifest must no longer require the adjacent path. Changing the binding source,
+llama.cpp revision, graph-selector profile, decode hooks, or
+speculative-state envelope is a reviewed compatibility event: compile the
+complete workspace, inspect changed native semantics, rerun the opt-in model
+fixtures, and update this document and `CHANGELOG.md`.
 
 ## Native build features
 
@@ -174,6 +194,15 @@ recorded token to restore the next-token boundary. A backend whose memory
 cannot remove that position is incompatible with checkpoint replay. A partial
 native restore or a failed post-restore logit refresh poisons the session
 because its resulting backend state is unknown.
+
+The successor binding can capture target sequence state, draft sequence state,
+and versioned MTP or EAGLE-3 implementation state at a quiescent boundary.
+`SpeculativeCheckpointReceiptV1` describes the complete envelope that a
+higher-level owner must authenticate. The current `generate_speculative`
+operation does not expose persistent checkpoint restore because llama.cpp
+offers an exact in-process sampler clone but no portable encoding for that
+sampler state. Logit Loom does not substitute an incomplete serializable
+checkpoint.
 
 Diffusion checkpoints are exact post-Euler host `f32` bytes bound to the full
 `DiffusionPlan`, companion/runtime identity, and completed step. Restore is

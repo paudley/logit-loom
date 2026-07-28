@@ -136,12 +136,22 @@ backend:
 ```sh
 cargo run -p logit-loom-llamacpp --example generate \
   --features vulkan -- /path/to/model.gguf "Prompt"
+
+cargo run -p logit-loom-llamacpp --example speculative_mtp \
+  --features vulkan -- /path/to/mtp-model.gguf "Draft from here:"
 ```
 
 `ModelOptions::default` requires accelerator participation. Logit Loom rejects
 a load with no reported accelerator device instead of silently retrying
 CPU-only inference. Record the selected Cargo feature and `Model::devices`
 alongside model-backed acceptance results.
+
+The MTP example requires one GGUF that reports native NextN heads. MTP uses
+two contexts over the same exact model; EAGLE-3 instead requires separately
+loaded, vocabulary-compatible target and `eagle3` draft models. The draft must
+name exactly three valid target extraction layers. Both mechanisms preserve
+target sampling as causal authority, expose no ordinary-generation fallback,
+and currently support one sequence through the high-level operation.
 
 Checkpoint state is opaque and bound to the model bytes, adapter build, and
 exact session allocation options. Keep it within a controlled deployment; do

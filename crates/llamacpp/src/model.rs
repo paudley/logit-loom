@@ -10,9 +10,12 @@ use llama_cpp_4::llama_backend::LlamaBackend;
 use llama_cpp_4::model::params::LlamaModelParams;
 use llama_cpp_4::model::{AddBos, LlamaBackendDeviceType, LlamaModel, Special};
 use llama_cpp_4::token::LlamaToken;
-use logit_loom::{Digest, TokenId};
+use logit_loom::{Digest, TextModelTopologyV1, TextSpeculativeMechanismV1, TokenId};
 
-use crate::{Error, LLAMA_CPP_BINDING_VERSION, Session, SessionOptions, error::native};
+use crate::{
+    ActivationConfiguration, Error, LLAMA_CPP_BINDING_VERSION, LLAMA_CPP_REVISION, Session,
+    SessionOptions, error::native,
+};
 
 const MODEL_ARTIFACT_DOMAIN: &str = "llamacpp-model-file-blake3-v1";
 pub(crate) const LORA_ARTIFACT_DOMAIN: &str = "llamacpp-lora-file-blake3-v1";
@@ -104,6 +107,9 @@ pub struct Tokenization {
 pub struct Model {
     pub(crate) native: LlamaModel,
     artifact: Digest,
+    topology: TextModelTopologyV1,
+    tensor_selector_implementation: Digest,
+    architecture: String,
     devices: Vec<String>,
 }
 
@@ -112,6 +118,8 @@ impl std::fmt::Debug for Model {
         formatter
             .debug_struct("Model")
             .field("artifact", &self.artifact)
+            .field("architecture", &self.architecture)
+            .field("topology", &self.topology)
             .field("devices", &self.devices)
             .finish_non_exhaustive()
     }
@@ -168,9 +176,56 @@ impl Model {
                 "model placement contains no accelerator device".to_owned(),
             ));
         }
+        let architecture = native_model
+            .meta_val_str("general.architecture", 256)
+            .map_err(native)?;
+        if architecture.is_empty() || architecture.len() > 256 {
+            return Err(Error::Incompatible(
+                "model architecture metadata is empty or excessive".to_owned(),
+            ));
+        }
+        let architecture_implementation =
+            architecture_implementation(runtime.identity(), &architecture)?;
+        let tensor_selector_implementation =
+            tensor_selector_implementation(&architecture_implementation)?;
+        let layers = positive_native_dimension(native_model.n_layer(), "model layer count")?;
+        let embedding_width =
+            positive_native_dimension(native_model.n_embd(), "model embedding width")?;
+        let experts = optional_native_dimension(native_model.n_expert(), "model expert count")?;
+        let experts_used = experts.and_then(|_| {
+            native_model
+                .meta_val_str(&format!("{architecture}.expert_used_count"), 64)
+                .ok()
+                .and_then(|value| value.parse::<u32>().ok())
+        });
+        let nextn_layers =
+            optional_native_dimension(native_model.n_layer_nextn(), "model NextN layer count")?
+                .unwrap_or(0);
+        let mut supported_speculation = Vec::with_capacity(2);
+        if nextn_layers > 0 {
+            supported_speculation.push(TextSpeculativeMechanismV1::Mtp);
+        }
+        if native_model.has_decoder() && !native_model.is_diffusion() {
+            supported_speculation.push(TextSpeculativeMechanismV1::Eagle3);
+        }
+        let topology = TextModelTopologyV1 {
+            model: artifact.clone(),
+            backend: runtime.identity().clone(),
+            architecture_implementation,
+            layers,
+            embedding_width,
+            experts,
+            experts_used,
+            nextn_layers,
+            supported_speculation,
+        };
+        topology.digest()?;
         Ok(Self {
             native: native_model,
             artifact,
+            topology,
+            tensor_selector_implementation,
+            architecture,
             devices,
         })
     }
@@ -178,6 +233,24 @@ impl Model {
     /// Returns the content identity of the exact GGUF bytes.
     pub const fn artifact_digest(&self) -> &Digest {
         &self.artifact
+    }
+
+    /// Returns the exact architecture name reported by GGUF metadata.
+    pub fn architecture(&self) -> &str {
+        &self.architecture
+    }
+
+    /// Returns content- and backend-bound text topology.
+    pub const fn topology(&self) -> &TextModelTopologyV1 {
+        &self.topology
+    }
+
+    /// Returns the exact llama.cpp graph-selector implementation identity.
+    ///
+    /// Router and named tensor sites must carry this identity before they can
+    /// be lowered by this adapter revision.
+    pub const fn tensor_selector_implementation(&self) -> &Digest {
+        &self.tensor_selector_implementation
     }
 
     /// Returns observed llama.cpp device descriptions.
@@ -253,6 +326,22 @@ impl Model {
         options: SessionOptions,
     ) -> Result<Session<'model>, Error> {
         Session::new(self, runtime, options)
+    }
+
+    /// Creates one causal session with an owned transactional activation
+    /// runtime.
+    ///
+    /// # Errors
+    ///
+    /// Returns a validation, callback-lowering, or native context-allocation
+    /// error.
+    pub fn session_with_activation<'model>(
+        &'model self,
+        runtime: &Runtime,
+        options: SessionOptions,
+        activation: ActivationConfiguration,
+    ) -> Result<Session<'model>, Error> {
+        Session::new_with_activation(self, runtime, options, activation)
     }
 }
 
@@ -346,6 +435,55 @@ fn validate_vocabulary_size(n_vocab: i32) -> Result<(), Error> {
         ));
     }
     Ok(())
+}
+
+fn positive_native_dimension(value: i32, field: &'static str) -> Result<u32, Error> {
+    if value <= 0 {
+        return Err(Error::Incompatible(format!(
+            "{field} must be positive, got {value}"
+        )));
+    }
+    u32::try_from(value)
+        .map_err(|_| Error::Incompatible(format!("{field} exceeds the u32 contract")))
+}
+
+fn optional_native_dimension(value: i32, field: &'static str) -> Result<Option<u32>, Error> {
+    if value < 0 {
+        return Err(Error::Incompatible(format!(
+            "{field} must not be negative, got {value}"
+        )));
+    }
+    if value == 0 {
+        return Ok(None);
+    }
+    u32::try_from(value)
+        .map(Some)
+        .map_err(|_| Error::Incompatible(format!("{field} exceeds the u32 contract")))
+}
+
+fn architecture_implementation(runtime: &Digest, architecture: &str) -> Result<Digest, Error> {
+    Ok(Digest::of_serializable(
+        "llamacpp-architecture-implementation-v1",
+        &(
+            runtime,
+            architecture,
+            LLAMA_CPP_BINDING_VERSION,
+            LLAMA_CPP_REVISION,
+            "l_out-{layer};ffn_moe_logits-{layer};ffn_moe_probs-{layer};ffn_moe_topk-{layer}",
+        ),
+    )?)
+}
+
+fn tensor_selector_implementation(architecture: &Digest) -> Result<Digest, Error> {
+    Ok(Digest::of_serializable(
+        "llamacpp-tensor-selector-implementation-v1",
+        &(
+            architecture,
+            LLAMA_CPP_BINDING_VERSION,
+            LLAMA_CPP_REVISION,
+            "exact-name;f32-or-i32;batch-token-rows-v1",
+        ),
+    )?)
 }
 
 #[cfg(test)]

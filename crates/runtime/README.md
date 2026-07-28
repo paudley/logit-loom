@@ -181,6 +181,21 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+## Activation and speculative generation
+
+The runtime re-exports the adapter's topology-bound activation and
+target-authoritative speculation types without hiding their native ownership.
+For same-model MTP, pass [`Loom::raw_runtime`] and [`Loom::raw_model`] to
+[`generate_speculative`]. EAGLE-3 requires two models loaded under one
+explicitly owned native [`low_level::llamacpp::Runtime`], so applications
+should construct the lower-level runtime and both `Model` values directly.
+
+No high-level call chooses tensor sites, mirrors a target activation program
+onto a draft, changes context allocation, or falls back to ordinary
+generation. The current speculative operation supports one sequence and does
+not expose persistent checkpoint restore; see the adapter guide and
+compatibility policy for the exact boundary.
+
 ## Identities and escape hatches
 
 [`Loom::model_identity`], [`Loom::backend_identity`], and

@@ -3,16 +3,29 @@
 #![doc = include_str!("../README.md")]
 #![forbid(unsafe_code)]
 
+mod activation;
 mod error;
 mod model;
 mod sampler;
 mod session;
+mod speculation;
 mod steering;
 
+pub use activation::{
+    ActivationCaptureOutput, ActivationConfiguration, ActivationProgramOutput,
+    LlamaCppTensorProfile,
+};
 pub use error::Error;
 pub use model::{DevicePolicy, MAX_TOKENIZATION_BYTES, Model, ModelOptions, Runtime, Tokenization};
 pub use session::{GenerationOutput, PrefillOutput, Session, SessionOptions, StateSnapshot};
+pub use speculation::{
+    SpeculativeActivationOutput, SpeculativeActivations, SpeculativeGenerationOutput,
+    SpeculativeRequest, SpeculativeSessionOptions, generate_speculative,
+    speculation_implementation_identity,
+};
 pub use steering::{ControlVector, ControlVectorScope, LoraAdapter, LoraScope};
 
 /// Exact native Rust binding version used by this adapter release.
-pub const LLAMA_CPP_BINDING_VERSION: &str = "llama-cpp-4:0.4.2";
+pub const LLAMA_CPP_BINDING_VERSION: &str = "llama-cpp-4:0.4.2+logit-loom-adr0002";
+/// Exact llama.cpp revision carried by the ADR 0002 binding successor.
+pub const LLAMA_CPP_REVISION: &str = "91f8c9c5fb038c086e13e9cd823c29b33b07ba54";

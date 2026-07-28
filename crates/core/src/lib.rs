@@ -3,18 +3,23 @@
 #![doc = include_str!("../README.md")]
 #![forbid(unsafe_code)]
 
+mod activation;
+mod activation_accumulator;
 mod audio;
 mod digest;
 mod error;
 mod generation;
 mod observe;
 mod sampling;
+mod speculation;
 mod state;
 mod steering;
 mod text_mechanics;
 mod token;
 mod transform;
 
+pub use activation::*;
+pub use activation_accumulator::*;
 pub use audio::{
     AudioPrefillPlanV1, AudioPrefillReceiptV1, MAX_AUDIO_FRAMES, MAX_AUDIO_SAMPLE_RATE_HZ,
 };
@@ -28,10 +33,13 @@ pub use sampling::{
     MAX_STOP_SEQUENCE_BYTES, MAX_STOP_SEQUENCES, MirostatSampler, MirostatVersion,
     RepetitionSampler, SamplingPlan,
 };
+pub use speculation::*;
 pub use state::CheckpointReceipt;
 pub use steering::{ControlVectorSpec, LoraSpec, SteeringAction, SteeringKind, SteeringReceipt};
 pub use text_mechanics::{
-    MAX_SPECULATIVE_TOKENS, MAX_TEXT_MECHANICS_LORAS, TextMechanicsPlanV1, TextMechanicsReceiptV1,
+    MAX_SPECULATIVE_TOKENS, MAX_TEXT_MECHANICS_CAPTURES, MAX_TEXT_MECHANICS_LORAS,
+    TextMechanicsCleanupReceiptV2, TextMechanicsPlanV1, TextMechanicsPlanV2,
+    TextMechanicsReceiptV1, TextMechanicsReceiptV2,
 };
 pub use token::{CandidateMode, MAX_SPARSE_CANDIDATES, TokenId};
 pub use transform::{

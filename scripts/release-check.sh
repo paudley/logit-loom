@@ -20,6 +20,13 @@ if [[ "${allow_dirty}" == false ]] && [[ -n "$(git status --porcelain)" ]]; then
     exit 1
 fi
 
+if rg -q \
+    '^llama-cpp-4[[:space:]]*=[[:space:]]*\{[^}]*path[[:space:]]*=' \
+    Cargo.toml; then
+    echo "release check requires a registry-published llama-cpp-4 successor, not a local path" >&2
+    exit 1
+fi
+
 cargo run --quiet --locked -p logit-loom-xtask -- models check
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --locked -- -D warnings

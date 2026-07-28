@@ -29,6 +29,14 @@ execution, and native details isolated in an adapter.
   sparse logit transforms before native sampling. Candidate changes commit only
   when every stage succeeds, so an error or panic cannot leave a partial
   write-back.
+- **Probe and intervene at exact model sites.** Capture bounded residual or
+  router rows, accumulate caller-labelled vectors, and apply ordered
+  position-scoped tensor operations through an exact topology/backend profile.
+  The receipts establish what ran, not what a direction means.
+- **Compare target and draft mechanics directly.** Run MTP or EAGLE-3 with the
+  target model as sole causal authority, retain proposed/accepted/rejected
+  accounting, and resolve provisional tensor telemetry before observers see
+  admitted tokens.
 - **Instrument generation at the causal boundary.** Observe arbitrary token
   bytes only after native admission, then implement logging, counters,
   cooperative stops, or application-specific control flow without assuming
@@ -199,6 +207,11 @@ receipts suitable for inspection or replay checks.
   repetition, DRY, Mirostat, logit bias, and grammar composition.
 - llama.cpp causal prefill, generation, checkpoint/restore, scoped LoRA, and
   scoped control-vector integration.
+- Topology-bound activation capture, deterministic content-free vector
+  accumulation, and transactional scaled-add/projection-removal programs.
+- One-sequence target-authoritative MTP and EAGLE-3 generation with exact
+  proposal boundaries, rejected-suffix rollback, optional independent
+  target/draft activation programs, and no ordinary-generation fallback.
 - An explicit higher-level local runtime with separate replace/append
   admission, bounded one-shot and stateful generation, control builders, and
   compatibility identity access.
@@ -240,7 +253,14 @@ cargo run -p logit-loom-runtime --example generate \
   --features vulkan -- /path/to/model.gguf "Prompt"
 cargo run -p logit-loom-runtime --example branch \
   --features vulkan -- /path/to/model.gguf "Branch from here:"
+cargo run -p logit-loom-llamacpp --example speculative_mtp \
+  --features vulkan -- /path/to/mtp-model.gguf "Draft from here:"
 ```
+
+The MTP example requires a compatible GGUF reporting native NextN heads. It
+uses the same exact model bytes for target and draft contexts, keeps target
+sampling causally authoritative, and reports proposal accounting on standard
+error.
 
 ## End-to-end experiment runbooks
 

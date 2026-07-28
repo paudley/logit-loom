@@ -4,6 +4,9 @@
 
 The diffusion runtime decision and its post-Euler state boundary are recorded
 in [ADR 0001](adr/0001-stable-diffusion-runtime.md).
+Topology-bound text activation and target-authoritative speculation are
+recorded in
+[ADR 0002](adr/0002-transactional-text-mechanics.md).
 
 Logit Loom separates stable mechanics contracts from callback execution and
 from fast-moving model backends. Token candidates and diffusion tensors remain
@@ -23,7 +26,11 @@ application
 text lane
   logit-loom-runtime
   ├─ logit-loom
-  └─ logit-loom-llamacpp → llama-cpp-4 → llama.cpp
+  └─ logit-loom-llamacpp
+       ├─ ordinary causal session
+       ├─ activation transaction controller
+       └─ MTP/EAGLE-3 target verifier
+            → reviewed llama-cpp-4 successor → pinned llama.cpp
 
 image lane
   logit-loom-diffusion-sdcpp
@@ -161,6 +168,72 @@ Repetition and DRY sampler state is initialized with the exact causal token
 history. Grammar state begins at the first generated token, so prompt tokens do
 not accidentally consume the output grammar. Every admitted generated token is
 then accepted by the complete native sampler chain.
+
+## Activation transaction boundary
+
+`TextModelTopologyV1` binds exact model bytes, backend build, architecture
+implementation, layer/embedding/expert dimensions, NextN heads, and supported
+speculative mechanisms. `TextTensorSiteV1` is backend-neutral; the llama.cpp
+adapter lowers it only through an exact selector profile tied to that topology
+and pinned graph implementation.
+
+The successor binding owns the native callback lifetime. Exact begin/end hooks
+cover direct decodes and llama.cpp decodes performed inside MTP or EAGLE-3.
+For each selected graph node it checks name, dtype, contiguous shape, row
+width, row count, sequence IDs, causal positions, and aggregate byte bounds.
+It then copies the complete tensor into Rust-owned storage.
+
+Read-only selections commit retained captures only after native decode and
+complete row coverage succeed. Mutable `f32` selections run ordered
+scaled-add or scaled-projection-removal operations on the owned copy. One
+complete finite tensor is written back after every operation succeeds; a
+callback error or panic produces no partial write-back and poisons the
+high-level session.
+
+Capture plans select the last prefill token or explicit inclusive positions
+and retain a digest, deterministic scalar statistics, or a bounded snapshot.
+The content-free accumulator consumes already captured rows in caller order to
+produce means or differences of means. It records mechanical provenance but
+does not assign a semantic label or make an efficacy claim.
+
+## Target-authoritative speculation
+
+`generate_speculative` creates separate target and draft contexts and an MTP
+or EAGLE-3 native session. It currently accepts exactly one sequence. Plans
+requesting another sequence count, insufficient verification-batch capacity,
+missing recurrent rollback headroom, a mismatched implementation identity, or
+an incompatible model/topology relationship fail before generation. The
+pre-allocation pairing check mirrors the pinned llama.cpp revision's
+vocabulary rules and validates MTP row width or EAGLE-3 architecture and
+extraction-layer metadata before either context is created.
+
+At each boundary:
+
+1. The draft proposes zero or more token IDs.
+2. The target decodes the pending sampled token plus the proposal and exposes
+   logits for every row.
+3. The draft implementation processes the same verified target state.
+4. The target sampler accepts only the longest exact proposal prefix.
+5. Both native contexts remove the rejected suffix and the draft
+   implementation records the accepted count.
+6. Provisional target/draft activation records resolve against the final
+   contiguous causal prefix.
+7. Transforms, exact token bytes, and observers advance only for tokens now
+   admitted by the target.
+
+The sampled mismatch becomes pending input for the next boundary and is not
+observed until its target decode succeeds. An end-of-generation selection is
+never decoded. Observer or exact-byte stop requests may shorten the accepted
+prefix; the unobserved suffix is rolled back before the boundary receipt is
+committed. There is no fallback to ordinary generation.
+
+At every completed boundary the successor binding can expose exact target,
+draft, and versioned MTP/EAGLE-3 implementation state. The backend-neutral
+`SpeculativeCheckpointReceiptV1` defines the full authenticated envelope.
+`generate_speculative` is currently one-shot and does not expose persistent
+restore because target sampler continuation is available only as an opaque
+in-process native clone; it never labels the remaining native state as a
+complete portable checkpoint.
 
 ## Transactional transforms
 

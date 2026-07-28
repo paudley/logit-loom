@@ -70,9 +70,28 @@ include breaking API changes.
 - A higher-level interface guide covering ownership, ordering, identities,
   exact bytes, concurrency boundaries, checkpoints, steering, and low-level
   escape hatches.
+- Backend-neutral, versioned text topology, activation capture, vector-bank,
+  ordered activation-program, provisional telemetry, target-authoritative
+  speculation, checkpoint-envelope, and aggregate V2 mechanics contracts.
+- A deterministic content-free activation accumulator for bounded group means,
+  paired differences, and optional unit normalization without prompt or
+  semantic labeling.
+- Exact llama.cpp topology/profile validation, bounded activation capture,
+  transactional scaled-add and projection-removal operators, and one-sequence
+  target-authoritative MTP and EAGLE-3 generation with explicit target/draft
+  activation policies, pre-allocation native-pair compatibility checks, and
+  admitted/rejected proposal receipts.
+- A caller-supplied-model MTP example that writes arbitrary generated token
+  bytes without assuming UTF-8.
 
 ### Changed
 
+- The text adapter now develops against a local `llama-cpp-4` 0.4.2 successor
+  forward-ported to llama.cpp
+  `91f8c9c5fb038c086e13e9cd823c29b33b07ba54`; public packaging remains blocked
+  until that successor is available from an immutable public source.
+- Release validation now rejects an adjacent-path `llama-cpp-4` successor so
+  the adapter cannot be mistaken for a crates.io-ready package.
 - Prepared the publishable workspace crates and exact internal dependencies
   for the coordinated `0.2.0` release; the partial tokenizer crate remains
   explicitly unpublished.

@@ -21,9 +21,12 @@ pub use steering::{ControlVectorSession, LoraSession};
 
 pub use logit_loom::*;
 pub use logit_loom_llamacpp::{
-    ControlVector, DevicePolicy, GenerationOutput, LLAMA_CPP_BINDING_VERSION, LoraAdapter,
-    MAX_TOKENIZATION_BYTES, ModelOptions, PrefillOutput, SessionOptions, StateSnapshot,
-    Tokenization,
+    ActivationCaptureOutput, ActivationConfiguration, ActivationProgramOutput, ControlVector,
+    DevicePolicy, GenerationOutput, LLAMA_CPP_BINDING_VERSION, LlamaCppTensorProfile, LoraAdapter,
+    MAX_TOKENIZATION_BYTES, ModelOptions, PrefillOutput, SessionOptions,
+    SpeculativeActivationOutput, SpeculativeActivations, SpeculativeGenerationOutput,
+    SpeculativeRequest, SpeculativeSessionOptions, StateSnapshot, Tokenization,
+    generate_speculative, speculation_implementation_identity,
 };
 pub use logit_loom_models::ArtifactReceipt as ModelArtifactReceipt;
 

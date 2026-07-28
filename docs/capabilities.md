@@ -16,6 +16,10 @@ It intentionally makes no model-quality or research-efficacy claims.
 | Cooperative cancellation | `CancellationToken`, observer control flow | Cross-thread signal test |
 | Native sampler translation | `GenerationPlan` through llama.cpp adapter | Type/API compilation against pinned binding |
 | Causal prefill and generation | `Session` | Type/API compilation; model execution is opt-in |
+| Topology-bound activation capture | `ActivationConfiguration`, `ActivationCaptureOutput` | Model-free topology/site/bound/retention tests plus compilation against the reviewed callback owner; graph execution is opt-in |
+| Transactional activation programs | `ActivationProgramV1`, `ActivationVectorBankV1`, llama.cpp activation runtime | Model-free accumulation, ordering, numeric, provisional-resolution, and transaction-staging tests; native tensor mutation and write-back are opt-in |
+| Target-authoritative speculation | `generate_speculative`, `SpeculationPlanV1`, MTP/EAGLE-3 receipts | Zero/partial/complete acceptance contracts, exact lifecycle unit tests, and adapter compilation against pinned llama.cpp HEAD; compatible-model execution is opt-in |
+| Speculative checkpoint envelope | `SpeculativeCheckpointReceiptV1`, successor binding state APIs | Model-free identity/bound checks and exact native target/draft/implementation-state APIs; the high-level persistent restore façade and sampler continuation fixture remain open |
 | Checkpoint capture/restore | `StateSnapshot` | Reconstruction/accounting unit tests; native capture/restore is opt-in |
 | Scoped `LoRA` | `LoraScope` | Type/API compilation; model/adapter execution is opt-in |
 | Scoped control vectors | `ControlVectorScope` | Dimension/lifecycle code and type/API compilation; model execution is opt-in |
