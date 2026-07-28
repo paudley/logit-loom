@@ -90,6 +90,9 @@ include breaking API changes.
   forward-ported to llama.cpp
   `91f8c9c5fb038c086e13e9cd823c29b33b07ba54`; public packaging remains blocked
   until that successor is available from an immutable public source.
+- The successor binding validates speculative context shape and lifecycle,
+  bounds copied prompt/state data, and contains C++ exceptions before they can
+  cross the Rust FFI boundary.
 - Release validation now rejects an adjacent-path `llama-cpp-4` successor so
   the adapter cannot be mistaken for a crates.io-ready package.
 - Prepared the publishable workspace crates and exact internal dependencies

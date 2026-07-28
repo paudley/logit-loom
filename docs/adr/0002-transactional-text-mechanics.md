@@ -297,8 +297,8 @@ width, or EAGLE-3 draft metadata and never falls back to ordinary generation.
 
 The binding successor is forward-ported to the literal revision recorded
 above. It owns bounded tensor transactions, native begin/end decode hooks,
-exclusive-lifetime speculative wrappers, and versioned MTP/EAGLE-3
-implementation-state capture and restore.
+exclusive-lifetime speculative wrappers, contained C++ lifecycle failures,
+and versioned MTP/EAGLE-3 implementation-state capture and restore.
 
 Two acceptance items remain deliberately open:
 
