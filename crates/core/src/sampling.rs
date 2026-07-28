@@ -18,6 +18,14 @@ pub const MAX_LOGIT_BIASES: usize = 65_536;
 pub const MAX_GRAMMAR_SOURCE_BYTES: usize = 1024 * 1024;
 /// Maximum UTF-8 bytes accepted in an eager grammar root name.
 pub const MAX_GRAMMAR_ROOT_BYTES: usize = 256;
+/// Maximum trigger patterns accepted by one lazy grammar.
+pub const MAX_LAZY_GRAMMAR_TRIGGER_PATTERNS: usize = 64;
+/// Maximum UTF-8 bytes accepted in one lazy-grammar trigger pattern.
+pub const MAX_LAZY_GRAMMAR_TRIGGER_PATTERN_BYTES: usize = 4_096;
+/// Maximum aggregate UTF-8 bytes accepted across lazy-grammar trigger patterns.
+pub const MAX_LAZY_GRAMMAR_TRIGGER_BYTES: usize = 64 * 1_024;
+/// Maximum trigger tokens accepted by one lazy grammar.
+pub const MAX_LAZY_GRAMMAR_TRIGGER_TOKENS: usize = 4_096;
 /// Maximum exact byte stop sequences accepted by one generation plan.
 pub const MAX_STOP_SEQUENCES: usize = 64;
 /// Maximum bytes accepted in one exact stop sequence.
@@ -271,6 +279,103 @@ impl Grammar {
     }
 }
 
+/// Activation policy for a version-two native grammar.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum GrammarActivationV2 {
+    /// Constrain the first generated token and every subsequent token.
+    Eager,
+    /// Begin unconstrained and activate when an exact pattern or token
+    /// trigger is observed by the native sampler.
+    Lazy {
+        /// Ordered native regular-expression trigger patterns.
+        trigger_patterns: Vec<String>,
+        /// Ordered exact tokenizer IDs that activate the grammar.
+        trigger_tokens: Vec<TokenId>,
+    },
+}
+
+/// Version-two eager or lazy llama.cpp GBNF grammar.
+///
+/// This is a separate serialized contract from [`Grammar`]. Existing
+/// generation-plan-v1 identities therefore remain unchanged.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GrammarPlanV2 {
+    /// Complete bounded GBNF grammar and root rule.
+    pub grammar: Grammar,
+    /// Eager or trigger-driven activation.
+    pub activation: GrammarActivationV2,
+}
+
+impl GrammarPlanV2 {
+    /// Validates grammar and lazy-trigger bounds.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for malformed grammar text, empty lazy activation,
+    /// duplicate triggers, excessive trigger counts, or excessive pattern
+    /// bytes.
+    pub fn validate(&self) -> Result<(), CoreError> {
+        self.grammar.validate()?;
+        let GrammarActivationV2::Lazy {
+            trigger_patterns,
+            trigger_tokens,
+        } = &self.activation
+        else {
+            return Ok(());
+        };
+        if trigger_patterns.is_empty() && trigger_tokens.is_empty() {
+            return Err(CoreError::invalid(
+                "lazy grammar",
+                "at least one trigger pattern or token is required",
+            ));
+        }
+        let trigger_bytes = trigger_patterns
+            .iter()
+            .try_fold(0_usize, |total, pattern| {
+                total
+                    .checked_add(pattern.len())
+                    .ok_or_else(|| CoreError::invalid("lazy grammar", "trigger bytes overflowed"))
+            })?;
+        if trigger_patterns.len() > MAX_LAZY_GRAMMAR_TRIGGER_PATTERNS
+            || trigger_patterns.iter().any(|pattern| {
+                pattern.is_empty()
+                    || pattern.len() > MAX_LAZY_GRAMMAR_TRIGGER_PATTERN_BYTES
+                    || pattern.contains('\0')
+            })
+            || trigger_bytes > MAX_LAZY_GRAMMAR_TRIGGER_BYTES
+            || trigger_tokens.len() > MAX_LAZY_GRAMMAR_TRIGGER_TOKENS
+        {
+            return Err(CoreError::invalid(
+                "lazy grammar",
+                format!(
+                    "requires at most {MAX_LAZY_GRAMMAR_TRIGGER_PATTERNS} non-empty NUL-free patterns of at most {MAX_LAZY_GRAMMAR_TRIGGER_PATTERN_BYTES} bytes, {MAX_LAZY_GRAMMAR_TRIGGER_BYTES} aggregate pattern bytes, and {MAX_LAZY_GRAMMAR_TRIGGER_TOKENS} trigger tokens"
+                ),
+            ));
+        }
+        if trigger_patterns.iter().collect::<HashSet<_>>().len() != trigger_patterns.len()
+            || trigger_tokens.iter().collect::<HashSet<_>>().len() != trigger_tokens.len()
+        {
+            return Err(CoreError::invalid(
+                "lazy grammar",
+                "trigger patterns and token identifiers must each be unique",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Returns the exact grammar identity.
+    ///
+    /// # Errors
+    ///
+    /// Returns a validation or serialization error.
+    pub fn digest(&self) -> Result<Digest, CoreError> {
+        self.validate()?;
+        Digest::of_serializable("grammar-plan-v2", self)
+    }
+}
+
 /// Complete bounded generation mechanics independent of prompt semantics.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct GenerationPlan {
@@ -355,6 +460,53 @@ impl GenerationPlan {
     pub fn digest(&self) -> Result<Digest, CoreError> {
         self.validate()?;
         Digest::of_serializable("generation-plan-v1", self)
+    }
+}
+
+/// Version-two generation mechanics with explicit eager or lazy grammar.
+///
+/// The embedded v1 generation plan must not select its eager grammar. This
+/// prevents the new contract from reinterpreting `generation-plan-v1` while
+/// reusing all unchanged sampler, bias, stop, and bound mechanics.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GenerationPlanV2 {
+    /// Complete unchanged v1 sampler, bias, stop, and token-bound mechanics.
+    pub generation: GenerationPlan,
+    /// Optional version-two eager or lazy grammar.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grammar: Option<GrammarPlanV2>,
+}
+
+impl GenerationPlanV2 {
+    /// Validates the complete version-two generation plan.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for invalid v1 mechanics, simultaneous v1 and v2
+    /// grammar selection, or invalid version-two grammar triggers.
+    pub fn validate(&self) -> Result<(), CoreError> {
+        self.generation.validate()?;
+        if self.generation.grammar.is_some() {
+            return Err(CoreError::invalid(
+                "generation plan v2",
+                "the embedded generation-plan-v1 grammar must be absent",
+            ));
+        }
+        if let Some(grammar) = &self.grammar {
+            grammar.validate()?;
+        }
+        Ok(())
+    }
+
+    /// Returns a content identity for exact version-two mechanics.
+    ///
+    /// # Errors
+    ///
+    /// Returns a validation or serialization error.
+    pub fn digest(&self) -> Result<Digest, CoreError> {
+        self.validate()?;
+        Digest::of_serializable("generation-plan-v2", self)
     }
 }
 
@@ -484,5 +636,39 @@ mod tests {
             },
         ];
         assert!(invalid.validate().is_err());
+    }
+
+    #[test]
+    fn version_two_generation_preserves_v1_and_binds_lazy_triggers() {
+        let grammar = GrammarPlanV2 {
+            grammar: Grammar {
+                source: "root ::= \"{}\"".to_owned(),
+                root: "root".to_owned(),
+            },
+            activation: GrammarActivationV2::Lazy {
+                trigger_patterns: vec!["<tool>.*".to_owned()],
+                trigger_tokens: vec![TokenId::new(7).unwrap()],
+            },
+        };
+        let version_two = GenerationPlanV2 {
+            generation: plan(),
+            grammar: Some(grammar.clone()),
+        };
+        assert!(version_two.validate().is_ok());
+        assert_ne!(
+            version_two.digest().unwrap(),
+            version_two.generation.digest().unwrap()
+        );
+
+        let mut duplicate = version_two.clone();
+        duplicate.grammar.as_mut().unwrap().activation = GrammarActivationV2::Lazy {
+            trigger_patterns: vec!["x".to_owned(), "x".to_owned()],
+            trigger_tokens: Vec::new(),
+        };
+        assert!(duplicate.validate().is_err());
+
+        let mut ambiguous = version_two;
+        ambiguous.generation.grammar = Some(grammar.grammar);
+        assert!(ambiguous.validate().is_err());
     }
 }

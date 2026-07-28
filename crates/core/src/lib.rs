@@ -28,10 +28,12 @@ pub use error::CoreError;
 pub use generation::{GenerationFinish, GenerationReceipt};
 pub use observe::{ControlFlow, ObserverReceipt, PrefillFinish, PrefillProgress, PrefillReceipt};
 pub use sampling::{
-    DrySampler, GenerationPlan, Grammar, LogitBias, MAX_DRY_SEQUENCE_BREAKER_BYTES,
-    MAX_DRY_SEQUENCE_BREAKERS, MAX_GRAMMAR_ROOT_BYTES, MAX_GRAMMAR_SOURCE_BYTES, MAX_LOGIT_BIASES,
-    MAX_STOP_SEQUENCE_BYTES, MAX_STOP_SEQUENCES, MirostatSampler, MirostatVersion,
-    RepetitionSampler, SamplingPlan,
+    DrySampler, GenerationPlan, GenerationPlanV2, Grammar, GrammarActivationV2, GrammarPlanV2,
+    LogitBias, MAX_DRY_SEQUENCE_BREAKER_BYTES, MAX_DRY_SEQUENCE_BREAKERS, MAX_GRAMMAR_ROOT_BYTES,
+    MAX_GRAMMAR_SOURCE_BYTES, MAX_LAZY_GRAMMAR_TRIGGER_BYTES,
+    MAX_LAZY_GRAMMAR_TRIGGER_PATTERN_BYTES, MAX_LAZY_GRAMMAR_TRIGGER_PATTERNS,
+    MAX_LAZY_GRAMMAR_TRIGGER_TOKENS, MAX_LOGIT_BIASES, MAX_STOP_SEQUENCE_BYTES, MAX_STOP_SEQUENCES,
+    MirostatSampler, MirostatVersion, RepetitionSampler, SamplingPlan,
 };
 pub use speculation::*;
 pub use state::CheckpointReceipt;

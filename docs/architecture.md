@@ -188,9 +188,11 @@ ties by ascending token ID. It is an exposure optimization, not a semantic
 selection policy. All stages in one pipeline use the same exposure mode.
 
 Repetition and DRY sampler state is initialized with the exact causal token
-history. Grammar state begins at the first generated token, so prompt tokens do
-not accidentally consume the output grammar. Every admitted generated token is
-then accepted by the complete native sampler chain.
+history. `GenerationPlan` retains the original eager grammar and digest
+contract. `GenerationPlanV2` preserves those v1 mechanics under a new identity
+and selects either eager activation or bounded ordered native regex/token
+triggers for a lazy grammar. Prompt tokens never consume either grammar; every
+admitted generated token is accepted by the complete native sampler chain.
 
 ## Activation transaction boundary
 

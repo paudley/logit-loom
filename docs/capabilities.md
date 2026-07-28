@@ -14,7 +14,7 @@ It intentionally makes no model-quality or research-efficacy claims.
 | Callback error/panic containment | `Pipeline`, `ObserverSet`, `PrefillMonitor` | In-memory failure tests |
 | Exact byte token observation | `ObservedToken` | Non-UTF-8 fixture test and runnable example |
 | Cooperative cancellation | `CancellationToken`, observer control flow | Cross-thread signal test |
-| Native sampler translation | `GenerationPlan` through llama.cpp adapter | Type/API compilation against pinned binding |
+| Native sampler translation | `GenerationPlan` and `GenerationPlanV2` through llama.cpp adapter | Model-free v1 identity preservation, lazy-trigger bounds/vocabulary checks, and type/API compilation against the pinned eager/lazy native grammar binding |
 | Causal prefill and generation | `Session` | Type/API compilation; model execution is opt-in |
 | Topology-bound activation capture | `ActivationConfiguration`, `ActivationCaptureOutput` | Model-free topology/site/bound/retention tests plus compilation against the reviewed callback owner; graph execution is opt-in |
 | Transactional activation programs | `ActivationProgramV1`, `ActivationVectorBankV1`, llama.cpp activation runtime | Model-free accumulation, ordering, numeric, provisional-resolution, and transaction-staging tests; native tensor mutation and write-back are opt-in |

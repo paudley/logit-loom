@@ -8,7 +8,9 @@ It maps llama.cpp candidate logits and admitted tokens into the transform and
 observer boundaries supplied by `logit-loom`. It also exposes causal prefill,
 compatibility-bound checkpoints, topology-bound activation capture and
 transactions, target-authoritative MTP/EAGLE-3 generation, and scoped `LoRA`
-and control vectors.
+and control vectors. `Session::generate_v2` additionally executes
+versioned eager or bounded trigger-driven lazy grammar plans without changing
+the original generation-plan identity.
 
 ## Select a backend
 

@@ -16,13 +16,17 @@ use llama_cpp_4::token::data::LlamaTokenData;
 use llama_cpp_4::token::data_array::LlamaTokenDataArray;
 use logit_loom::{
     ActivationPhaseV1, ActivationTelemetryDispositionV1, CheckpointReceipt, ControlFlow, Digest,
-    GenerationFinish, GenerationPlan, GenerationReceipt, ObservedToken, ObserverSet, Pipeline,
-    PrefillFinish, PrefillMonitor, PrefillProgress, PrefillReceipt, SteeringKind, TokenId,
+    GenerationFinish, GenerationPlan, GenerationPlanV2, GenerationReceipt, ObservedToken,
+    ObserverSet, Pipeline, PrefillFinish, PrefillMonitor, PrefillProgress, PrefillReceipt,
+    SteeringKind, TokenId,
 };
 
 use crate::{
     ActivationCaptureOutput, ActivationConfiguration, ActivationProgramOutput, Error, Model,
-    Runtime, activation::ActivationController, error::native, sampler::build_sampler,
+    Runtime,
+    activation::ActivationController,
+    error::native,
+    sampler::{build_sampler, build_sampler_v2},
 };
 
 const STATE_BYTES_DOMAIN: &str = "llamacpp-state-bytes-v1";
@@ -692,17 +696,63 @@ impl<'model> Session<'model> {
     pub fn generate(
         &mut self,
         plan: &GenerationPlan,
-        mut pipeline: Option<&mut Pipeline>,
-        mut observers: Option<&mut ObserverSet>,
+        pipeline: Option<&mut Pipeline>,
+        observers: Option<&mut ObserverSet>,
     ) -> Result<GenerationOutput, Error> {
-        self.ensure_healthy()?;
         plan.validate()?;
+        self.ensure_generation_ready()?;
+        let plan_identity = plan.digest()?;
+        let sampler = build_sampler(&self.model.native, plan, &self.token_history)?;
+        self.generate_inner(plan, plan_identity, sampler, pipeline, observers)
+    }
+
+    /// Generates with an explicit eager or lazy version-two grammar.
+    ///
+    /// This preserves every v1 sampler, bias, stop, transform, observer, and
+    /// causal-accounting rule. The only additional mechanic is the separately
+    /// versioned grammar activation contract.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same errors as [`Self::generate`], plus invalid or
+    /// model-incompatible lazy-grammar triggers.
+    pub fn generate_v2(
+        &mut self,
+        plan: &GenerationPlanV2,
+        pipeline: Option<&mut Pipeline>,
+        observers: Option<&mut ObserverSet>,
+    ) -> Result<GenerationOutput, Error> {
+        plan.validate()?;
+        self.ensure_generation_ready()?;
+        let plan_identity = plan.digest()?;
+        let sampler = build_sampler_v2(&self.model.native, plan, &self.token_history)?;
+        self.generate_inner(
+            &plan.generation,
+            plan_identity,
+            sampler,
+            pipeline,
+            observers,
+        )
+    }
+
+    fn ensure_generation_ready(&self) -> Result<(), Error> {
+        self.ensure_healthy()?;
         if self.token_history.is_empty() {
             return Err(Error::Invalid(
                 "generation requires at least one prefilled token".to_owned(),
             ));
         }
-        let plan_identity = plan.digest()?;
+        Ok(())
+    }
+
+    fn generate_inner(
+        &mut self,
+        plan: &GenerationPlan,
+        plan_identity: Digest,
+        mut sampler: LlamaSampler,
+        mut pipeline: Option<&mut Pipeline>,
+        mut observers: Option<&mut ObserverSet>,
+    ) -> Result<GenerationOutput, Error> {
         let initial_position = self.position;
         if let Some(active) = pipeline.as_deref_mut() {
             active.begin(&self.token_history)?;
@@ -710,7 +760,6 @@ impl<'model> Session<'model> {
         if let Some(active) = observers.as_deref_mut() {
             active.begin(initial_position, plan.max_tokens)?;
         }
-        let mut sampler = build_sampler(&self.model.native, plan, &self.token_history)?;
         let mut output_tokens = Vec::new();
         let mut output_bytes = Vec::new();
         let mut finish = GenerationFinish::TokenLimit;
