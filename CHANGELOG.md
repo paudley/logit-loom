@@ -91,13 +91,16 @@ include breaking API changes.
 
 ### Changed
 
-- The text adapter now develops against a local `llama-cpp-4` 0.4.2 successor
-  forward-ported to llama.cpp
-  `91f8c9c5fb038c086e13e9cd823c29b33b07ba54`; public packaging remains blocked
+- The text adapter now develops against local `llama-cpp-4` 0.4.2 successor
+  revision `f9a8d9ca1b91b09faa421807b42709cb96598f59`, forward-ported to llama.cpp
+  `f87067841bac583bc089a225382248d857791ca8`; public packaging remains blocked
   until that successor is available from an immutable public source.
 - The successor binding validates speculative context shape and lifecycle,
-  bounds copied prompt/state data, and contains C++ exceptions before they can
-  cross the Rust FFI boundary.
+  bounds copied prompt/state data, admits the `gpt-oss` EAGLE-3 v3 terminal
+  extraction site, and converts missing EAGLE extraction output and C++
+  exceptions into failures before they can cross the Rust FFI boundary.
+- Native checkpoint compatibility now binds the exact safe-binding source and
+  literal llama.cpp revisions through new binding and session digest domains.
 - Release validation now rejects an adjacent-path `llama-cpp-4` successor so
   the adapter cannot be mistaken for a crates.io-ready package.
 - Prepared the publishable workspace crates and exact internal dependencies

@@ -151,10 +151,11 @@ expose persistent speculative checkpoint restore because llama.cpp provides
 target sampler continuation only as an opaque in-process clone. It does not
 emit a partial serializable checkpoint.
 
-Checkpoints bind the model bytes, adapter build identity, and exact session
-allocation options; native state is opaque and is not a portable interchange
-format. A failed automatic steering cleanup or partial checkpoint restore
-poisons the session, and subsequent mutation returns `Error::Poisoned`.
+Checkpoints bind the model bytes, exact safe-binding source, literal llama.cpp
+revision, adapter build identity, and exact session allocation options; native
+state is opaque and is not a portable interchange format. A failed automatic
+steering cleanup or partial checkpoint restore poisons the session, and
+subsequent mutation returns `Error::Poisoned`.
 
 Applications may persist `StateSnapshot::into_parts` in their own container
 format and reconstruct it with `StateSnapshot::from_parts`. Reconstruction

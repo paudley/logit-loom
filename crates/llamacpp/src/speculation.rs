@@ -22,8 +22,9 @@ use logit_loom::{
 
 use crate::{
     ActivationCaptureOutput, ActivationConfiguration, ActivationProgramOutput, Error,
-    GenerationOutput, LLAMA_CPP_BINDING_VERSION, LLAMA_CPP_REVISION, Model, Runtime, Session,
-    SessionOptions, activation::ActivationController, error::native, sampler::build_sampler,
+    GenerationOutput, LLAMA_CPP_BINDING_SOURCE_REVISION, LLAMA_CPP_BINDING_VERSION,
+    LLAMA_CPP_REVISION, Model, Runtime, Session, SessionOptions, activation::ActivationController,
+    error::native, sampler::build_sampler,
 };
 
 const SPECULATION_IMPLEMENTATION_DOMAIN: &str = "llamacpp-speculation-implementation-v1";
@@ -32,14 +33,16 @@ const MAX_SPECULATIVE_VOCABULARY_DIFFERENCE: u32 = 128;
 
 /// Returns the exact native and safe-wrapper implementation identity.
 ///
-/// This identity changes when the binding version, pinned llama.cpp revision,
-/// or Logit Loom lowering profile changes.
+/// This identity changes when the binding version or source, pinned llama.cpp
+/// revision, or Logit Loom lowering profile changes.
 #[must_use]
 pub fn speculation_implementation_identity() -> Digest {
     Digest::of_bytes(
         SPECULATION_IMPLEMENTATION_DOMAIN,
-        format!("{LLAMA_CPP_BINDING_VERSION}|{LLAMA_CPP_REVISION}|target-authoritative-v1")
-            .as_bytes(),
+        format!(
+            "{LLAMA_CPP_BINDING_VERSION}|{LLAMA_CPP_BINDING_SOURCE_REVISION}|{LLAMA_CPP_REVISION}|target-authoritative-v1"
+        )
+        .as_bytes(),
     )
 }
 
@@ -391,13 +394,21 @@ fn validate_native_model_pair(
                     draft.architecture()
                 )));
             }
-            validate_eagle_layer_ids(draft.native.target_layer_ids(), target.topology().layers)?;
+            validate_eagle_layer_ids(
+                draft.native.target_layer_ids(),
+                target.topology().layers,
+                target.architecture() == "gpt-oss",
+            )?;
         }
     }
     Ok(())
 }
 
-fn validate_eagle_layer_ids(layer_ids: &[i32], target_layers: u32) -> Result<(), Error> {
+fn validate_eagle_layer_ids(
+    layer_ids: &[i32],
+    target_layers: u32,
+    terminal_nextn_site: bool,
+) -> Result<(), Error> {
     if layer_ids.len() != 3 {
         return Err(Error::Incompatible(format!(
             "EAGLE-3 draft metadata must name exactly 3 target extraction layers, found {}",
@@ -410,9 +421,9 @@ fn validate_eagle_layer_ids(layer_ids: &[i32], target_layers: u32) -> Result<(),
                 "EAGLE-3 draft metadata contains a negative target layer".to_owned(),
             )
         })?;
-        if layer >= target_layers {
+        if layer > target_layers || (layer == target_layers && !terminal_nextn_site) {
             return Err(Error::Incompatible(format!(
-                "EAGLE-3 target extraction layer {layer} is outside the target's {target_layers} layers"
+                "EAGLE-3 target extraction site {layer} is unsupported by the target's {target_layers}-layer architecture"
             )));
         }
     }
@@ -1399,8 +1410,10 @@ mod tests {
             speculation_implementation_identity(),
             Digest::of_bytes(
                 SPECULATION_IMPLEMENTATION_DOMAIN,
-                format!("{LLAMA_CPP_BINDING_VERSION}|{LLAMA_CPP_REVISION}|target-authoritative-v1")
-                    .as_bytes(),
+                format!(
+                    "{LLAMA_CPP_BINDING_VERSION}|{LLAMA_CPP_BINDING_SOURCE_REVISION}|{LLAMA_CPP_REVISION}|target-authoritative-v1"
+                )
+                .as_bytes(),
             )
         );
     }
@@ -1447,11 +1460,13 @@ mod tests {
     }
 
     #[test]
-    fn eagle_layer_metadata_is_exact_and_in_range() {
-        assert!(validate_eagle_layer_ids(&[1, 4, 7], 8).is_ok());
-        assert!(validate_eagle_layer_ids(&[1, 4], 8).is_err());
-        assert!(validate_eagle_layer_ids(&[1, -1, 7], 8).is_err());
-        assert!(validate_eagle_layer_ids(&[1, 4, 8], 8).is_err());
+    fn eagle_layer_metadata_accepts_only_supported_sites() {
+        assert!(validate_eagle_layer_ids(&[1, 4, 7], 8, false).is_ok());
+        assert!(validate_eagle_layer_ids(&[1, 4], 8, false).is_err());
+        assert!(validate_eagle_layer_ids(&[1, -1, 7], 8, false).is_err());
+        assert!(validate_eagle_layer_ids(&[1, 4, 8], 8, false).is_err());
+        assert!(validate_eagle_layer_ids(&[1, 4, 8], 8, true).is_ok());
+        assert!(validate_eagle_layer_ids(&[1, 4, 9], 8, true).is_err());
     }
 
     #[test]

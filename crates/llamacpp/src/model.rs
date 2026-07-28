@@ -13,8 +13,8 @@ use llama_cpp_4::token::LlamaToken;
 use logit_loom::{Digest, TextModelTopologyV1, TextSpeculativeMechanismV1, TokenId};
 
 use crate::{
-    ActivationConfiguration, Error, LLAMA_CPP_BINDING_VERSION, LLAMA_CPP_REVISION, Session,
-    SessionOptions, error::native,
+    ActivationConfiguration, Error, LLAMA_CPP_BINDING_SOURCE_REVISION, LLAMA_CPP_BINDING_VERSION,
+    LLAMA_CPP_REVISION, Session, SessionOptions, error::native,
 };
 
 const MODEL_ARTIFACT_DOMAIN: &str = "llamacpp-model-file-blake3-v1";
@@ -43,7 +43,7 @@ impl Runtime {
         let compatibility = compatibility_label();
         Ok(Self {
             native,
-            identity: Digest::of_bytes("llamacpp-binding-identity-v1", compatibility.as_bytes()),
+            identity: Digest::of_bytes("llamacpp-binding-identity-v2", compatibility.as_bytes()),
             compatibility,
         })
     }
@@ -416,7 +416,7 @@ fn compatibility_label() -> String {
         features.join(",")
     };
     format!(
-        "{LLAMA_CPP_BINDING_VERSION};logit-loom={};target={}-{}-{};features={features}",
+        "{LLAMA_CPP_BINDING_VERSION};binding-revision={LLAMA_CPP_BINDING_SOURCE_REVISION};llama-revision={LLAMA_CPP_REVISION};logit-loom={};target={}-{}-{};features={features}",
         env!("CARGO_PKG_VERSION"),
         std::env::consts::ARCH,
         std::env::consts::OS,
@@ -468,6 +468,7 @@ fn architecture_implementation(runtime: &Digest, architecture: &str) -> Result<D
             runtime,
             architecture,
             LLAMA_CPP_BINDING_VERSION,
+            LLAMA_CPP_BINDING_SOURCE_REVISION,
             LLAMA_CPP_REVISION,
             "l_out-{layer};ffn_moe_logits-{layer};ffn_moe_probs-{layer};ffn_moe_topk-{layer}",
         ),
@@ -480,6 +481,7 @@ fn tensor_selector_implementation(architecture: &Digest) -> Result<Digest, Error
         &(
             architecture,
             LLAMA_CPP_BINDING_VERSION,
+            LLAMA_CPP_BINDING_SOURCE_REVISION,
             LLAMA_CPP_REVISION,
             "exact-name;f32-or-i32;batch-token-rows-v1",
         ),
@@ -496,6 +498,8 @@ mod tests {
     fn compatibility_label_binds_version_target_and_features() {
         let label = compatibility_label();
         assert!(label.contains(LLAMA_CPP_BINDING_VERSION));
+        assert!(label.contains(LLAMA_CPP_BINDING_SOURCE_REVISION));
+        assert!(label.contains(LLAMA_CPP_REVISION));
         assert!(label.contains(std::env::consts::ARCH));
         assert!(label.contains(std::env::consts::OS));
         assert!(label.contains("features="));

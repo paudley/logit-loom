@@ -5,8 +5,9 @@
 - Status: accepted; source implementation complete except persistent
   speculative checkpoint restore; live acceptance pending
 - Decision date: 2026-07-27
-- Reviewed binding: local `llama-cpp-4` 0.4.2 successor
-- Reviewed llama.cpp revision: `91f8c9c5fb038c086e13e9cd823c29b33b07ba54`
+- Reviewed binding: local `llama-cpp-4` 0.4.2 successor at
+  `f9a8d9ca1b91b09faa421807b42709cb96598f59`
+- Reviewed llama.cpp revision: `f87067841bac583bc089a225382248d857791ca8`
 - Delivery order: before ADR 0003
 
 ## Context

@@ -1106,5 +1106,5 @@ fn session_compatibility_identity(
     };
     bytes.extend_from_slice(&context_type.to_le_bytes());
     bytes.extend_from_slice(&recurrent_state_slots.to_le_bytes());
-    Digest::of_bytes("llamacpp-session-compatibility-v2", &bytes)
+    Digest::of_bytes("llamacpp-session-compatibility-v3", &bytes)
 }
