@@ -62,6 +62,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+Local resource authorities that have already streamed an exact GGUF into an
+immutable sealed descriptor may use `Model::load_preverified` with a
+`PreverifiedModelArtifact`. That path preserves the ordinary model identity
+while avoiding another whole-file digest pass. Its caller must supply the raw
+BLAKE3 digest and exact length and keep the verified immutable object alive for
+the complete load. Mutable and ordinary filesystem paths must continue to use
+`Model::load`, which verifies the file before and after native loading.
+
 Generated pieces remain arbitrary bytes. Call `GenerationOutput::text` only
 when the complete output is expected to be valid UTF-8.
 `Model::tokenize` rejects NUL bytes and inputs larger than

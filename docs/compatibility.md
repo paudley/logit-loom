@@ -293,6 +293,15 @@ Model and `LoRA` files use distinct versioned content-identity domains even
 when their bytes happen to match. The adapter hashes each file before and after
 native loading and rejects an ordinary concurrent modification; callers should
 still treat artifact paths as immutable for the complete load.
+
+`logit-loom-llamacpp` also exposes a narrow preverified model-load contract for
+local resource authorities that already own complete BLAKE3 verification and
+immutable sealed-descriptor lifecycle. The caller supplies the raw content
+digest and exact byte length; Logit Loom preserves the ordinary model artifact
+identity and checks the length around native loading without rereading the
+entire artifact. This does not weaken or replace the ordinary path contract:
+mutable and otherwise unverified paths retain before-and-after content
+verification.
 Control vectors are checked before application for finite values, model
 embedding width, complete rows for layers `1..n_layer`, and an inclusive layer
 range within the model. Layer zero is not steerable.

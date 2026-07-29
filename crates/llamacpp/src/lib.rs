@@ -22,7 +22,10 @@ pub use mechanics::{
     OrdinaryTextMechanicsSnapshot, TextMechanicsCheckpoint, TextMechanicsExecutionOutput,
     TextMechanicsOutput, TextMechanicsRequest, TextMechanicsResume, execute_text_mechanics,
 };
-pub use model::{DevicePolicy, MAX_TOKENIZATION_BYTES, Model, ModelOptions, Runtime, Tokenization};
+pub use model::{
+    DevicePolicy, MAX_TOKENIZATION_BYTES, Model, ModelOptions, PreverifiedModelArtifact, Runtime,
+    Tokenization,
+};
 pub use session::{GenerationOutput, PrefillOutput, Session, SessionOptions, StateSnapshot};
 pub use speculation::{
     SpeculativeActivationOutput, SpeculativeActivations, SpeculativeCheckpointOutput,

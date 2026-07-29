@@ -96,6 +96,45 @@ pub struct ModelOptions {
     pub device_policy: DevicePolicy,
 }
 
+/// Exact content evidence for an immutable model artifact verified by its caller.
+///
+/// This contract is intended for a local resource authority that has already
+/// streamed and BLAKE3-verified the complete artifact into an immutable sealed
+/// descriptor. The caller must keep that exact immutable object alive for the
+/// complete native load. Ordinary mutable paths must use [`Model::load`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PreverifiedModelArtifact {
+    content_blake3: [u8; 32],
+    byte_length: u64,
+}
+
+impl PreverifiedModelArtifact {
+    /// Binds an exact BLAKE3 content digest and byte length.
+    #[must_use]
+    pub const fn new(content_blake3: [u8; 32], byte_length: u64) -> Self {
+        Self {
+            content_blake3,
+            byte_length,
+        }
+    }
+
+    /// Returns the caller-verified raw BLAKE3 digest.
+    #[must_use]
+    pub const fn content_blake3(self) -> [u8; 32] {
+        self.content_blake3
+    }
+
+    /// Returns the exact caller-verified byte length.
+    #[must_use]
+    pub const fn byte_length(self) -> u64 {
+        self.byte_length
+    }
+
+    fn artifact_digest(self) -> Digest {
+        model_artifact_digest(self.content_blake3)
+    }
+}
+
 impl Default for ModelOptions {
     fn default() -> Self {
         Self {
@@ -146,25 +185,57 @@ impl Model {
         path: impl AsRef<Path>,
         options: ModelOptions,
     ) -> Result<Self, Error> {
-        if options.main_gpu < 0 {
-            return Err(Error::Invalid(
-                "main GPU index must be non-negative".to_owned(),
-            ));
-        }
+        validate_model_options(options)?;
         let path = path.as_ref();
         let artifact_before_load = digest_file(path, MODEL_ARTIFACT_DOMAIN)?;
-        let params = LlamaModelParams::default()
-            .with_n_gpu_layers(options.gpu_layers)
-            .with_main_gpu(options.main_gpu);
-        let native_model =
-            LlamaModel::load_from_file(&runtime.native, path, &params).map_err(native)?;
-        validate_vocabulary_size(native_model.n_vocab())?;
+        let model = Self::load_with_artifact(runtime, path, options, artifact_before_load.clone())?;
         let artifact = digest_file(path, MODEL_ARTIFACT_DOMAIN)?;
         if artifact != artifact_before_load {
             return Err(Error::Incompatible(
                 "model file changed while llama.cpp was loading it".to_owned(),
             ));
         }
+        Ok(model)
+    }
+
+    /// Loads a caller-verified immutable GGUF without rereading it for hashing.
+    ///
+    /// The caller must have verified the complete raw BLAKE3 digest and exact
+    /// length, and must guarantee that `path` names those same immutable bytes
+    /// for the complete call. A sealed descriptor owned by a local resource
+    /// authority satisfies that contract. This method checks the exact length
+    /// before and after native loading but deliberately does not trust mutable
+    /// path content.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I/O, length, native load, or placement error.
+    pub fn load_preverified(
+        runtime: &Runtime,
+        path: impl AsRef<Path>,
+        artifact: PreverifiedModelArtifact,
+        options: ModelOptions,
+    ) -> Result<Self, Error> {
+        validate_model_options(options)?;
+        let path = path.as_ref();
+        verify_artifact_length(path, artifact.byte_length())?;
+        let model = Self::load_with_artifact(runtime, path, options, artifact.artifact_digest())?;
+        verify_artifact_length(path, artifact.byte_length())?;
+        Ok(model)
+    }
+
+    fn load_with_artifact(
+        runtime: &Runtime,
+        path: &Path,
+        options: ModelOptions,
+        artifact: Digest,
+    ) -> Result<Self, Error> {
+        let params = LlamaModelParams::default()
+            .with_n_gpu_layers(options.gpu_layers)
+            .with_main_gpu(options.main_gpu);
+        let native_model =
+            LlamaModel::load_from_file(&runtime.native, path, &params).map_err(native)?;
+        validate_vocabulary_size(native_model.n_vocab())?;
         let mut has_accelerator = false;
         let devices = native_model
             .devices()
@@ -400,6 +471,29 @@ fn digest_reader(reader: &mut impl Read, domain: &str) -> Result<Digest, Error> 
     Ok(Digest::of_bytes(domain, hasher.finalize().as_bytes()))
 }
 
+fn model_artifact_digest(content_blake3: [u8; 32]) -> Digest {
+    Digest::of_bytes(MODEL_ARTIFACT_DOMAIN, &content_blake3)
+}
+
+fn verify_artifact_length(path: &Path, expected: u64) -> Result<(), Error> {
+    let actual = std::fs::metadata(path)?.len();
+    if actual != expected {
+        return Err(Error::Incompatible(format!(
+            "preverified model length differs: expected {expected}, observed {actual}"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_model_options(options: ModelOptions) -> Result<(), Error> {
+    if options.main_gpu < 0 {
+        return Err(Error::Invalid(
+            "main GPU index must be non-negative".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
 fn validate_tokenization_input(text: &str) -> Result<(), Error> {
     validate_tokenization_shape(text.len(), text.as_bytes().contains(&0))
 }
@@ -537,6 +631,17 @@ mod tests {
         let model = digest_reader(&mut Cursor::new(bytes), MODEL_ARTIFACT_DOMAIN).unwrap();
         let lora = digest_reader(&mut Cursor::new(bytes), LORA_ARTIFACT_DOMAIN).unwrap();
         assert_ne!(model, lora);
+    }
+
+    #[test]
+    fn preverified_artifact_preserves_model_identity() {
+        let bytes = b"same immutable model bytes";
+        let streamed = digest_reader(&mut Cursor::new(bytes), MODEL_ARTIFACT_DOMAIN).unwrap();
+        let raw = *blake3::hash(bytes).as_bytes();
+        let preverified = PreverifiedModelArtifact::new(raw, u64::try_from(bytes.len()).unwrap());
+        assert_eq!(preverified.artifact_digest(), streamed);
+        assert_eq!(preverified.byte_length(), bytes.len() as u64);
+        assert_eq!(preverified.content_blake3(), raw);
     }
 
     #[test]
