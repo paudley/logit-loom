@@ -22,7 +22,9 @@ The companion ABI exposes:
 - a mandatory program ABI v3 value arena for multiple diffusion/VAE stages,
   scheduled request-local `LoRA` scales, checkpoint and snapshot state,
   deterministic joins, exact RGB8/RGBA8 conversion, bounded deterministic
-  PNG encoding, generation-checked handles, and verified cleanup; and
+  PNG encoding, generation-checked handles, and verified cleanup;
+- a model-block ABI v4 extension for typed, exact-step Krea residual scaling
+  with loaded-topology validation; and
 - explicit continue, cooperative-stop, callback-error, unsupported-mechanic,
   invalid-argument, and native-error results.
 
@@ -56,10 +58,11 @@ If the source path does not exist, the script clones the upstream repository.
 It checks out the exact revision, applies
 [`logit-loom-step-v1.patch`](logit-loom-step-v1.patch) followed by
 [`logit-loom-image-v2.patch`](logit-loom-image-v2.patch) and
-[`logit-loom-program-v3.patch`](logit-loom-program-v3.patch), initializes only the
-required `ggml` submodule, and builds a shared library. Existing incompatible
-source changes are rejected. The script never runs from tests, CI,
-documentation, package builds, or `make check`.
+[`logit-loom-program-v3.patch`](logit-loom-program-v3.patch), then the
+[`logit-loom-model-block-v4.patch`](logit-loom-model-block-v4.patch) extension,
+initializes only the required `ggml` submodule, and builds a shared library.
+Existing incompatible source changes are rejected. The script never runs from
+tests, CI, documentation, package builds, or `make check`.
 
 Select `vulkan`, `hip`, `cuda`, or `metal` according to the deployment. The
 Rust adapter subsequently verifies the companion ABI, upstream commit,

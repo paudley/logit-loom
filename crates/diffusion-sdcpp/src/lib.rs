@@ -24,8 +24,9 @@ pub use contract::{
 };
 pub use error::{Error, Result};
 pub use execution::{
-    ArtifactPathResolver, ChannelBiasControlV1, ImagePlanExecutor, RejectArtifactPaths,
-    channel_bias_schema_v1, lora_target_v1,
+    ArtifactPathResolver, ChannelBiasControlV1, ImagePlanExecutor,
+    ModelBlockResidualScaleControlV1, RejectArtifactPaths, channel_bias_schema_v1, lora_target_v1,
+    model_block_residual_scale_schema_v1,
 };
 pub use image::{
     AdvancedGenerationOutput, AdvancedGenerationReceipt, AdvancedImageRequest,
@@ -52,7 +53,9 @@ pub const COMPANION_ABI_VERSION: u32 = 1;
 pub const IMAGE_ABI_VERSION: u32 = 2;
 /// Version of the resident native value-arena extension.
 pub const PROGRAM_ABI_VERSION: u32 = 3;
+/// Version of the native model-block operator extension.
+pub const MODEL_BLOCK_ABI_VERSION: u32 = 4;
 /// Version of the safe Rust execution contract layered over the companion.
-pub const ADAPTER_CONTRACT_VERSION: u32 = 5;
+pub const ADAPTER_CONTRACT_VERSION: u32 = 6;
 /// Exact stable-diffusion.cpp revision required by this adapter.
 pub const UPSTREAM_COMMIT: &str = "ea4e566ccffa10f853ecc3f29e74b1820bc91beb";

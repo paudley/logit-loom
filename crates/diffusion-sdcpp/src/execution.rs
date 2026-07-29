@@ -171,6 +171,116 @@ pub fn channel_bias_schema_v1() -> Digest {
     )
 }
 
+/// Fixed binary controls for the installed model-block residual-scale
+/// operator.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModelBlockResidualScaleControlV1 {
+    /// Exact residual multiplier bits.
+    pub scale_bits: u32,
+    /// Exact positive maximum-absolute-scale bits.
+    pub maximum_scale_bits: u32,
+}
+
+impl ModelBlockResidualScaleControlV1 {
+    /// Creates one bounded finite residual multiplier.
+    ///
+    /// A scale of zero bypasses the selected block. A scale of one preserves
+    /// its unmodified output. Other values interpolate or extrapolate the
+    /// complete block residual against its input.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error unless the scale is finite and within a positive
+    /// declared maximum no greater than 16.
+    pub fn new(scale: f32, maximum_absolute_scale: f32) -> Result<Self> {
+        if !scale.is_finite()
+            || !maximum_absolute_scale.is_finite()
+            || maximum_absolute_scale <= 0.0
+            || maximum_absolute_scale > 16.0
+            || scale.abs() > maximum_absolute_scale
+        {
+            return Err(Error::Invalid(
+                "model-block residual scale is outside its finite declared bound".to_owned(),
+            ));
+        }
+        Ok(Self {
+            scale_bits: scale.to_bits(),
+            maximum_scale_bits: maximum_absolute_scale.to_bits(),
+        })
+    }
+
+    /// Returns the exact residual multiplier.
+    pub fn scale(self) -> f32 {
+        f32::from_bits(self.scale_bits)
+    }
+
+    /// Returns the exact declared maximum.
+    pub fn maximum_absolute_scale(self) -> f32 {
+        f32::from_bits(self.maximum_scale_bits)
+    }
+
+    /// Encodes the fixed eight-byte little-endian control body.
+    pub fn to_control_bytes(self) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(8);
+        bytes.extend_from_slice(&self.scale_bits.to_le_bytes());
+        bytes.extend_from_slice(&self.maximum_scale_bits.to_le_bytes());
+        bytes
+    }
+
+    /// Decodes and validates the fixed eight-byte control body.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for another length or invalid scalar bounds.
+    pub fn from_control_bytes(bytes: &[u8]) -> Result<Self> {
+        if bytes.len() != 8 {
+            return Err(Error::Invalid(
+                "model-block residual controls must contain exactly 8 bytes".to_owned(),
+            ));
+        }
+        Self::new(
+            f32::from_bits(u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]])),
+            f32::from_bits(u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]])),
+        )
+    }
+
+    /// Returns the exact installed implementation identity.
+    ///
+    /// # Errors
+    ///
+    /// Returns a selector validation or deterministic serialization error.
+    pub fn implementation_for(
+        self,
+        selector: &TensorSelector,
+        steps: &StepSelector,
+    ) -> Result<Digest> {
+        selector
+            .validate()
+            .map_err(logit_loom_diffusion::Error::from)?;
+        Digest::of_serializable(
+            "sdcpp-model-block-residual-scale-operator-v1",
+            &(
+                model_block_residual_scale_schema_v1(),
+                selector,
+                steps,
+                self,
+            ),
+        )
+        .map_err(logit_loom_diffusion::Error::from)
+        .map_err(Into::into)
+    }
+}
+
+/// Returns the public schema identity for
+/// [`ModelBlockResidualScaleControlV1`].
+pub fn model_block_residual_scale_schema_v1() -> Digest {
+    Digest::of_bytes(
+        "sdcpp-installed-operator-schema-v1",
+        b"model-block-residual-scale-le8-v1",
+    )
+}
+
 /// Returns the exact fixed-scale whole-request `LoRA` target identity.
 pub fn lora_target_v1(high_noise: bool) -> Digest {
     Digest::of_bytes(
@@ -721,6 +831,48 @@ pub(crate) struct InstalledChannelBias {
     axis: usize,
     channel: u64,
     delta: f32,
+}
+
+pub(crate) struct InstalledModelBlockResidualScale {
+    pub(crate) block: u32,
+    pub(crate) scale: f32,
+    pub(crate) steps: StepSelector,
+}
+
+impl InstalledModelBlockResidualScale {
+    pub(crate) fn from_invocation(operator: &OperatorInvocation) -> Result<Self> {
+        let TensorSelector::ModelBlock {
+            component,
+            block,
+            site,
+        } = &operator.selector
+        else {
+            return Err(Error::Invalid(
+                "model-block residual scale requires a model-block selector".to_owned(),
+            ));
+        };
+        if component != "krea2"
+            || site != "residual"
+            || operator.schema != model_block_residual_scale_schema_v1()
+        {
+            return Err(Error::Invalid(
+                "stable-diffusion.cpp does not install this model-block component, site, or schema"
+                    .to_owned(),
+            ));
+        }
+        let controls = ModelBlockResidualScaleControlV1::from_control_bytes(&operator.controls)?;
+        let expected = controls.implementation_for(&operator.selector, &operator.steps)?;
+        if operator.implementation != expected {
+            return Err(Error::Incompatible(
+                "installed model-block implementation identity differs".to_owned(),
+            ));
+        }
+        Ok(Self {
+            block: *block,
+            scale: controls.scale(),
+            steps: operator.steps.clone(),
+        })
+    }
 }
 
 impl InstalledChannelBias {
@@ -1442,6 +1594,55 @@ mod tests {
             .unwrap()
             .to_control_bytes();
         assert!(InstalledChannelBias::from_invocation(&invocation, &plan).is_err());
+    }
+
+    #[test]
+    fn model_block_residual_control_encoding_and_identity_are_exact() {
+        let control = ModelBlockResidualScaleControlV1::new(0.0, 1.0).unwrap();
+        assert_eq!(
+            ModelBlockResidualScaleControlV1::from_control_bytes(&control.to_control_bytes())
+                .unwrap(),
+            control
+        );
+        let selector = TensorSelector::ModelBlock {
+            component: "krea2".to_owned(),
+            block: 9,
+            site: "residual".to_owned(),
+        };
+        let steps = StepSelector::Exact { steps: vec![0] };
+        let invocation = OperatorInvocation {
+            schema: model_block_residual_scale_schema_v1(),
+            implementation: control.implementation_for(&selector, &steps).unwrap(),
+            selector,
+            steps,
+            controls: control.to_control_bytes(),
+        };
+        let installed = InstalledModelBlockResidualScale::from_invocation(&invocation).unwrap();
+        assert_eq!(installed.block, 9);
+        assert_eq!(installed.scale.to_bits(), 0.0_f32.to_bits());
+        assert_eq!(installed.steps, StepSelector::Exact { steps: vec![0] });
+    }
+
+    #[test]
+    fn model_block_residual_control_rejects_uninstalled_or_unbounded_inputs() {
+        assert!(ModelBlockResidualScaleControlV1::new(17.0, 17.0).is_err());
+        assert!(ModelBlockResidualScaleControlV1::from_control_bytes(&[0; 7]).is_err());
+
+        let control = ModelBlockResidualScaleControlV1::new(0.5, 1.0).unwrap();
+        let selector = TensorSelector::ModelBlock {
+            component: "krea2".to_owned(),
+            block: 10,
+            site: "attention".to_owned(),
+        };
+        let steps = StepSelector::All;
+        let invocation = OperatorInvocation {
+            schema: model_block_residual_scale_schema_v1(),
+            implementation: control.implementation_for(&selector, &steps).unwrap(),
+            selector,
+            steps,
+            controls: control.to_control_bytes(),
+        };
+        assert!(InstalledModelBlockResidualScale::from_invocation(&invocation).is_err());
     }
 
     #[test]

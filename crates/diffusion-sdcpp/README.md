@@ -28,7 +28,7 @@ latency for every completed step. These non-deterministic deployment
 measurements are separate from mechanical receipts and do not affect replay or
 content identities.
 
-The safe Rust adapter contract is version 5. Its native-facing paths are
+The safe Rust adapter contract is version 6. Its native-facing paths are
 intentionally explicit:
 
 - The full-state path copies each post-Euler host `f32` tensor for
@@ -65,15 +65,18 @@ fake-arena tests exercise those mechanics without loading a companion library
 or model.
 
 `SdcppResidentProgram` implements that backend over the mandatory
-stable-diffusion.cpp program ABI v3. One arena can execute multiple ordered
-diffusion and direct-VAE stages, scheduled request-local `LoRA` scales,
-authenticated checkpoint restore/capture, scheduler-state interventions and
-observations, exact snapshots, deterministic RGB8 joins, and typed
-RGB8/RGBA8/PNG/tensor/checkpoint outputs. Native stages keep source images and
-masks canvas-bound while forwarding bounded reference images with their own
-exact RGB8/RGBA8 dimensions and bytes. PNG values bind decoded geometry, RGB
-or RGBA color, a deterministic encoder identity, and a bounded encoded length.
-Every intermediate remains behind a generation-checked native handle; cleanup
+stable-diffusion.cpp program ABI v3 and model-block ABI v4. One arena can
+execute multiple ordered diffusion and direct-VAE stages, scheduled
+request-local `LoRA` scales, authenticated checkpoint restore/capture,
+scheduler-state interventions and observations, exact-step Krea residual block
+scaling, exact snapshots, deterministic RGB8 joins, and typed
+RGB8/RGBA8/PNG/tensor/checkpoint outputs. Krea block indices are validated
+against the topology detected from the loaded weights; the adapter assigns no
+semantic role to a block. Native stages keep source images and masks
+canvas-bound while forwarding bounded reference images with their own exact
+RGB8/RGBA8 dimensions and bytes. PNG values bind decoded geometry, RGB or RGBA
+color, a deterministic encoder identity, and a bounded encoded length. Every
+intermediate remains behind a generation-checked native handle; cleanup
 uncertainty poisons the owner.
 
 Image-v2 success confirms that every requested `LoRA` participated in at least

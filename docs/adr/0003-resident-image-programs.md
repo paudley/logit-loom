@@ -324,6 +324,10 @@ against its pinned stable-diffusion.cpp revision. The model-free probe checks
 required symbols, ABI, upstream commit, library-byte stability, supported
 sites, handle limits, and bounded device reports.
 
+ADR 0004 subsequently installs one exact Krea residual model-block operator
+through a version-four extension. Conditioning operators and every
+unregistered model component/site remain unsupported.
+
 Live acceptance is opt-in, uses caller-supplied local artifacts, requires a
 reported accelerator, records exact profile and device placement, and never
 falls back to CPU. It exercises:

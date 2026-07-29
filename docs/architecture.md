@@ -9,6 +9,8 @@ recorded in
 [ADR 0002](adr/0002-transactional-text-mechanics.md).
 Bounded resident staged image programs are recorded in
 [ADR 0003](adr/0003-resident-image-programs.md).
+Typed Krea model-block residual operators are recorded in
+[ADR 0004](adr/0004-krea-model-block-operators.md).
 
 Logit Loom separates stable mechanics contracts from callback execution and
 from fast-moving model backends. Token candidates and diffusion tensors remain
@@ -39,6 +41,7 @@ image lane
   ├─ logit-loom-executor
   ├─ logit-loom-diffusion
   └─ companion ABI v1 + image ABI v2 + program ABI v3
+       + model-block ABI v4
        → pinned stable-diffusion.cpp
 ```
 
@@ -108,11 +111,11 @@ model-backed behavior remains opt-in acceptance.
 
 The stable-diffusion.cpp adapter supports only the exact catalogued MiniT2I and
 Krea 2 component layouts. It dynamically loads companion ABI version 1 plus
-the required image ABI version 2 and program ABI version 3 at the exact
-upstream commit recorded in ADR 0001. Before context creation it verifies
-component bytes, the library digest,
-required symbols, ABI/revision, the bounded device report, and exact non-CPU
-backend names. No failed placement is retried on CPU.
+the required image ABI version 2, program ABI version 3, and model-block ABI
+version 4 at the exact upstream commit recorded in ADR 0001. Before context
+creation it verifies component bytes, the library digest, required symbols,
+ABI/revision, the bounded device report, and exact non-CPU backend names. No
+failed placement is retried on CPU.
 
 Native conditioning tensors are delivered first and hashed synchronously. The
 adapter then constructs an exact `DiffusionPlan` containing component,
@@ -148,11 +151,15 @@ reject scheduled `LoRA` scales, arbitrary model-block/conditioning operators,
 snapshots, multiple native inference operations, and direct VAE stages rather
 than changing its established identity.
 
-Safe adapter contract v5 adds the separate `SdcppResidentProgram` and mandatory
-program ABI v3 for scheduled adapters, snapshots, multiple native/VAE stages,
-typed RGB8/RGBA8/PNG/tensor/checkpoint outputs, and private arena liveness.
-Only installed scheduler-state selectors are accepted; unresolved model-block
-and conditioning selectors fail whole-program preflight. See
+Safe adapter contract v5 added the separate `SdcppResidentProgram` and
+mandatory program ABI v3 for scheduled adapters, snapshots, multiple
+native/VAE stages, typed RGB8/RGBA8/PNG/tensor/checkpoint outputs, and private
+arena liveness. Safe contract v6 additionally installs exact-step Krea
+model-block residual scaling through model-block ABI v4. The native Krea
+topology determines whether a requested zero-based block exists; the public
+operator does not hard-code a layer count or semantic interpretation.
+Uninstalled model components/sites and every conditioning selector fail
+whole-program preflight. See
 [worker-local image execution](image-execution.md) for the support matrix and
 failure rules.
 

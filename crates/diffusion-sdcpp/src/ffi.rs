@@ -11,7 +11,8 @@ use std::{
 use libloading::Library;
 
 use crate::{
-    COMPANION_ABI_VERSION, Error, IMAGE_ABI_VERSION, PROGRAM_ABI_VERSION, Result, UPSTREAM_COMMIT,
+    COMPANION_ABI_VERSION, Error, IMAGE_ABI_VERSION, MODEL_BLOCK_ABI_VERSION, PROGRAM_ABI_VERSION,
+    Result, UPSTREAM_COMMIT,
 };
 
 pub(crate) const PROFILE_MINIT2I: i32 = 1;
@@ -50,6 +51,11 @@ pub(crate) const PROGRAM_PNG_RGBA8_V3: i32 = 4;
 
 pub(crate) const VALUE_HOST_V3: i32 = 1;
 pub(crate) const VALUE_MIXED_V3: i32 = 2;
+
+pub(crate) const MODEL_COMPONENT_KREA2_V4: i32 = 1;
+pub(crate) const MODEL_BLOCK_RESIDUAL_V4: i32 = 1;
+pub(crate) const STEP_ALL_V4: i32 = 1;
+pub(crate) const STEP_EXACT_V4: i32 = 2;
 
 const MAX_DEVICE_REPORT_BYTES: usize = 64 * 1024;
 const MAX_DEVICE_LINES: usize = 64;
@@ -229,6 +235,25 @@ pub(crate) struct ProgramImageParamsV3 {
     pub snapshot_count: usize,
 }
 
+#[repr(C)]
+pub(crate) struct ModelBlockOperatorV4 {
+    pub component: i32,
+    pub block: u32,
+    pub site: i32,
+    pub residual_scale: f32,
+    pub step_selection: i32,
+    pub steps: *const u32,
+    pub step_count: usize,
+}
+
+#[repr(C)]
+pub(crate) struct ProgramImageParamsV4 {
+    pub abi_version: u32,
+    pub image: ProgramImageParamsV3,
+    pub model_block_operators: *const ModelBlockOperatorV4,
+    pub model_block_operator_count: usize,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ProgramOutputV3 {
     pub width: u32,
@@ -352,6 +377,17 @@ type ProgramGenerateImageV3 = unsafe extern "C" fn(
     usize,
     *mut ProgramImageResultV3,
 ) -> i32;
+type ProgramGenerateImageV4 = unsafe extern "C" fn(
+    *mut c_void,
+    *const ProgramImageParamsV4,
+    Option<ConditionCallback>,
+    *mut c_void,
+    Option<StepCallback>,
+    *mut c_void,
+    *mut ValueHandleV3,
+    usize,
+    *mut ProgramImageResultV3,
+) -> i32;
 type ProgramDescribeV3 =
     unsafe extern "C" fn(*const c_void, ValueHandleV3, *mut ValueDescriptorV3) -> i32;
 type ProgramReadV3 = unsafe extern "C" fn(
@@ -386,6 +422,7 @@ struct Functions {
     program_vae_encode_v3: ProgramVaeEncodeV3,
     program_vae_decode_v3: ProgramVaeDecodeV3,
     program_generate_image_v3: ProgramGenerateImageV3,
+    program_generate_image_v4: ProgramGenerateImageV4,
     program_describe_v3: ProgramDescribeV3,
     program_read_v3: ProgramReadV3,
     program_copy_v3: ProgramCopyV3,
@@ -462,6 +499,10 @@ impl NativeApi {
                 program_generate_image_v3: load_symbol(
                     &library,
                     b"sd_loom_program_generate_image_v3\0",
+                )?,
+                program_generate_image_v4: load_symbol(
+                    &library,
+                    b"sd_loom_program_generate_image_v4\0",
                 )?,
                 program_describe_v3: load_symbol(&library, b"sd_loom_program_describe_v3\0")?,
                 program_read_v3: load_symbol(&library, b"sd_loom_program_read_v3\0")?,
@@ -814,6 +855,44 @@ impl NativeApi {
         // SAFETY: Forwarded from this method's caller contract.
         unsafe {
             (self.functions.program_generate_image_v3)(
+                program,
+                params,
+                Some(condition_callback),
+                condition_callback_data,
+                Some(step_callback),
+                step_callback_data,
+                snapshots.as_mut_ptr(),
+                snapshots.len(),
+                result_out,
+            )
+        }
+    }
+
+    /// Executes one resident diffusion operation with typed model-block
+    /// controls.
+    ///
+    /// # Safety
+    ///
+    /// All handles, arrays, nested step arrays, callbacks, and callback states
+    /// must remain live for the complete synchronous call. Output storage must
+    /// match the declared snapshot count.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) unsafe fn program_generate_image_v4(
+        &self,
+        program: *mut c_void,
+        params: &ProgramImageParamsV4,
+        condition_callback: ConditionCallback,
+        condition_callback_data: *mut c_void,
+        step_callback: StepCallback,
+        step_callback_data: *mut c_void,
+        snapshots: &mut [ValueHandleV3],
+        result_out: &mut ProgramImageResultV3,
+    ) -> i32 {
+        debug_assert_eq!(params.abi_version, MODEL_BLOCK_ABI_VERSION);
+        debug_assert_eq!(params.image.abi_version, PROGRAM_ABI_VERSION);
+        // SAFETY: Forwarded from this method's caller contract.
+        unsafe {
+            (self.functions.program_generate_image_v4)(
                 program,
                 params,
                 Some(condition_callback),

@@ -153,10 +153,10 @@ The default feature set is useful for API compilation and does not promise an
 accelerated runtime.
 
 The image adapter dynamically loads companion ABI version `1` and requires
-whole-image extension version `2` plus resident-program extension version `3`,
-built from
+whole-image extension version `2`, resident-program extension version `3`, and
+model-block extension version `4`, built from
 `stable-diffusion.cpp@ea4e566ccffa10f853ecc3f29e74b1820bc91beb`. The safe
-Rust adapter contract is version `5`. The exact ABIs, extensions, commit,
+Rust adapter contract is version `6`. The exact ABIs, extensions, commit,
 required symbol set, and shared-library bytes are checked before model context
 creation. A library carrying only the earlier step-v1 symbols is incompatible
 with this adapter version. Updating the upstream revision, companion layout,
@@ -179,14 +179,16 @@ model-specific target selectors, PNG encoding, arbitrary model-block
 operators, and multiple native inference operations require another reviewed
 adapter contract; a lowerer must reject them instead of approximating them.
 
-Safe contract version `5` retains the version-four `ImageExecutionPlanV3`
-lowering and requires resident-program extension v3 for
+Safe contract version `6` retains the version-four `ImageExecutionPlanV3`
+lowering and requires resident-program extension v3 plus model-block extension
+v4 for
 `ImageProgramPlanV1`. The resident contract supports multiple native/VAE
 stages, typed values, scheduled adapters, checkpoint and snapshot mechanics,
-and explicit value-arena cleanup. Source images and masks remain stage-canvas
-bound; reference images preserve their own bounded RGB8/RGBA8 geometry and
-exact bytes. Admitting those previously rejected reference dimensions changes
-no serialized shape, native ABI, or digest domain.
+Krea residual block scaling at exact denoising transitions, and explicit
+value-arena cleanup. Source images and masks remain stage-canvas bound;
+reference images preserve their own bounded RGB8/RGBA8 geometry and exact
+bytes. The Krea block count is discovered from loaded weights and does not
+assign semantic meaning to any block.
 
 The companion is prepared explicitly for `vulkan`, `hip`, `cuda`, or `metal`.
 This is independent of the llama.cpp Cargo feature selection. A model-free

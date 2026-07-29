@@ -24,14 +24,19 @@ use logit_loom_diffusion::{
 use logit_loom_executor::{CancellationProbe, ExecutorState, InputBuffer};
 
 use crate::{
-    ADAPTER_CONTRACT_VERSION, DiffusionCheckpoint, Error, ImageRequest, PROGRAM_ABI_VERSION,
-    ResidentImageProgramBackend, ResidentProgramCompletedStage, ResidentProgramFinish,
-    ResidentProgramStageTerminal, Result, Sdcpp, StepProgram, UPSTREAM_COMMIT,
+    ADAPTER_CONTRACT_VERSION, DiffusionCheckpoint, Error, ImageRequest, MODEL_BLOCK_ABI_VERSION,
+    PROGRAM_ABI_VERSION, ResidentImageProgramBackend, ResidentProgramCompletedStage,
+    ResidentProgramFinish, ResidentProgramStageTerminal, Result, Sdcpp, StepProgram,
+    UPSTREAM_COMMIT,
     contract::component_map,
-    execution::{InstalledChannelBias, ObservationAccumulator, lora_target_v1},
+    execution::{
+        InstalledChannelBias, InstalledModelBlockResidualScale, ObservationAccumulator,
+        lora_target_v1,
+    },
     ffi::{
-        self, ImageViewV2, LoraScalePointV3, LoraScheduleV3, ProgramImageParamsV3,
-        ProgramImageResultV3, ProgramOutputV3, TensorViewV2, ValueDescriptorV3, ValueHandleV3,
+        self, ImageViewV2, LoraScalePointV3, LoraScheduleV3, ModelBlockOperatorV4,
+        ProgramImageParamsV3, ProgramImageParamsV4, ProgramImageResultV3, ProgramOutputV3,
+        TensorViewV2, ValueDescriptorV3, ValueHandleV3,
     },
     runtime::{
         CallbackState, condition_callback, native_status_error, path_c_string, step_callback,
@@ -607,7 +612,11 @@ impl StepProgram for ResidentStageProgram<'_> {
         }
         let mut interventions: Vec<Box<dyn Intervention>> =
             Vec::with_capacity(self.operators.len());
-        for operator in &self.operators {
+        for operator in self
+            .operators
+            .iter()
+            .filter(|operator| operator.selector == TensorSelector::SchedulerState)
+        {
             interventions.push(Box::new(
                 InstalledChannelBias::from_invocation(operator, plan)
                     .map_err(|error| error.to_string())?,
@@ -1339,6 +1348,7 @@ impl<R: ResidentArtifactPathResolver> SdcppResidentProgram<'_, R> {
                 })
             })
             .collect::<Result<Vec<_>>>()?;
+        let model_blocks = lower_model_block_operators(&native.operators)?;
         let snapshot_steps = native
             .observations
             .iter()
@@ -1375,6 +1385,8 @@ impl<R: ResidentArtifactPathResolver> SdcppResidentProgram<'_, R> {
             reference_images,
             _scale_points: scale_points,
             lora_schedules,
+            _model_block_steps: model_blocks.steps,
+            model_block_operators: model_blocks.operators,
             snapshot_steps,
             seed,
             schedule,
@@ -1430,17 +1442,14 @@ impl<R: ResidentArtifactPathResolver> SdcppResidentProgram<'_, R> {
         // synchronous call. Both callbacks contain panics and validate all
         // native descriptors before forming Rust slices.
         let status = unsafe {
-            self.runtime.api.program_generate_image_v3(
-                self.arena()?.as_ptr(),
-                &params,
-                condition_callback,
-                callback_pointer,
-                step_callback,
+            self.invoke_diffusion_native(
+                params,
+                prepared,
                 callback_pointer,
                 &mut snapshot_handles,
                 &mut result,
             )
-        };
+        }?;
         let callback_error = callbacks.take_error();
         let last_step = callbacks.last_completed_step();
         let native_time_ns = callbacks.native_time_ns();
@@ -1481,6 +1490,58 @@ impl<R: ResidentArtifactPathResolver> SdcppResidentProgram<'_, R> {
                 native_time_ns,
             },
         )))
+    }
+
+    /// Invokes the exact resident ABI selected by the prepared operators.
+    ///
+    /// # Safety
+    ///
+    /// The callback state, every array nested beneath `params` and `prepared`,
+    /// snapshot storage, and result storage must remain live for the complete
+    /// synchronous native call.
+    unsafe fn invoke_diffusion_native(
+        &mut self,
+        params: ProgramImageParamsV3,
+        prepared: &PreparedDiffusionCall,
+        callback_pointer: *mut c_void,
+        snapshot_handles: &mut [ValueHandleV3],
+        result: &mut ProgramImageResultV3,
+    ) -> Result<i32> {
+        let arena = self.arena()?.as_ptr();
+        if prepared.model_block_operators.is_empty() {
+            // SAFETY: Forwarded from this method's caller contract.
+            return Ok(unsafe {
+                self.runtime.api.program_generate_image_v3(
+                    arena,
+                    &params,
+                    condition_callback,
+                    callback_pointer,
+                    step_callback,
+                    callback_pointer,
+                    snapshot_handles,
+                    result,
+                )
+            });
+        }
+        let params = ProgramImageParamsV4 {
+            abi_version: MODEL_BLOCK_ABI_VERSION,
+            image: params,
+            model_block_operators: pointer_or_null(&prepared.model_block_operators),
+            model_block_operator_count: prepared.model_block_operators.len(),
+        };
+        // SAFETY: Forwarded from this method's caller contract.
+        Ok(unsafe {
+            self.runtime.api.program_generate_image_v4(
+                arena,
+                &params,
+                condition_callback,
+                callback_pointer,
+                step_callback,
+                callback_pointer,
+                snapshot_handles,
+                result,
+            )
+        })
     }
 
     fn diffusion_params(
@@ -1811,11 +1872,58 @@ struct PreparedDiffusionCall {
     reference_images: Vec<ValueHandleV3>,
     _scale_points: Vec<Vec<LoraScalePointV3>>,
     lora_schedules: Vec<LoraScheduleV3>,
+    _model_block_steps: Vec<Vec<u32>>,
+    model_block_operators: Vec<ModelBlockOperatorV4>,
     snapshot_steps: Vec<u32>,
     seed: u64,
     schedule: logit_loom_diffusion::DiffusionSchedule,
     restore: Option<DiffusionCheckpoint>,
     output: ProgramOutputV3,
+}
+
+struct LoweredModelBlockOperators {
+    steps: Vec<Vec<u32>>,
+    operators: Vec<ModelBlockOperatorV4>,
+}
+
+fn lower_model_block_operators(
+    operators: &[logit_loom_diffusion::OperatorInvocation],
+) -> Result<LoweredModelBlockOperators> {
+    let steps = operators
+        .iter()
+        .filter_map(|operator| match &operator.selector {
+            TensorSelector::ModelBlock { .. } => Some(match &operator.steps {
+                StepSelector::All => Vec::new(),
+                StepSelector::Exact { steps } => steps.clone(),
+            }),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let native = operators
+        .iter()
+        .filter(|operator| matches!(operator.selector, TensorSelector::ModelBlock { .. }))
+        .zip(&steps)
+        .map(|(operator, selected_steps)| {
+            let installed = InstalledModelBlockResidualScale::from_invocation(operator)?;
+            Ok(ModelBlockOperatorV4 {
+                component: ffi::MODEL_COMPONENT_KREA2_V4,
+                block: installed.block,
+                site: ffi::MODEL_BLOCK_RESIDUAL_V4,
+                residual_scale: installed.scale,
+                step_selection: if matches!(installed.steps, StepSelector::All) {
+                    ffi::STEP_ALL_V4
+                } else {
+                    ffi::STEP_EXACT_V4
+                },
+                steps: pointer_or_null(selected_steps),
+                step_count: selected_steps.len(),
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(LoweredModelBlockOperators {
+        steps,
+        operators: native,
+    })
 }
 
 struct CompletedDiffusionCall<'a> {
@@ -1903,10 +2011,21 @@ fn validate_native_stage(
         }
     }
     for operator in &stage.operators {
-        if operator.selector != TensorSelector::SchedulerState {
-            return Err(Error::Invalid(
-                "resident model-block and conditioning operators are not installed".to_owned(),
-            ));
+        match &operator.selector {
+            TensorSelector::SchedulerState => {}
+            TensorSelector::ModelBlock { .. } if runtime.profile == crate::Profile::Krea2Turbo => {
+                InstalledModelBlockResidualScale::from_invocation(operator)?;
+            }
+            TensorSelector::ModelBlock { .. } => {
+                return Err(Error::Invalid(
+                    "resident model-block operators require the Krea profile".to_owned(),
+                ));
+            }
+            TensorSelector::Conditioning { .. } => {
+                return Err(Error::Invalid(
+                    "resident conditioning operators are not installed".to_owned(),
+                ));
+            }
         }
     }
     for observation in &stage.observations {
@@ -2307,6 +2426,8 @@ unsafe extern "C" fn hash_native_value(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{ModelBlockResidualScaleControlV1, model_block_residual_scale_schema_v1};
+    use logit_loom_diffusion::OperatorInvocation;
 
     #[test]
     fn incremental_value_hash_matches_public_content_domain() {
@@ -2335,6 +2456,59 @@ mod tests {
             resident_lora_target_v1(false),
             resident_lora_target_v1(true)
         );
+    }
+
+    #[test]
+    fn model_block_lowering_retains_exact_step_storage() {
+        let all_control = ModelBlockResidualScaleControlV1::new(0.0, 1.0).unwrap();
+        let all_selector = TensorSelector::ModelBlock {
+            component: "krea2".to_owned(),
+            block: 9,
+            site: "residual".to_owned(),
+        };
+        let all_steps = StepSelector::All;
+        let exact_control = ModelBlockResidualScaleControlV1::new(0.5, 1.0).unwrap();
+        let exact_selector = TensorSelector::ModelBlock {
+            component: "krea2".to_owned(),
+            block: 10,
+            site: "residual".to_owned(),
+        };
+        let exact_steps = StepSelector::Exact { steps: vec![1, 3] };
+        let invocations = vec![
+            OperatorInvocation {
+                schema: model_block_residual_scale_schema_v1(),
+                implementation: all_control
+                    .implementation_for(&all_selector, &all_steps)
+                    .unwrap(),
+                selector: all_selector,
+                steps: all_steps,
+                controls: all_control.to_control_bytes(),
+            },
+            OperatorInvocation {
+                schema: model_block_residual_scale_schema_v1(),
+                implementation: exact_control
+                    .implementation_for(&exact_selector, &exact_steps)
+                    .unwrap(),
+                selector: exact_selector,
+                steps: exact_steps,
+                controls: exact_control.to_control_bytes(),
+            },
+        ];
+
+        let lowered = lower_model_block_operators(&invocations).unwrap();
+        assert_eq!(lowered.steps, [Vec::new(), vec![1, 3]]);
+        assert_eq!(lowered.operators.len(), 2);
+        assert_eq!(lowered.operators[0].block, 9);
+        assert_eq!(lowered.operators[0].step_selection, ffi::STEP_ALL_V4);
+        assert!(lowered.operators[0].steps.is_null());
+        assert_eq!(lowered.operators[1].block, 10);
+        assert_eq!(
+            lowered.operators[1].residual_scale.to_bits(),
+            0.5_f32.to_bits()
+        );
+        assert_eq!(lowered.operators[1].step_selection, ffi::STEP_EXACT_V4);
+        assert_eq!(lowered.operators[1].step_count, 2);
+        assert_eq!(lowered.operators[1].steps, lowered.steps[1].as_ptr());
     }
 
     #[test]

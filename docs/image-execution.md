@@ -99,8 +99,8 @@ contained by the existing transactional full-state path.
 
 ## Resident-program support matrix
 
-Program ABI v3 and safe adapter contract v5 provide this exact resident
-surface:
+Program ABI v3, model-block ABI v4, and safe adapter contract v6 provide this
+exact resident surface:
 
 | Mechanic | Resident adapter behavior |
 | --- | --- |
@@ -108,7 +108,7 @@ surface:
 | Inputs | Exact UTF-8 conditioning, canvas-bound tight RGB8/RGBA8 sources and Gray8 masks, independently sized bounded tight RGB8/RGBA8 references, finite dimension-zero-fastest `f32` tensors, authenticated checkpoints, and caller-retained verified `LoRA` descriptor paths |
 | LoRA | Ordered request-local fixed or scheduled scales at exact pre-denoiser boundaries; every adapter must participate in a native model tensor |
 | Checkpoint | Authenticated restore/capture with exact runtime compatibility and post-Euler boundary identity |
-| Operator | Installed scheduler-state channel bias; model-block and conditioning selectors fail during whole-program preflight |
+| Operator | Installed scheduler-state channel bias plus Krea residual block scaling at all or exact selected transitions; uninstalled model components/sites and conditioning selectors fail during whole-program preflight |
 | Observation | Scheduler-state digest, statistics, and exact selected-boundary snapshots |
 | Compositing | Ordered deterministic tight-RGB8 mask blends |
 | Output | Individually typed RGB8, RGBA8, bounded PNG (RGB or RGBA plus encoder identity), tensor, checkpoint, snapshot, and final program-receipt routes |
@@ -116,15 +116,16 @@ surface:
 | Cleanup | Generation-checked value release, retained or confirmed-clear disposition, epoch advancement, and poisoning on uncertainty |
 | Measurements | Per-stage wall/native time, arena peak, placement, and transfers outside deterministic identity |
 
-The adapter rejects unsupported selector semantics before the arena begins. It
-does not reinterpret opaque conditioning, invent model-block hook sites,
-approximate a scheduled adapter, select a seed for the coordinator, or fall
-back to another backend.
+The adapter rejects unsupported selector semantics before the arena begins.
+Krea block indices are checked against the topology detected from the loaded
+weights. It does not reinterpret opaque conditioning, infer semantic block
+roles, invent additional hook sites, approximate a scheduled adapter, select a
+seed for the coordinator, or fall back to another backend.
 
 ## Single-primary stable-diffusion.cpp support matrix
 
 The image extension is layered over companion ABI v1, is required by safe
-adapter contract v5, and provides the following exact legacy subset:
+adapter contract v6, and provides the following exact legacy subset:
 
 | Mechanic | Current adapter behavior |
 | --- | --- |
@@ -148,11 +149,12 @@ stack before a normal, stopped, callback-error, or unsupported return. A
 native exception or unconfirmed cleanup poisons the Rust session, which must
 then be replaced.
 
-The whole-plan lowerer rejects per-step `LoRA` schedules, arbitrary model-block
-or conditioning operators, snapshot observations, PNG/RGBA/tensor output
-routes, multiple native inference operations, and version-two direct VAE
-execution. Another adapter or a future reviewed contract version may implement
-those mechanics.
+The older whole-plan lowerer rejects per-step `LoRA` schedules, model-block or
+conditioning operators, snapshot observations, PNG/RGBA/tensor output routes,
+multiple native inference operations, and version-two direct VAE execution.
+Krea residual block controls are available only through the resident program
+surface; unsupported model components, tensor sites, and control schemas are
+rejected instead of approximated.
 
 ## Integrating a local worker
 

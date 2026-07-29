@@ -11,7 +11,9 @@ The safe public adapter relies on all of the following conditions:
 2. Resolved symbols retain the C signatures declared in
    `native/stable-diffusion.cpp/logit-loom-step-v1.patch` and
    `native/stable-diffusion.cpp/logit-loom-image-v2.patch`, plus the program
-   ABI in `native/stable-diffusion.cpp/logit-loom-program-v3.patch`, for the
+   ABI in `native/stable-diffusion.cpp/logit-loom-program-v3.patch` and the
+   Krea model-block extension in
+   `native/stable-diffusion.cpp/logit-loom-model-block-v4.patch`, for the
    lifetime of the loaded library. Every image, tensor, program parameter, and
    value descriptor carries its exact extension version, which the companion
    checks before reading the rest of that descriptor.
@@ -66,6 +68,13 @@ The safe public adapter relies on all of the following conditions:
     count, multiplication, encoder format, and declared maximum bytes before
     publishing a value. Encoded PNG storage is copied into the arena before
     the temporary encoder allocation is released.
+16. Program-v4 model-block arrays and their nested exact-step arrays outlive
+    the synchronous generation call. Rust validates the installed schema,
+    selector, fixed-width controls, and implementation identity before native
+    entry. Native code revalidates scalar bounds, canonical steps, overlap,
+    and each block against the loaded Krea topology before installing
+    request-local controls. A scope guard clears those controls on every
+    returned path.
 
 The exact ABI/commit checks turn an accidental ordinary stable-diffusion.cpp
 library or another companion revision into a load error before any model
@@ -80,7 +89,8 @@ dispositions, authenticated checkpoint envelopes, stale-backend rejection,
 post-observation cancellation, whole-plan receipt lineage, and compile-fail
 `Send`/`Sync` assertions. Resident model-free tests additionally cover value
 liveness, scheduled-adapter target identity, typed PNG lowering, incremental
-native hashing, output atomicity, cleanup poisoning, and handle release. The public
-`probe_companion` path checks both symbol sets, companion ABI, commit, library
-bytes, and device-report handling against a caller-built companion without
-loading a model.
+native hashing, exact model-block control encoding and installation, output
+atomicity, cleanup poisoning, and handle release. The public
+`probe_companion` path checks all required symbol sets, companion ABI, commit,
+library bytes, and device-report handling against a caller-built companion
+without loading a model.
