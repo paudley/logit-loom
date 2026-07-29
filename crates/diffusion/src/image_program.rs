@@ -1742,7 +1742,7 @@ fn validate_role_spec(
                     ..
                 }
         ),
-        ImageBufferRole::SourceImage | ImageBufferRole::ReferenceImage => matches!(
+        ImageBufferRole::SourceImage => matches!(
             spec,
             ImageProgramValueSpecV1::Rgb8 {
                 width: value_width,
@@ -1751,6 +1751,10 @@ fn validate_role_spec(
                 width: value_width,
                 height: value_height
             } if (*value_width, *value_height) == (width, height)
+        ),
+        ImageBufferRole::ReferenceImage => matches!(
+            spec,
+            ImageProgramValueSpecV1::Rgb8 { .. } | ImageProgramValueSpecV1::Rgba8 { .. }
         ),
         ImageBufferRole::Mask => matches!(
             spec,
@@ -2288,6 +2292,109 @@ mod tests {
             buffer: buffer("unused", 4),
         });
         assert!(unused.validate().is_err());
+    }
+
+    #[test]
+    fn reference_images_preserve_independent_geometry_and_identity() {
+        let mut plan = graph();
+        plan.values.push(value(
+            8,
+            ImageProgramValueSpecV1::Rgb8 {
+                width: 1,
+                height: 2,
+            },
+        ));
+        plan.inputs.push(ImageProgramInputV1 {
+            value: 8,
+            buffer: buffer("reference-input", 6),
+        });
+        let ImageProgramStageOperationV1::Native { plan: native } = &mut plan.stages[0].operation
+        else {
+            panic!("fixture stage must be native");
+        };
+        native
+            .inputs
+            .push(binding(ImageBufferRole::ReferenceImage, 8));
+
+        plan.validate().unwrap();
+        let independent_digest = plan.digest().unwrap();
+        let encoded = serde_json::to_vec(&plan).unwrap();
+        let decoded: ImageProgramPlanV1 = serde_json::from_slice(&encoded).unwrap();
+        assert_eq!(decoded, plan);
+        assert_eq!(
+            decoded.values[8].spec,
+            ImageProgramValueSpecV1::Rgb8 {
+                width: 1,
+                height: 2,
+            }
+        );
+
+        plan.values[8].spec = ImageProgramValueSpecV1::Rgb8 {
+            width: 2,
+            height: 1,
+        };
+        plan.validate().unwrap();
+        assert_ne!(plan.digest().unwrap(), independent_digest);
+
+        plan.values[8].spec = ImageProgramValueSpecV1::Rgba8 {
+            width: 1,
+            height: 2,
+        };
+        plan.inputs[2].buffer = buffer("rgba-reference-input", 8);
+        plan.validate().unwrap();
+    }
+
+    #[test]
+    fn reference_images_reject_invalid_specs_and_lengths() {
+        let independent_rgb = ImageProgramValueSpecV1::Rgb8 {
+            width: 1,
+            height: 2,
+        };
+        assert!(
+            validate_role_spec(ImageBufferRole::ReferenceImage, &independent_rgb, 2, 1).is_ok()
+        );
+        assert!(validate_role_spec(ImageBufferRole::SourceImage, &independent_rgb, 2, 1).is_err());
+        assert!(
+            validate_role_spec(
+                ImageBufferRole::Mask,
+                &ImageProgramValueSpecV1::Gray8 {
+                    width: 1,
+                    height: 2,
+                },
+                2,
+                1
+            )
+            .is_err()
+        );
+        assert!(
+            validate_role_spec(
+                ImageBufferRole::ReferenceImage,
+                &ImageProgramValueSpecV1::Gray8 {
+                    width: 1,
+                    height: 2,
+                },
+                2,
+                1
+            )
+            .is_err()
+        );
+        assert!(
+            ImageProgramValueSpecV1::Rgb8 {
+                width: 0,
+                height: 1,
+            }
+            .validate()
+            .is_err()
+        );
+        assert!(
+            ImageProgramValueSpecV1::Rgba8 {
+                width: MAX_IMAGE_DIMENSION + 1,
+                height: 1,
+            }
+            .validate()
+            .is_err()
+        );
+        assert!(independent_rgb.validate_buffer_length(5).is_err());
     }
 
     #[test]

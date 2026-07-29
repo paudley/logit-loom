@@ -1491,6 +1491,41 @@ mod tests {
     }
 
     #[test]
+    fn lowering_preserves_independent_reference_geometry_and_bytes() {
+        let native = diffusion_plan();
+        let mut plan = image_plan(&native, ImageCheckpointPlan::default(), Vec::new());
+        plan.primary.inputs.push(ImageBufferBinding {
+            slot: 1,
+            role: ImageBufferRole::ReferenceImage,
+            buffer: BufferSpec::new(
+                Digest::of_bytes("reference", b"independent-geometry"),
+                6,
+                "image/rgb",
+            )
+            .unwrap(),
+            layout: ImageBufferLayout::Rgb8 {
+                width: 1,
+                height: 2,
+                row_stride: 3,
+            },
+        });
+        plan.primary.validate().unwrap();
+
+        let prompt = *b"x";
+        let reference = [1_u8, 2, 3, 4, 5, 6];
+        let inputs = [
+            InputBuffer::new(&plan.primary.inputs[0].buffer, &prompt).unwrap(),
+            InputBuffer::new(&plan.primary.inputs[1].buffer, &reference).unwrap(),
+        ];
+        let request = lower_request(&plan.primary, &inputs, &mut RejectArtifactPaths).unwrap();
+        let lowered = request.references()[0];
+        assert_eq!(lowered.width(), 1);
+        assert_eq!(lowered.height(), 2);
+        assert_eq!(lowered.channels(), 3);
+        assert_eq!(lowered.bytes(), reference);
+    }
+
+    #[test]
     fn stale_checkpoint_backend_fails_at_program_begin() {
         let native = diffusion_plan();
         let context = StepContext::for_plan(&native, 0).unwrap();

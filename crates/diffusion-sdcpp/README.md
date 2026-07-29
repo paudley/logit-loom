@@ -69,10 +69,12 @@ stable-diffusion.cpp program ABI v3. One arena can execute multiple ordered
 diffusion and direct-VAE stages, scheduled request-local `LoRA` scales,
 authenticated checkpoint restore/capture, scheduler-state interventions and
 observations, exact snapshots, deterministic RGB8 joins, and typed
-RGB8/RGBA8/PNG/tensor/checkpoint outputs. PNG values bind decoded geometry,
-RGB or RGBA color, a deterministic encoder identity, and a bounded encoded
-length. Every intermediate remains behind a generation-checked native handle;
-cleanup uncertainty poisons the owner.
+RGB8/RGBA8/PNG/tensor/checkpoint outputs. Native stages keep source images and
+masks canvas-bound while forwarding bounded reference images with their own
+exact RGB8/RGBA8 dimensions and bytes. PNG values bind decoded geometry, RGB
+or RGBA color, a deterministic encoder identity, and a bounded encoded length.
+Every intermediate remains behind a generation-checked native handle; cleanup
+uncertainty poisons the owner.
 
 Image-v2 success confirms that every requested `LoRA` participated in at least
 one native model tensor. The native stack is cleared before reusable returns;

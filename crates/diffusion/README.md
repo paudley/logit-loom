@@ -37,6 +37,11 @@ outside deterministic identity. Stage-produced values use the
 `image-program-value-content-v1` content domain so an executor can verify
 explicit materialization without reinterpreting the value.
 
+Source images and masks are bound to the native stage canvas. Reference images
+instead retain their own bounded, tightly packed RGB8 or RGBA8 dimensions in
+the serialized value specification and plan identity; the contract performs no
+implicit resize, crop, or byte transformation.
+
 `mask_blend_rgb8` validates every length before its first write. These
 contracts contain no paths, transport, queue, native handles, or feature-gated
 availability. An adapter must reject plan mechanics it cannot implement

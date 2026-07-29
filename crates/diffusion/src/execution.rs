@@ -76,7 +76,7 @@ pub enum ImageBufferRole {
     NegativeConditioning,
     /// Image-to-image, inpaint, outpaint, or VAE source image.
     SourceImage,
-    /// Additional reference image.
+    /// Additional independently sized reference image.
     ReferenceImage,
     /// Spatial mask.
     Mask,

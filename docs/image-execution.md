@@ -34,8 +34,10 @@ configuration switch. Before allocation or native execution it validates:
 
 - canonically numbered values and stages with exactly one producer per value;
 - external or earlier-stage-only references and complete value consumption;
-- native operation roles, image geometry, tensor representation, schedules,
-  scheduled `LoRA` values, checkpoint state, and snapshot output types;
+- native operation roles, canvas-bound source/mask geometry, independently
+  sized bounded RGB8/RGBA8 reference geometry, tensor representation,
+  schedules, scheduled `LoRA` values, checkpoint state, and snapshot output
+  types;
 - deterministic RGB8 join inputs and checkpoint conversion compatibility;
 - unique non-aliasing output allocations, one final program-receipt route, and
   non-routable mutable checkpoint state; and
@@ -103,7 +105,7 @@ surface:
 | Mechanic | Resident adapter behavior |
 | --- | --- |
 | Native stages | Multiple ordered text-to-image, image-to-image, inpaint, outpaint, direct VAE encode, and direct VAE decode stages |
-| Inputs | Exact UTF-8 conditioning, tight RGB8/RGBA8/Gray8 images, finite dimension-zero-fastest `f32` tensors, authenticated checkpoints, and caller-retained verified `LoRA` descriptor paths |
+| Inputs | Exact UTF-8 conditioning, canvas-bound tight RGB8/RGBA8 sources and Gray8 masks, independently sized bounded tight RGB8/RGBA8 references, finite dimension-zero-fastest `f32` tensors, authenticated checkpoints, and caller-retained verified `LoRA` descriptor paths |
 | LoRA | Ordered request-local fixed or scheduled scales at exact pre-denoiser boundaries; every adapter must participate in a native model tensor |
 | Checkpoint | Authenticated restore/capture with exact runtime compatibility and post-Euler boundary identity |
 | Operator | Installed scheduler-state channel bias; model-block and conditioning selectors fail during whole-program preflight |

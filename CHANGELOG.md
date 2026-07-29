@@ -41,7 +41,7 @@ include breaking API changes.
 - `logit-loom-diffusion-sdcpp`, a safe adapter over companion ABI version 1 for
   an exact pinned stable-diffusion.cpp revision, with explicit accelerator
   placement and focused unsafe-boundary tests.
-- Stable-diffusion.cpp image ABI version 2 and safe adapter contract version 4,
+- Stable-diffusion.cpp image ABI version 2 and safe adapter contract version 5,
   with direct caller-owned RGB output, bounded source/mask/reference inputs,
   negative conditioning, fixed request-local LoRA stacks with verified tensor
   participation and cleanup, direct Krea VAE encode/decode, lifecycle epochs,
@@ -106,6 +106,10 @@ include breaking API changes.
 
 ### Changed
 
+- Resident native stages now accept bounded tight RGB8/RGBA8 reference images
+  at their own serialized dimensions while source images and masks remain
+  canvas-bound. Lowering preserves the exact reference bytes and geometry; no
+  serialized shape, native ABI, or digest domain changed.
 - The text adapter now pins public `llama-cpp-4` 0.4.2 successor revision
   `d76356b9725a3736212b3bfd16c66fc80c995c29`, forward-ported to llama.cpp
   `f87067841bac583bc089a225382248d857791ca8`; source builds no longer require
