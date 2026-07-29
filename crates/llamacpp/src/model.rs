@@ -165,26 +165,23 @@ impl Model {
                 "model file changed while llama.cpp was loading it".to_owned(),
             ));
         }
+        let mut has_accelerator = false;
         let devices = native_model
             .devices()
             .map(|device| {
-                let name = device.name().unwrap_or("unknown");
-                format!("{name}:{:?}", device.device_type())
-            })
-            .collect::<Vec<_>>();
-        if options.device_policy == DevicePolicy::RequireAccelerator
-            && !native_model.devices().any(|device| {
-                matches!(
-                    device.device_type(),
+                let device_type = device.device_type();
+                has_accelerator |= matches!(
+                    device_type,
                     LlamaBackendDeviceType::Gpu
                         | LlamaBackendDeviceType::IntegratedGpu
                         | LlamaBackendDeviceType::Accel
-                )
+                );
+                let name = device.name().unwrap_or("unknown");
+                format!("{name}:{device_type:?}")
             })
-        {
-            return Err(Error::Native(
-                "model placement contains no accelerator device".to_owned(),
-            ));
+            .collect::<Vec<_>>();
+        if options.device_policy == DevicePolicy::RequireAccelerator && !has_accelerator {
+            return Err(Error::Native(accelerator_placement_error(&devices)));
         }
         let architecture = native_model
             .meta_val_str("general.architecture", 256)
@@ -363,6 +360,15 @@ impl Model {
     ) -> Result<Session<'model>, Error> {
         Session::new_with_activation(self, runtime, options, activation)
     }
+}
+
+fn accelerator_placement_error(devices: &[String]) -> String {
+    let observed = if devices.is_empty() {
+        "none".to_owned()
+    } else {
+        devices.join(", ")
+    };
+    format!("model placement contains no accelerator device; observed devices: {observed}")
 }
 
 fn validate_token_ids(n_vocab: i32, tokens: &[TokenId]) -> Result<(), Error> {
@@ -553,5 +559,17 @@ mod tests {
         let outside = TokenId::new(10).unwrap();
         assert!(validate_token_ids(10, &[inside]).is_ok());
         assert!(validate_token_ids(10, &[outside]).is_err());
+    }
+
+    #[test]
+    fn accelerator_placement_errors_report_observed_devices() {
+        assert_eq!(
+            accelerator_placement_error(&[]),
+            "model placement contains no accelerator device; observed devices: none"
+        );
+        assert_eq!(
+            accelerator_placement_error(&["CPU:Cpu".to_owned(), "NPU:Unknown".to_owned()]),
+            "model placement contains no accelerator device; observed devices: CPU:Cpu, NPU:Unknown"
+        );
     }
 }
