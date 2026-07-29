@@ -99,8 +99,8 @@ contained by the existing transactional full-state path.
 
 ## Resident-program support matrix
 
-Program ABI v3, model-block ABI v4, and safe adapter contract v6 provide this
-exact resident surface:
+Program ABI v3, model-block ABI v4, application ABI v5, and safe adapter
+contract v7 provide this exact resident surface:
 
 | Mechanic | Resident adapter behavior |
 | --- | --- |
@@ -108,7 +108,7 @@ exact resident surface:
 | Inputs | Exact UTF-8 conditioning, canvas-bound tight RGB8/RGBA8 sources and Gray8 masks, independently sized bounded tight RGB8/RGBA8 references, finite dimension-zero-fastest `f32` tensors, authenticated checkpoints, and caller-retained verified `LoRA` descriptor paths |
 | LoRA | Ordered request-local fixed or scheduled scales at exact pre-denoiser boundaries; every adapter must participate in a native model tensor |
 | Checkpoint | Authenticated restore/capture with exact runtime compatibility and post-Euler boundary identity |
-| Operator | Installed scheduler-state channel bias plus Krea residual block scaling at all or exact selected transitions; uninstalled model components/sites and conditioning selectors fail during whole-program preflight |
+| Operator | Installed scheduler-state channel bias plus Krea residual block scaling at all or exact selected transitions; application receipts retain the actual transition bitmap, loaded topology, graph-action counts, and cleanup confirmation; uninstalled model components/sites and conditioning selectors fail during whole-program preflight |
 | Observation | Scheduler-state digest, statistics, and exact selected-boundary snapshots |
 | Compositing | Ordered deterministic tight-RGB8 mask blends |
 | Output | Individually typed RGB8, RGBA8, bounded PNG (RGB or RGBA plus encoder identity), tensor, checkpoint, snapshot, and final program-receipt routes |

@@ -46,6 +46,7 @@ patch_files=(
     "${repo_root}/native/stable-diffusion.cpp/logit-loom-image-v2.patch"
     "${repo_root}/native/stable-diffusion.cpp/logit-loom-program-v3.patch"
     "${repo_root}/native/stable-diffusion.cpp/logit-loom-model-block-v4.patch"
+    "${repo_root}/native/stable-diffusion.cpp/logit-loom-model-block-application-v5.patch"
 )
 source_dir="$(realpath -m -- "${source_dir}")"
 build_dir="$(realpath -m -- "${build_dir}")"

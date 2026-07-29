@@ -55,6 +55,10 @@ include breaking API changes.
   deterministic joins, checkpoint conversion, liveness-derived arena limits,
   completed-stage receipts, cleanup uncertainty, and deployment measurements
   outside deterministic identity.
+- Model-block application ABI version 5 and safe adapter contract version 7,
+  with native Krea graph-branch accounting, exact selected-transition bitmaps,
+  loaded-topology evidence, request-local cleanup confirmation, and a separate
+  digest-bound `ModelBlockApplicationReceiptV1`.
 - A reproducible native companion patch/build script, model-free ABI probe,
   complete MiniT2I and Krea checkpoint experiments, and an output-free
   model-acceptance report schema.

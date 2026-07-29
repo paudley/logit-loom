@@ -52,10 +52,10 @@ pub(crate) const PROGRAM_PNG_RGBA8_V3: i32 = 4;
 pub(crate) const VALUE_HOST_V3: i32 = 1;
 pub(crate) const VALUE_MIXED_V3: i32 = 2;
 
-pub(crate) const MODEL_COMPONENT_KREA2_V4: i32 = 1;
-pub(crate) const MODEL_BLOCK_RESIDUAL_V4: i32 = 1;
-pub(crate) const STEP_ALL_V4: i32 = 1;
-pub(crate) const STEP_EXACT_V4: i32 = 2;
+pub(crate) const MODEL_COMPONENT_KREA2_V5: i32 = 1;
+pub(crate) const MODEL_BLOCK_RESIDUAL_V5: i32 = 1;
+pub(crate) const STEP_ALL_V5: i32 = 1;
+pub(crate) const STEP_EXACT_V5: i32 = 2;
 
 const MAX_DEVICE_REPORT_BYTES: usize = 64 * 1024;
 const MAX_DEVICE_LINES: usize = 64;
@@ -236,7 +236,8 @@ pub(crate) struct ProgramImageParamsV3 {
 }
 
 #[repr(C)]
-pub(crate) struct ModelBlockOperatorV4 {
+pub(crate) struct ModelBlockOperatorV5 {
+    pub operator_index: u32,
     pub component: i32,
     pub block: u32,
     pub site: i32,
@@ -247,11 +248,24 @@ pub(crate) struct ModelBlockOperatorV4 {
 }
 
 #[repr(C)]
-pub(crate) struct ProgramImageParamsV4 {
+pub(crate) struct ProgramImageParamsV5 {
     pub abi_version: u32,
     pub image: ProgramImageParamsV3,
-    pub model_block_operators: *const ModelBlockOperatorV4,
+    pub model_block_operators: *const ModelBlockOperatorV5,
     pub model_block_operator_count: usize,
+}
+
+#[derive(Clone, Copy, Default)]
+#[repr(C)]
+pub(crate) struct NativeModelBlockApplicationV5 {
+    pub operator_index: u32,
+    pub loaded_model_blocks: u32,
+    pub block: u32,
+    pub residual_scale: f32,
+    pub graph_applications: u32,
+    pub ordinary_graphs: u32,
+    pub bypassed_graphs: u32,
+    pub scaled_residual_graphs: u32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -277,6 +291,27 @@ impl Default for ProgramImageResultV3 {
             primary: ValueHandleV3::EMPTY,
             checkpoint_state: ValueHandleV3::EMPTY,
             snapshot_count: 0,
+        }
+    }
+}
+
+#[repr(C)]
+pub(crate) struct ProgramImageResultV5 {
+    pub abi_version: u32,
+    pub image: ProgramImageResultV3,
+    pub model_block_application_count: usize,
+    pub transition_words_per_operator: usize,
+    pub controls_cleared: u32,
+}
+
+impl Default for ProgramImageResultV5 {
+    fn default() -> Self {
+        Self {
+            abi_version: MODEL_BLOCK_ABI_VERSION,
+            image: ProgramImageResultV3::default(),
+            model_block_application_count: 0,
+            transition_words_per_operator: 0,
+            controls_cleared: 0,
         }
     }
 }
@@ -377,16 +412,20 @@ type ProgramGenerateImageV3 = unsafe extern "C" fn(
     usize,
     *mut ProgramImageResultV3,
 ) -> i32;
-type ProgramGenerateImageV4 = unsafe extern "C" fn(
+type ProgramGenerateImageV5 = unsafe extern "C" fn(
     *mut c_void,
-    *const ProgramImageParamsV4,
+    *const ProgramImageParamsV5,
     Option<ConditionCallback>,
     *mut c_void,
     Option<StepCallback>,
     *mut c_void,
     *mut ValueHandleV3,
     usize,
-    *mut ProgramImageResultV3,
+    *mut NativeModelBlockApplicationV5,
+    usize,
+    *mut u64,
+    usize,
+    *mut ProgramImageResultV5,
 ) -> i32;
 type ProgramDescribeV3 =
     unsafe extern "C" fn(*const c_void, ValueHandleV3, *mut ValueDescriptorV3) -> i32;
@@ -422,7 +461,7 @@ struct Functions {
     program_vae_encode_v3: ProgramVaeEncodeV3,
     program_vae_decode_v3: ProgramVaeDecodeV3,
     program_generate_image_v3: ProgramGenerateImageV3,
-    program_generate_image_v4: ProgramGenerateImageV4,
+    program_generate_image_v5: ProgramGenerateImageV5,
     program_describe_v3: ProgramDescribeV3,
     program_read_v3: ProgramReadV3,
     program_copy_v3: ProgramCopyV3,
@@ -500,9 +539,9 @@ impl NativeApi {
                     &library,
                     b"sd_loom_program_generate_image_v3\0",
                 )?,
-                program_generate_image_v4: load_symbol(
+                program_generate_image_v5: load_symbol(
                     &library,
-                    b"sd_loom_program_generate_image_v4\0",
+                    b"sd_loom_program_generate_image_v5\0",
                 )?,
                 program_describe_v3: load_symbol(&library, b"sd_loom_program_describe_v3\0")?,
                 program_read_v3: load_symbol(&library, b"sd_loom_program_read_v3\0")?,
@@ -877,22 +916,24 @@ impl NativeApi {
     /// must remain live for the complete synchronous call. Output storage must
     /// match the declared snapshot count.
     #[allow(clippy::too_many_arguments)]
-    pub(crate) unsafe fn program_generate_image_v4(
+    pub(crate) unsafe fn program_generate_image_v5(
         &self,
         program: *mut c_void,
-        params: &ProgramImageParamsV4,
+        params: &ProgramImageParamsV5,
         condition_callback: ConditionCallback,
         condition_callback_data: *mut c_void,
         step_callback: StepCallback,
         step_callback_data: *mut c_void,
         snapshots: &mut [ValueHandleV3],
-        result_out: &mut ProgramImageResultV3,
+        applications: &mut [NativeModelBlockApplicationV5],
+        transition_masks: &mut [u64],
+        result_out: &mut ProgramImageResultV5,
     ) -> i32 {
         debug_assert_eq!(params.abi_version, MODEL_BLOCK_ABI_VERSION);
         debug_assert_eq!(params.image.abi_version, PROGRAM_ABI_VERSION);
         // SAFETY: Forwarded from this method's caller contract.
         unsafe {
-            (self.functions.program_generate_image_v4)(
+            (self.functions.program_generate_image_v5)(
                 program,
                 params,
                 Some(condition_callback),
@@ -901,6 +942,10 @@ impl NativeApi {
                 step_callback_data,
                 snapshots.as_mut_ptr(),
                 snapshots.len(),
+                applications.as_mut_ptr(),
+                applications.len(),
+                transition_masks.as_mut_ptr(),
+                transition_masks.len(),
                 result_out,
             )
         }

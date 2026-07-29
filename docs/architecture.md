@@ -41,7 +41,7 @@ image lane
   ├─ logit-loom-executor
   ├─ logit-loom-diffusion
   └─ companion ABI v1 + image ABI v2 + program ABI v3
-       + model-block ABI v4
+       + model-block ABI v4 + application ABI v5
        → pinned stable-diffusion.cpp
 ```
 
@@ -111,8 +111,9 @@ model-backed behavior remains opt-in acceptance.
 
 The stable-diffusion.cpp adapter supports only the exact catalogued MiniT2I and
 Krea 2 component layouts. It dynamically loads companion ABI version 1 plus
-the required image ABI version 2, program ABI version 3, and model-block ABI
-version 4 at the exact upstream commit recorded in ADR 0001. Before context
+the required image ABI version 2, program ABI version 3, model-block ABI
+version 4, and model-block application ABI version 5 at the exact upstream
+commit recorded in ADR 0001. Before context
 creation it verifies component bytes, the library digest, required symbols,
 ABI/revision, the bounded device report, and exact non-CPU backend names. No
 failed placement is retried on CPU.
@@ -155,7 +156,10 @@ Safe adapter contract v5 added the separate `SdcppResidentProgram` and
 mandatory program ABI v3 for scheduled adapters, snapshots, multiple
 native/VAE stages, typed RGB8/RGBA8/PNG/tensor/checkpoint outputs, and private
 arena liveness. Safe contract v6 additionally installs exact-step Krea
-model-block residual scaling through model-block ABI v4. The native Krea
+model-block residual scaling through model-block ABI v4. Safe contract v7
+requires application ABI v5 and returns transition bitmaps, Krea graph-branch
+counts, loaded topology, and confirmed request-local cleanup in a separate
+receipt bound to the unchanged program receipt. The native Krea
 topology determines whether a requested zero-based block exists; the public
 operator does not hard-code a layer count or semantic interpretation.
 Uninstalled model components/sites and every conditioning selector fail

@@ -1,0 +1,390 @@
+diff --git include/stable-diffusion.h include/stable-diffusion.h
+index 6159fff..72432fa 100644
+--- include/stable-diffusion.h
++++ include/stable-diffusion.h
+@@ -426,6 +426,7 @@ typedef bool (*sd_graph_eval_callback_t)(struct ggml_tensor* t, bool ask, void*
+ #define SD_LOOM_IMAGE_ABI_VERSION 2
+ #define SD_LOOM_PROGRAM_ABI_VERSION 3
+ #define SD_LOOM_MODEL_BLOCK_ABI_VERSION 4
++#define SD_LOOM_MODEL_BLOCK_APPLICATION_ABI_VERSION 5
+ 
+ enum sd_loom_profile_t {
+     SD_LOOM_PROFILE_MINIT2I_B16 = 1,
+@@ -681,6 +682,43 @@ typedef struct {
+     size_t model_block_operator_count;
+ } sd_loom_program_image_params_v4_t;
+ 
++typedef struct {
++    uint32_t operator_index;
++    enum sd_loom_model_component_v4_t component;
++    uint32_t block;
++    enum sd_loom_model_block_site_v4_t site;
++    float residual_scale;
++    enum sd_loom_step_selection_v4_t step_selection;
++    const uint32_t* steps;
++    size_t step_count;
++} sd_loom_model_block_operator_v5_t;
++
++typedef struct {
++    uint32_t abi_version;
++    sd_loom_program_image_params_v3_t image;
++    const sd_loom_model_block_operator_v5_t* model_block_operators;
++    size_t model_block_operator_count;
++} sd_loom_program_image_params_v5_t;
++
++typedef struct {
++    uint32_t operator_index;
++    uint32_t loaded_model_blocks;
++    uint32_t block;
++    float residual_scale;
++    uint32_t graph_applications;
++    uint32_t ordinary_graphs;
++    uint32_t bypassed_graphs;
++    uint32_t scaled_residual_graphs;
++} sd_loom_model_block_application_v5_t;
++
++typedef struct {
++    uint32_t abi_version;
++    sd_loom_program_image_result_v3_t image;
++    size_t model_block_application_count;
++    size_t transition_words_per_operator;
++    uint32_t controls_cleared;
++} sd_loom_program_image_result_v5_t;
++
+ typedef int32_t (*sd_loom_value_read_cb_v3_t)(const uint8_t* bytes,
+                                               size_t byte_count,
+                                               void* data);
+@@ -909,6 +947,20 @@ SD_API int32_t sd_loom_program_generate_image_v4(
+     sd_loom_value_handle_v3_t* snapshot_values,
+     size_t snapshot_capacity,
+     sd_loom_program_image_result_v3_t* result_out);
++SD_API int32_t sd_loom_program_generate_image_v5(
++    sd_loom_program_v3_t* program,
++    const sd_loom_program_image_params_v5_t* params,
++    sd_loom_condition_cb_v1_t condition_callback,
++    void* condition_callback_data,
++    sd_loom_step_cb_v1_t step_callback,
++    void* step_callback_data,
++    sd_loom_value_handle_v3_t* snapshot_values,
++    size_t snapshot_capacity,
++    sd_loom_model_block_application_v5_t* application_results,
++    size_t application_capacity,
++    uint64_t* transition_masks,
++    size_t transition_mask_capacity,
++    sd_loom_program_image_result_v5_t* result_out);
+ SD_API int32_t sd_loom_program_describe_v3(const sd_loom_program_v3_t* program,
+                                            sd_loom_value_handle_v3_t value,
+                                            sd_loom_value_descriptor_v3_t* descriptor_out);
+diff --git src/model/diffusion/krea2.hpp src/model/diffusion/krea2.hpp
+index 252ea3a..91d5782 100644
+--- src/model/diffusion/krea2.hpp
++++ src/model/diffusion/krea2.hpp
+@@ -669,6 +669,17 @@ namespace Krea2 {
+                     [i](const ModelBlockControl& candidate) {
+                         return candidate.block == i;
+                     });
++                if (control != block_controls.end() &&
++                    control->application != nullptr) {
++                    ++control->application->graph_applications;
++                    if (control->residual_scale == 0.f) {
++                        ++control->application->bypassed_graphs;
++                    } else if (control->residual_scale == 1.f) {
++                        ++control->application->ordinary_graphs;
++                    } else {
++                        ++control->application->scaled_residual_graphs;
++                    }
++                }
+                 if (control != block_controls.end() &&
+                     control->residual_scale == 0.f) {
+                     sd::ggml_graph_cut::mark_graph_cut(hidden_states, "krea2.blocks." + std::to_string(i), "hidden_states");
+diff --git src/model/diffusion/model.hpp src/model/diffusion/model.hpp
+index 8342e22..249c9fe 100644
+--- src/model/diffusion/model.hpp
++++ src/model/diffusion/model.hpp
+@@ -50,9 +50,17 @@ struct SkipLayerDiffusionExtra {
+     const std::vector<int>* skip_layers = nullptr;
+ };
+ 
++struct ModelBlockApplicationCounter {
++    uint32_t graph_applications     = 0;
++    uint32_t ordinary_graphs        = 0;
++    uint32_t bypassed_graphs        = 0;
++    uint32_t scaled_residual_graphs = 0;
++};
++
+ struct ModelBlockControl {
+-    int block            = -1;
+-    float residual_scale = 1.f;
++    int block                                  = -1;
++    float residual_scale                       = 1.f;
++    ModelBlockApplicationCounter* application = nullptr;
+ };
+ 
+ struct ModelBlockDiffusionExtra {
+diff --git src/stable-diffusion.cpp src/stable-diffusion.cpp
+index 9051749..2e5ebcf 100644
+--- src/stable-diffusion.cpp
++++ src/stable-diffusion.cpp
+@@ -207,6 +207,11 @@ struct sd_loom_scheduled_model_block_v4_t {
+     float residual_scale = 1.f;
+     bool all_steps = false;
+     std::vector<uint32_t> steps;
++    size_t application_index = std::numeric_limits<size_t>::max();
++    uint32_t operator_index = 0;
++    uint32_t loaded_model_blocks = 0;
++    std::vector<uint64_t> selected_transitions;
++    ModelBlockApplicationCounter application;
+ 
+     bool selects(uint32_t step) const {
+         return all_steps || std::binary_search(steps.begin(), steps.end(), step);
+@@ -2541,11 +2546,24 @@ public:
+             std::vector<ModelBlockControl> active_model_block_controls;
+             if (step > 0 && !loom_model_block_controls.empty()) {
+                 uint32_t model_step = static_cast<uint32_t>(step - 1);
+-                for (const auto& control : loom_model_block_controls) {
++                for (auto& control : loom_model_block_controls) {
+                     if (control.selects(model_step)) {
++                        if (control.application_index !=
++                            std::numeric_limits<size_t>::max()) {
++                            size_t word = static_cast<size_t>(model_step / 64);
++                            uint32_t bit = model_step % 64;
++                            if (word < control.selected_transitions.size()) {
++                                control.selected_transitions[word] |=
++                                    uint64_t{1} << bit;
++                            }
++                        }
+                         active_model_block_controls.push_back({
+                             static_cast<int>(control.block),
+                             control.residual_scale,
++                            control.application_index ==
++                                    std::numeric_limits<size_t>::max()
++                                ? nullptr
++                                : &control.application,
+                         });
+                     }
+                 }
+@@ -7509,6 +7527,224 @@ int32_t sd_loom_program_generate_image_v4(
+     }
+ }
+ 
++static bool sd_loom_valid_model_block_steps_v5(
++    const sd_loom_model_block_operator_v5_t& operator_params,
++    uint32_t step_count) {
++    if (operator_params.step_selection == SD_LOOM_STEP_ALL_V4) {
++        return operator_params.steps == nullptr &&
++               operator_params.step_count == 0;
++    }
++    if (operator_params.step_selection != SD_LOOM_STEP_EXACT_V4 ||
++        operator_params.steps == nullptr ||
++        operator_params.step_count == 0 ||
++        operator_params.step_count > step_count) {
++        return false;
++    }
++    for (size_t index = 0; index < operator_params.step_count; ++index) {
++        if (operator_params.steps[index] >= step_count ||
++            (index > 0 &&
++             operator_params.steps[index - 1] >= operator_params.steps[index])) {
++            return false;
++        }
++    }
++    return true;
++}
++
++static bool sd_loom_model_block_operator_selects_v5(
++    const sd_loom_model_block_operator_v5_t& operator_params,
++    uint32_t step) {
++    if (operator_params.step_selection == SD_LOOM_STEP_ALL_V4) {
++        return true;
++    }
++    return std::binary_search(operator_params.steps,
++                              operator_params.steps + operator_params.step_count,
++                              step);
++}
++
++int32_t sd_loom_program_generate_image_v5(
++    sd_loom_program_v3_t* program,
++    const sd_loom_program_image_params_v5_t* params,
++    sd_loom_condition_cb_v1_t condition_callback,
++    void* condition_callback_data,
++    sd_loom_step_cb_v1_t step_callback,
++    void* step_callback_data,
++    sd_loom_value_handle_v3_t* snapshot_values,
++    size_t snapshot_capacity,
++    sd_loom_model_block_application_v5_t* application_results,
++    size_t application_capacity,
++    uint64_t* transition_masks,
++    size_t transition_mask_capacity,
++    sd_loom_program_image_result_v5_t* result_out) {
++    if (result_out != nullptr) {
++        *result_out = {
++            SD_LOOM_MODEL_BLOCK_APPLICATION_ABI_VERSION,
++            {
++                SD_LOOM_PROGRAM_ABI_VERSION,
++                sd_loom_empty_handle_v3(),
++                sd_loom_empty_handle_v3(),
++                0,
++            },
++            0,
++            0,
++            0,
++        };
++    }
++    if (application_results != nullptr) {
++        for (size_t application = 0;
++             application < application_capacity;
++             ++application) {
++            application_results[application] = {};
++        }
++    }
++    if (transition_masks != nullptr) {
++        std::fill(transition_masks,
++                  transition_masks + transition_mask_capacity,
++                  uint64_t{0});
++    }
++    if (!sd_loom_program_live_v3(program) ||
++        params == nullptr ||
++        result_out == nullptr ||
++        params->abi_version != SD_LOOM_MODEL_BLOCK_APPLICATION_ABI_VERSION ||
++        params->image.abi_version != SD_LOOM_PROGRAM_ABI_VERSION ||
++        params->image.sigma_count < 2 ||
++        params->image.sigma_count > 4097 ||
++        params->model_block_operator_count == 0 ||
++        params->model_block_operator_count > 64 ||
++        params->model_block_operators == nullptr ||
++        application_results == nullptr ||
++        application_capacity != params->model_block_operator_count ||
++        !program->context->sd->loom_model_block_controls.empty()) {
++        return SD_LOOM_STATUS_INVALID_ARGUMENT;
++    }
++
++    uint32_t step_count = static_cast<uint32_t>(params->image.sigma_count - 1);
++    size_t transition_words_per_operator =
++        (static_cast<size_t>(step_count) + 63) / 64;
++    if (transition_words_per_operator == 0 ||
++        params->model_block_operator_count >
++            std::numeric_limits<size_t>::max() /
++                transition_words_per_operator) {
++        return SD_LOOM_STATUS_INVALID_ARGUMENT;
++    }
++    size_t expected_transition_words =
++        params->model_block_operator_count *
++        transition_words_per_operator;
++    if (transition_masks == nullptr ||
++        transition_mask_capacity != expected_transition_words) {
++        return SD_LOOM_STATUS_INVALID_ARGUMENT;
++    }
++
++    std::vector<sd_loom_scheduled_model_block_v4_t> scheduled;
++    try {
++        scheduled.reserve(params->model_block_operator_count);
++        auto krea = std::dynamic_pointer_cast<Krea2::Krea2Runner>(
++            program->context->sd->diffusion_model);
++        int64_t model_block_count = krea == nullptr ? 0 : krea->model_block_count();
++        if (krea == nullptr ||
++            model_block_count <= 0 ||
++            model_block_count >
++                static_cast<int64_t>(std::numeric_limits<uint32_t>::max())) {
++            return SD_LOOM_STATUS_UNSUPPORTED;
++        }
++        for (size_t index = 0;
++             index < params->model_block_operator_count;
++             ++index) {
++            const auto& operator_params = params->model_block_operators[index];
++            if (operator_params.component != SD_LOOM_MODEL_COMPONENT_KREA2_V4 ||
++                operator_params.site != SD_LOOM_MODEL_BLOCK_RESIDUAL_V4 ||
++                operator_params.block >= static_cast<uint64_t>(model_block_count) ||
++                !std::isfinite(operator_params.residual_scale) ||
++                operator_params.residual_scale < -16.f ||
++                operator_params.residual_scale > 16.f ||
++                !sd_loom_valid_model_block_steps_v5(operator_params, step_count)) {
++                return SD_LOOM_STATUS_INVALID_ARGUMENT;
++            }
++            for (size_t prior = 0; prior < index; ++prior) {
++                const auto& prior_params = params->model_block_operators[prior];
++                if (prior_params.operator_index == operator_params.operator_index) {
++                    return SD_LOOM_STATUS_INVALID_ARGUMENT;
++                }
++                if (prior_params.block != operator_params.block) {
++                    continue;
++                }
++                for (uint32_t step = 0; step < step_count; ++step) {
++                    if (sd_loom_model_block_operator_selects_v5(prior_params, step) &&
++                        sd_loom_model_block_operator_selects_v5(operator_params, step)) {
++                        return SD_LOOM_STATUS_INVALID_ARGUMENT;
++                    }
++                }
++            }
++
++            sd_loom_scheduled_model_block_v4_t selected;
++            selected.block = operator_params.block;
++            selected.residual_scale = operator_params.residual_scale;
++            selected.all_steps =
++                operator_params.step_selection == SD_LOOM_STEP_ALL_V4;
++            selected.application_index = index;
++            selected.operator_index = operator_params.operator_index;
++            selected.loaded_model_blocks =
++                static_cast<uint32_t>(model_block_count);
++            selected.selected_transitions.assign(
++                transition_words_per_operator,
++                uint64_t{0});
++            if (!selected.all_steps) {
++                selected.steps.assign(operator_params.steps,
++                                      operator_params.steps +
++                                          operator_params.step_count);
++            }
++            scheduled.push_back(std::move(selected));
++        }
++
++        program->context->sd->loom_model_block_controls = std::move(scheduled);
++        int32_t status = sd_loom_program_generate_image_v3(
++            program,
++            &params->image,
++            condition_callback,
++            condition_callback_data,
++            step_callback,
++            step_callback_data,
++            snapshot_values,
++            snapshot_capacity,
++            &result_out->image);
++        for (const auto& control :
++             program->context->sd->loom_model_block_controls) {
++            if (control.application_index >= application_capacity ||
++                control.selected_transitions.size() !=
++                    transition_words_per_operator) {
++                program->context->sd->loom_model_block_controls.clear();
++                return SD_LOOM_STATUS_NATIVE_ERROR;
++            }
++            application_results[control.application_index] = {
++                control.operator_index,
++                control.loaded_model_blocks,
++                control.block,
++                control.residual_scale,
++                control.application.graph_applications,
++                control.application.ordinary_graphs,
++                control.application.bypassed_graphs,
++                control.application.scaled_residual_graphs,
++            };
++            std::copy(
++                control.selected_transitions.begin(),
++                control.selected_transitions.end(),
++                transition_masks +
++                    control.application_index *
++                        transition_words_per_operator);
++        }
++        result_out->model_block_application_count =
++            params->model_block_operator_count;
++        result_out->transition_words_per_operator =
++            transition_words_per_operator;
++        program->context->sd->loom_model_block_controls.clear();
++        result_out->controls_cleared =
++            program->context->sd->loom_model_block_controls.empty() ? 1 : 0;
++        return status;
++    } catch (...) {
++        program->context->sd->loom_model_block_controls.clear();
++        return SD_LOOM_STATUS_NATIVE_ERROR;
++    }
++}
++
+ int32_t sd_loom_program_describe_v3(const sd_loom_program_v3_t* program,
+                                     sd_loom_value_handle_v3_t handle,
+                                     sd_loom_value_descriptor_v3_t* descriptor_out) {

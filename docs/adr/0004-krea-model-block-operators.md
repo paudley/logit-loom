@@ -1,7 +1,7 @@
 # ADR 0004: Krea model-block residual operators
 
-- Status: accepted; source implementation complete; model-backed acceptance
-  pending
+- Status: accepted; source implementation and native application attestation
+  complete; model-backed acceptance pending
 - Date: 2026-07-29
 
 ## Context
@@ -59,9 +59,10 @@ zero-based completed boundary has the selected index. Step lists remain
 canonical, bounded, unique, and in range.
 
 The native model-block extension is ABI version 4 layered over the existing
-ABI-v3 resident arena. Rust lowers only installed Krea residual operators into
-the v4 call. Scheduler-state operators continue through the transactional
-post-Euler pipeline. The native boundary:
+ABI-v3 resident arena. Application evidence is a separate ABI-v5 call and
+result so the v4 result shape is not reinterpreted. Rust lowers installed Krea
+residual operators through v5; scheduler-state operators continue through the
+transactional post-Euler pipeline. The native boundary:
 
 - accepts at most 64 model-block invocations;
 - rejects unknown components, sites, selectors, non-finite or out-of-bound
@@ -73,6 +74,15 @@ post-Euler pipeline. The native boundary:
   transition; and
 - clears request-local controls on every returned success or failure path.
 
+For every model-block operator, ABI v5 reports the exact operator index, loaded
+block count, block and scale, actual selected-transition bitmap, and counts of
+ordinary, bypassed, and scaled-residual Krea graph branches. The graph counts
+increment inside the selected Krea block branch. The safe adapter rejects and
+poisons the resident session unless the native result also confirms that
+request-local controls were cleared. This evidence is returned as a separately
+versioned `ModelBlockApplicationReceiptV1` digest-bound to the unchanged
+`ImageProgramReceiptV1`.
+
 The implementation does not download a model, start a listener, add a content
 policy, or claim that any block controls safety, refusal, style, identity, or
 image quality.
@@ -80,15 +90,17 @@ image quality.
 ## Validation
 
 Default-built Rust tests cover exact control bytes and identities, scalar
-bounds, and rejection of uninstalled sites. The complete companion patch
-applies after ABI v3 and compiles as a shared library from the pinned upstream
-revision without loading weights.
+bounds, rejection of uninstalled sites, transition bitmaps, graph-action
+accounting, and application-receipt lineage. The complete companion patch
+stack applies after ABI v3 and compiles as a shared library from the pinned
+upstream revision without loading weights.
 
 Model-backed acceptance remains opt-in. It must bind exact model artifacts,
 backend build, device placement, seed, schedule, prompt identity, selected
-blocks and steps, output identity, and cleanup result. A useful semantic
-effect requires a controlled differential study; a compiled graph or valid
-image proves only mechanics.
+blocks and steps, application receipt, output identity, and cleanup result.
+The application receipt proves which native graph branch was reached, not that
+the intervention has a useful semantic effect. That requires a controlled
+differential study.
 
 ## Consequences
 

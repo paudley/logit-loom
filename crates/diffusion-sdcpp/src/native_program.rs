@@ -25,18 +25,19 @@ use logit_loom_executor::{CancellationProbe, ExecutorState, InputBuffer};
 
 use crate::{
     ADAPTER_CONTRACT_VERSION, DiffusionCheckpoint, Error, ImageRequest, MODEL_BLOCK_ABI_VERSION,
-    PROGRAM_ABI_VERSION, ResidentImageProgramBackend, ResidentProgramCompletedStage,
-    ResidentProgramFinish, ResidentProgramStageTerminal, Result, Sdcpp, StepProgram,
-    UPSTREAM_COMMIT,
+    ModelBlockApplicationV1, PROGRAM_ABI_VERSION, ResidentImageProgramBackend,
+    ResidentProgramCompletedStage, ResidentProgramFinish, ResidentProgramStageTerminal, Result,
+    Sdcpp, StepProgram, UPSTREAM_COMMIT,
     contract::component_map,
     execution::{
         InstalledChannelBias, InstalledModelBlockResidualScale, ObservationAccumulator,
         lora_target_v1,
     },
     ffi::{
-        self, ImageViewV2, LoraScalePointV3, LoraScheduleV3, ModelBlockOperatorV4,
-        ProgramImageParamsV3, ProgramImageParamsV4, ProgramImageResultV3, ProgramOutputV3,
-        TensorViewV2, ValueDescriptorV3, ValueHandleV3,
+        self, ImageViewV2, LoraScalePointV3, LoraScheduleV3, ModelBlockOperatorV5,
+        NativeModelBlockApplicationV5, ProgramImageParamsV3, ProgramImageParamsV5,
+        ProgramImageResultV3, ProgramImageResultV5, ProgramOutputV3, TensorViewV2,
+        ValueDescriptorV3, ValueHandleV3,
     },
     runtime::{
         CallbackState, condition_callback, native_status_error, path_c_string, step_callback,
@@ -778,6 +779,7 @@ impl<R: ResidentArtifactPathResolver> ResidentImageProgramBackend for SdcppResid
                     outputs: receipts,
                     observations: execution.observations,
                 },
+                model_block_applications: execution.model_block_applications,
                 wall_time_ns,
                 native_time_ns: execution.native_time_ns,
                 values: measurements,
@@ -897,10 +899,12 @@ impl<R: ResidentArtifactPathResolver> SdcppResidentProgram<'_, R> {
                     NativeStageOutcome::Completed {
                         outputs,
                         observations,
+                        model_block_applications,
                         native_time_ns,
                     } => Ok(StageOperationOutcome::Completed(StageExecution {
                         outputs,
                         observations,
+                        model_block_applications,
                         native_time_ns,
                     })),
                     NativeStageOutcome::Cancelled { step } => {
@@ -1437,18 +1441,11 @@ impl<R: ResidentArtifactPathResolver> SdcppResidentProgram<'_, R> {
         let callback_pointer = (&raw mut callbacks).cast::<c_void>();
         let params = Self::diffusion_params(native, prepared)?;
         let mut snapshot_handles = vec![ValueHandleV3::EMPTY; prepared.snapshot_steps.len()];
-        let mut result = ProgramImageResultV3::default();
         // SAFETY: Every handle and borrowed array remains live for this
         // synchronous call. Both callbacks contain panics and validate all
         // native descriptors before forming Rust slices.
-        let status = unsafe {
-            self.invoke_diffusion_native(
-                params,
-                prepared,
-                callback_pointer,
-                &mut snapshot_handles,
-                &mut result,
-            )
+        let invocation = unsafe {
+            self.invoke_diffusion_native(params, prepared, callback_pointer, &mut snapshot_handles)
         }?;
         let callback_error = callbacks.take_error();
         let last_step = callbacks.last_completed_step();
@@ -1458,7 +1455,7 @@ impl<R: ResidentArtifactPathResolver> SdcppResidentProgram<'_, R> {
         if let Some(error) = callback_error {
             return Err(Error::Callback(error));
         }
-        if status == ffi::STATUS_STOPPED {
+        if invocation.status == ffi::STATUS_STOPPED {
             return Ok(DiffusionCallOutcome::Cancelled {
                 step: last_step.ok_or_else(|| {
                     Error::Incompatible(
@@ -1467,7 +1464,10 @@ impl<R: ResidentArtifactPathResolver> SdcppResidentProgram<'_, R> {
                 })?,
             });
         }
-        Self::require_stage_status(status, "resident diffusion")?;
+        Self::require_stage_status(invocation.status, "resident diffusion")?;
+        let model_block_applications =
+            verified_model_block_applications(stage.stage, prepared, &invocation)?;
+        let result = invocation.result;
         if result.abi_version != PROGRAM_ABI_VERSION
             || result.primary.is_empty()
             || result.snapshot_count != snapshot_handles.len()
@@ -1484,6 +1484,7 @@ impl<R: ResidentArtifactPathResolver> SdcppResidentProgram<'_, R> {
         Ok(DiffusionCallOutcome::Completed(Box::new(
             CompletedDiffusionCall {
                 result,
+                model_block_applications,
                 snapshot_handles,
                 stage_program,
                 actual_plan,
@@ -1505,12 +1506,12 @@ impl<R: ResidentArtifactPathResolver> SdcppResidentProgram<'_, R> {
         prepared: &PreparedDiffusionCall,
         callback_pointer: *mut c_void,
         snapshot_handles: &mut [ValueHandleV3],
-        result: &mut ProgramImageResultV3,
-    ) -> Result<i32> {
+    ) -> Result<NativeDiffusionInvocation> {
         let arena = self.arena()?.as_ptr();
         if prepared.model_block_operators.is_empty() {
+            let mut result = ProgramImageResultV3::default();
             // SAFETY: Forwarded from this method's caller contract.
-            return Ok(unsafe {
+            let status = unsafe {
                 self.runtime.api.program_generate_image_v3(
                     arena,
                     &params,
@@ -1519,19 +1520,43 @@ impl<R: ResidentArtifactPathResolver> SdcppResidentProgram<'_, R> {
                     step_callback,
                     callback_pointer,
                     snapshot_handles,
-                    result,
+                    &mut result,
                 )
+            };
+            return Ok(NativeDiffusionInvocation {
+                status,
+                result,
+                applications: Vec::new(),
+                transition_masks: Vec::new(),
+                transition_words_per_operator: 0,
             });
         }
-        let params = ProgramImageParamsV4 {
+        let step_count = params.sigma_count.checked_sub(1).ok_or_else(|| {
+            Error::Invalid("resident diffusion schedule has no transition".to_owned())
+        })?;
+        let transition_words_per_operator = step_count.checked_add(63).ok_or_else(|| {
+            Error::Invalid("resident model-block transition count overflowed".to_owned())
+        })? / 64;
+        let transition_mask_words = prepared
+            .model_block_operators
+            .len()
+            .checked_mul(transition_words_per_operator)
+            .ok_or_else(|| {
+                Error::Invalid("resident model-block transition mask overflowed".to_owned())
+            })?;
+        let mut applications =
+            vec![NativeModelBlockApplicationV5::default(); prepared.model_block_operators.len()];
+        let mut transition_masks = vec![0_u64; transition_mask_words];
+        let params = ProgramImageParamsV5 {
             abi_version: MODEL_BLOCK_ABI_VERSION,
             image: params,
             model_block_operators: pointer_or_null(&prepared.model_block_operators),
             model_block_operator_count: prepared.model_block_operators.len(),
         };
+        let mut result = ProgramImageResultV5::default();
         // SAFETY: Forwarded from this method's caller contract.
-        Ok(unsafe {
-            self.runtime.api.program_generate_image_v4(
+        let status = unsafe {
+            self.runtime.api.program_generate_image_v5(
                 arena,
                 &params,
                 condition_callback,
@@ -1539,8 +1564,27 @@ impl<R: ResidentArtifactPathResolver> SdcppResidentProgram<'_, R> {
                 step_callback,
                 callback_pointer,
                 snapshot_handles,
-                result,
+                &mut applications,
+                &mut transition_masks,
+                &mut result,
             )
+        };
+        if result.abi_version != MODEL_BLOCK_ABI_VERSION
+            || result.image.abi_version != PROGRAM_ABI_VERSION
+            || result.model_block_application_count != applications.len()
+            || result.transition_words_per_operator != transition_words_per_operator
+            || result.controls_cleared != 1
+        {
+            return Err(Error::Poisoned(
+                "native model-block application or cleanup attestation differs".to_owned(),
+            ));
+        }
+        Ok(NativeDiffusionInvocation {
+            status,
+            result: result.image,
+            applications,
+            transition_masks,
+            transition_words_per_operator,
         })
     }
 
@@ -1584,6 +1628,7 @@ impl<R: ResidentArtifactPathResolver> SdcppResidentProgram<'_, R> {
     ) -> Result<NativeStageOutcome> {
         let CompletedDiffusionCall {
             result,
+            model_block_applications,
             snapshot_handles,
             stage_program,
             actual_plan,
@@ -1601,6 +1646,7 @@ impl<R: ResidentArtifactPathResolver> SdcppResidentProgram<'_, R> {
         Ok(NativeStageOutcome::Completed {
             outputs,
             observations,
+            model_block_applications,
             native_time_ns,
         })
     }
@@ -1845,6 +1891,7 @@ impl<R> Drop for SdcppResidentProgram<'_, R> {
 struct StageExecution {
     outputs: Vec<u16>,
     observations: Vec<Digest>,
+    model_block_applications: Vec<ModelBlockApplicationV1>,
     native_time_ns: Option<u64>,
 }
 
@@ -1853,6 +1900,7 @@ impl StageExecution {
         Self {
             outputs,
             observations: Vec::new(),
+            model_block_applications: Vec::new(),
             native_time_ns: None,
         }
     }
@@ -1873,7 +1921,7 @@ struct PreparedDiffusionCall {
     _scale_points: Vec<Vec<LoraScalePointV3>>,
     lora_schedules: Vec<LoraScheduleV3>,
     _model_block_steps: Vec<Vec<u32>>,
-    model_block_operators: Vec<ModelBlockOperatorV4>,
+    model_block_operators: Vec<ModelBlockOperatorV5>,
     snapshot_steps: Vec<u32>,
     seed: u64,
     schedule: logit_loom_diffusion::DiffusionSchedule,
@@ -1883,7 +1931,7 @@ struct PreparedDiffusionCall {
 
 struct LoweredModelBlockOperators {
     steps: Vec<Vec<u32>>,
-    operators: Vec<ModelBlockOperatorV4>,
+    operators: Vec<ModelBlockOperatorV5>,
 }
 
 fn lower_model_block_operators(
@@ -1901,19 +1949,23 @@ fn lower_model_block_operators(
         .collect::<Vec<_>>();
     let native = operators
         .iter()
-        .filter(|operator| matches!(operator.selector, TensorSelector::ModelBlock { .. }))
+        .enumerate()
+        .filter(|(_, operator)| matches!(operator.selector, TensorSelector::ModelBlock { .. }))
         .zip(&steps)
-        .map(|(operator, selected_steps)| {
+        .map(|((operator_index, operator), selected_steps)| {
             let installed = InstalledModelBlockResidualScale::from_invocation(operator)?;
-            Ok(ModelBlockOperatorV4 {
-                component: ffi::MODEL_COMPONENT_KREA2_V4,
+            Ok(ModelBlockOperatorV5 {
+                operator_index: u32::try_from(operator_index).map_err(|_| {
+                    Error::Invalid("resident model-block operator index exceeds u32".to_owned())
+                })?,
+                component: ffi::MODEL_COMPONENT_KREA2_V5,
                 block: installed.block,
-                site: ffi::MODEL_BLOCK_RESIDUAL_V4,
+                site: ffi::MODEL_BLOCK_RESIDUAL_V5,
                 residual_scale: installed.scale,
                 step_selection: if matches!(installed.steps, StepSelector::All) {
-                    ffi::STEP_ALL_V4
+                    ffi::STEP_ALL_V5
                 } else {
-                    ffi::STEP_EXACT_V4
+                    ffi::STEP_EXACT_V5
                 },
                 steps: pointer_or_null(selected_steps),
                 step_count: selected_steps.len(),
@@ -1926,8 +1978,92 @@ fn lower_model_block_operators(
     })
 }
 
+struct NativeDiffusionInvocation {
+    status: i32,
+    result: ProgramImageResultV3,
+    applications: Vec<NativeModelBlockApplicationV5>,
+    transition_masks: Vec<u64>,
+    transition_words_per_operator: usize,
+}
+
+fn verified_model_block_applications(
+    stage: u16,
+    prepared: &PreparedDiffusionCall,
+    invocation: &NativeDiffusionInvocation,
+) -> Result<Vec<ModelBlockApplicationV1>> {
+    if prepared.model_block_operators.is_empty() {
+        if !invocation.applications.is_empty()
+            || !invocation.transition_masks.is_empty()
+            || invocation.transition_words_per_operator != 0
+        {
+            return Err(Error::Poisoned(
+                "native model-block evidence appeared without an operator".to_owned(),
+            ));
+        }
+        return Ok(Vec::new());
+    }
+    if invocation.applications.len() != prepared.model_block_operators.len()
+        || invocation.transition_masks.len()
+            != invocation
+                .applications
+                .len()
+                .checked_mul(invocation.transition_words_per_operator)
+                .ok_or_else(|| {
+                    Error::Poisoned("native model-block evidence length overflowed".to_owned())
+                })?
+    {
+        return Err(Error::Poisoned(
+            "native model-block evidence buffer accounting differs".to_owned(),
+        ));
+    }
+
+    invocation
+        .applications
+        .iter()
+        .zip(&prepared.model_block_operators)
+        .enumerate()
+        .map(|(application_index, (application, operator))| {
+            if application.operator_index != operator.operator_index
+                || application.block != operator.block
+                || application.residual_scale.to_bits() != operator.residual_scale.to_bits()
+                || application.loaded_model_blocks == 0
+                || application.block >= application.loaded_model_blocks
+            {
+                return Err(Error::Poisoned(
+                    "native model-block evidence does not echo the exact operator".to_owned(),
+                ));
+            }
+            let start = application_index
+                .checked_mul(invocation.transition_words_per_operator)
+                .ok_or_else(|| {
+                    Error::Poisoned("native model-block transition offset overflowed".to_owned())
+                })?;
+            let end = start
+                .checked_add(invocation.transition_words_per_operator)
+                .ok_or_else(|| {
+                    Error::Poisoned("native model-block transition extent overflowed".to_owned())
+                })?;
+            Ok(ModelBlockApplicationV1 {
+                stage,
+                operator: u16::try_from(operator.operator_index).map_err(|_| {
+                    Error::Poisoned("native model-block operator exceeds u16".to_owned())
+                })?,
+                loaded_model_blocks: application.loaded_model_blocks,
+                block: application.block,
+                residual_scale_bits: application.residual_scale.to_bits(),
+                selected_transitions: invocation.transition_masks[start..end].to_vec(),
+                graph_applications: application.graph_applications,
+                ordinary_graphs: application.ordinary_graphs,
+                bypassed_graphs: application.bypassed_graphs,
+                scaled_residual_graphs: application.scaled_residual_graphs,
+            })
+        })
+        .collect()
+}
+
 struct CompletedDiffusionCall<'a> {
     result: ProgramImageResultV3,
+    model_block_applications: Vec<ModelBlockApplicationV1>,
     snapshot_handles: Vec<ValueHandleV3>,
     stage_program: ResidentStageProgram<'a>,
     actual_plan: DiffusionPlan,
@@ -1943,6 +2079,7 @@ enum NativeStageOutcome {
     Completed {
         outputs: Vec<u16>,
         observations: Vec<Digest>,
+        model_block_applications: Vec<ModelBlockApplicationV1>,
         native_time_ns: Option<u64>,
     },
     Cancelled {
@@ -2499,14 +2636,14 @@ mod tests {
         assert_eq!(lowered.steps, [Vec::new(), vec![1, 3]]);
         assert_eq!(lowered.operators.len(), 2);
         assert_eq!(lowered.operators[0].block, 9);
-        assert_eq!(lowered.operators[0].step_selection, ffi::STEP_ALL_V4);
+        assert_eq!(lowered.operators[0].step_selection, ffi::STEP_ALL_V5);
         assert!(lowered.operators[0].steps.is_null());
         assert_eq!(lowered.operators[1].block, 10);
         assert_eq!(
             lowered.operators[1].residual_scale.to_bits(),
             0.5_f32.to_bits()
         );
-        assert_eq!(lowered.operators[1].step_selection, ffi::STEP_EXACT_V4);
+        assert_eq!(lowered.operators[1].step_selection, ffi::STEP_EXACT_V5);
         assert_eq!(lowered.operators[1].step_count, 2);
         assert_eq!(lowered.operators[1].steps, lowered.steps[1].as_ptr());
     }

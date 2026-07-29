@@ -3,6 +3,7 @@
 #![doc = include_str!("../README.md")]
 #![allow(unsafe_code)]
 
+mod application;
 mod contract;
 mod error;
 mod execution;
@@ -13,6 +14,7 @@ mod program;
 mod resident;
 mod runtime;
 
+pub use application::{ModelBlockApplicationReceiptV1, ModelBlockApplicationV1};
 pub use contract::{
     BoundaryControl, BoundaryReceipt, CompanionReceipt, ContinueControl,
     ControlledGenerationOutput, ControlledGenerationReceipt, DiffusionCheckpoint,
@@ -53,9 +55,10 @@ pub const COMPANION_ABI_VERSION: u32 = 1;
 pub const IMAGE_ABI_VERSION: u32 = 2;
 /// Version of the resident native value-arena extension.
 pub const PROGRAM_ABI_VERSION: u32 = 3;
-/// Version of the native model-block operator extension.
-pub const MODEL_BLOCK_ABI_VERSION: u32 = 4;
+/// Version of the native model-block operator and application-attestation
+/// extension.
+pub const MODEL_BLOCK_ABI_VERSION: u32 = 5;
 /// Version of the safe Rust execution contract layered over the companion.
-pub const ADAPTER_CONTRACT_VERSION: u32 = 6;
+pub const ADAPTER_CONTRACT_VERSION: u32 = 7;
 /// Exact stable-diffusion.cpp revision required by this adapter.
 pub const UPSTREAM_COMMIT: &str = "ea4e566ccffa10f853ecc3f29e74b1820bc91beb";

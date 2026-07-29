@@ -24,7 +24,10 @@ The companion ABI exposes:
   deterministic joins, exact RGB8/RGBA8 conversion, bounded deterministic
   PNG encoding, generation-checked handles, and verified cleanup;
 - a model-block ABI v4 extension for typed, exact-step Krea residual scaling
-  with loaded-topology validation; and
+  with loaded-topology validation;
+- a model-block application ABI v5 extension that returns actual-transition
+  bitmaps, graph-branch counts, loaded topology, and confirmed request-local
+  control cleanup; and
 - explicit continue, cooperative-stop, callback-error, unsupported-mechanic,
   invalid-argument, and native-error results.
 
@@ -60,6 +63,8 @@ It checks out the exact revision, applies
 [`logit-loom-image-v2.patch`](logit-loom-image-v2.patch) and
 [`logit-loom-program-v3.patch`](logit-loom-program-v3.patch), then the
 [`logit-loom-model-block-v4.patch`](logit-loom-model-block-v4.patch) extension,
+and finally
+[`logit-loom-model-block-application-v5.patch`](logit-loom-model-block-application-v5.patch),
 initializes only the required `ggml` submodule, and builds a shared library.
 Existing incompatible source changes are rejected. The script never runs from
 tests, CI, documentation, package builds, or `make check`.

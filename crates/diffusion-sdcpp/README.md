@@ -65,11 +65,13 @@ fake-arena tests exercise those mechanics without loading a companion library
 or model.
 
 `SdcppResidentProgram` implements that backend over the mandatory
-stable-diffusion.cpp program ABI v3 and model-block ABI v4. One arena can
+stable-diffusion.cpp program ABI v3, model-block ABI v4, and application ABI
+v5. One arena can
 execute multiple ordered diffusion and direct-VAE stages, scheduled
 request-local `LoRA` scales, authenticated checkpoint restore/capture,
 scheduler-state interventions and observations, exact-step Krea residual block
-scaling, exact snapshots, deterministic RGB8 joins, and typed
+scaling with transition bitmaps and graph-branch application receipts, exact
+snapshots, deterministic RGB8 joins, and typed
 RGB8/RGBA8/PNG/tensor/checkpoint outputs. Krea block indices are validated
 against the topology detected from the loaded weights; the adapter assigns no
 semantic role to a block. Native stages keep source images and masks

@@ -14,13 +14,15 @@ use logit_loom_executor::{
     CancellationProbe, ClassifiedExecutionError, FailureDisposition, InputBuffer, OutputBuffer,
 };
 
-use crate::{Error, Result};
+use crate::{Error, ModelBlockApplicationReceiptV1, ModelBlockApplicationV1, Result};
 
 /// One completed native or deterministic program stage.
 #[derive(Clone, Debug)]
 pub struct ResidentProgramCompletedStage {
     /// Exact deterministic stage receipt.
     pub receipt: ImageProgramStageReceiptV1,
+    /// Exact native model-block application records in operator order.
+    pub model_block_applications: Vec<ModelBlockApplicationV1>,
     /// Observed wall time in nanoseconds.
     pub wall_time_ns: u64,
     /// Native compute time in nanoseconds when the backend exposes it.
@@ -143,6 +145,8 @@ pub trait ResidentImageProgramBackend {
 pub struct ResidentImageProgramExecution {
     /// Deterministic mechanical receipt.
     pub receipt: ImageProgramReceiptV1,
+    /// Native model-block application evidence bound to `receipt`.
+    pub model_block_applications: ModelBlockApplicationReceiptV1,
     /// Non-deterministic placement, transfer, and timing measurements.
     pub measurements: ImageProgramMeasurementsV1,
 }
@@ -376,6 +380,7 @@ struct DriverState {
     backend: Digest,
     runtime_epoch: u64,
     stages: Vec<ImageProgramStageReceiptV1>,
+    model_block_applications: Vec<ModelBlockApplicationV1>,
     outputs: Vec<ImageProgramOutputReceiptV1>,
     contents: HashMap<u16, Digest>,
     wall_times: Vec<u64>,
@@ -409,6 +414,7 @@ impl DriverState {
             backend,
             runtime_epoch,
             stages: Vec::with_capacity(plan.stages.len()),
+            model_block_applications: Vec::new(),
             outputs: Vec::with_capacity(plan.outputs.len()),
             contents,
             wall_times: Vec::with_capacity(plan.stages.len()),
@@ -458,6 +464,8 @@ impl DriverState {
             .map(|output| output.value)
             .collect::<Vec<_>>();
         let values = validate_measurement_prefix(plan, &expected_values, completed.values)?;
+        self.model_block_applications
+            .extend(completed.model_block_applications);
         self.stages.push(completed.receipt);
         self.wall_times.push(completed.wall_time_ns);
         self.native_times.push(completed.native_time_ns);
@@ -493,6 +501,18 @@ impl DriverState {
         receipt
             .validate_for(plan)
             .map_err(logit_loom_diffusion::Error::from)?;
+        let program_receipt = receipt
+            .digest_for(plan)
+            .map_err(logit_loom_diffusion::Error::from)?;
+        let model_block_applications = ModelBlockApplicationReceiptV1 {
+            plan: self.plan.clone(),
+            program_receipt,
+            backend: self.backend.clone(),
+            runtime_epoch: self.runtime_epoch,
+            completed_stages,
+            applications: self.model_block_applications,
+        };
+        model_block_applications.validate_for(plan, &receipt)?;
         let measurements = ImageProgramMeasurementsV1 {
             plan: self.plan,
             backend: self.backend,
@@ -509,6 +529,7 @@ impl DriverState {
             .map_err(logit_loom_diffusion::Error::from)?;
         Ok(ResidentImageProgramExecution {
             receipt,
+            model_block_applications,
             measurements,
         })
     }
@@ -562,6 +583,18 @@ fn cancelled_before_start(
     receipt
         .validate_for(plan)
         .map_err(logit_loom_diffusion::Error::from)?;
+    let program_receipt = receipt
+        .digest_for(plan)
+        .map_err(logit_loom_diffusion::Error::from)?;
+    let model_block_applications = ModelBlockApplicationReceiptV1 {
+        plan: plan_digest.clone(),
+        program_receipt,
+        backend: backend.clone(),
+        runtime_epoch,
+        completed_stages: 0,
+        applications: Vec::new(),
+    };
+    model_block_applications.validate_for(plan, &receipt)?;
     let measurements = ImageProgramMeasurementsV1 {
         plan: plan_digest,
         backend,
@@ -587,6 +620,7 @@ fn cancelled_before_start(
         .map_err(logit_loom_diffusion::Error::from)?;
     Ok(ResidentImageProgramExecution {
         receipt,
+        model_block_applications,
         measurements,
     })
 }
@@ -966,6 +1000,7 @@ mod tests {
                         outputs: receipts,
                         observations,
                     },
+                    model_block_applications: Vec::new(),
                     wall_time_ns: u64::from(stage.stage) + 10,
                     native_time_ns: Some(u64::from(stage.stage) + 5),
                     values: measurements,
