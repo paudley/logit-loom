@@ -111,6 +111,9 @@ include breaking API changes.
   `f87067841bac583bc089a225382248d857791ca8`; source builds no longer require
   an adjacent checkout, while crates.io packaging remains blocked until the
   successor is registry-published.
+- The binding successor is submitted upstream as
+  [`eugenehp/llama-cpp-rs#301`](https://github.com/eugenehp/llama-cpp-rs/pull/301);
+  the open pull request does not relax the registry publication gate.
 - The successor binding validates speculative context shape and lifecycle,
   bounds copied prompt/state data, admits the `gpt-oss` EAGLE-3 v3 terminal
   extraction site, and converts missing EAGLE extraction output and C++

@@ -7,6 +7,8 @@
 - Reviewed binding: public `llama-cpp-4` 0.4.2 successor at
   `paudley/llama-cpp-rs@d76356b9725a3736212b3bfd16c66fc80c995c29`
 - Reviewed llama.cpp revision: `f87067841bac583bc089a225382248d857791ca8`
+- Upstream review:
+  [`eugenehp/llama-cpp-rs#301`](https://github.com/eugenehp/llama-cpp-rs/pull/301)
 - Delivery order: before ADR 0003
 
 ## Context

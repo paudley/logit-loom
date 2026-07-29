@@ -104,11 +104,14 @@ failure instead of aborting the host process.
 
 This arrangement supports reproducible source builds but is not publishable to
 crates.io. A crates.io Logit Loom release requires the successor as a registry
-package, and the release check rejects both path and Git sources. Changing the
-binding source, llama.cpp revision, graph-selector profile, decode hooks, or
-speculative-state envelope is a reviewed compatibility event: compile the
-complete workspace, inspect changed native semantics, rerun the opt-in model
-fixtures, and update this document and `CHANGELOG.md`.
+package, and the release check rejects both path and Git sources. Upstream
+review is tracked in
+[`eugenehp/llama-cpp-rs#301`](https://github.com/eugenehp/llama-cpp-rs/pull/301);
+an open pull request or fork revision does not satisfy the registry gate.
+Changing the binding source, llama.cpp revision, graph-selector profile,
+decode hooks, or speculative-state envelope is a reviewed compatibility event:
+compile the complete workspace, inspect changed native semantics, rerun the
+opt-in model fixtures, and update this document and `CHANGELOG.md`.
 
 The readable runtime compatibility label includes the exact binding version,
 binding source revision, literal llama.cpp revision, Rust target, and selected
