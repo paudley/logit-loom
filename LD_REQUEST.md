@@ -52,6 +52,66 @@ Please land these as immutable public revisions with no worker process,
 listener, daemonization, CPU model execution, retry, or fallback. The consumer
 will replace its vendored snapshot only after reviewing that exact return.
 
+### Krea conditioning and text-residual return — 2026-07-30
+
+The production consumer also requires a generally reusable Krea activation
+intervention surface. This is a mechanics request, not a claim that a
+particular activation, layer, direction, or edit controls any semantic model
+behavior.
+
+The current image contracts provide useful tensor selectors, observations,
+operator invocations, and typed SSA values, while the text stack provides
+bounded activation-vector mechanics. The resident
+stable-diffusion.cpp-backed Krea executor does not yet install conditioning
+operators or non-scheduler activation observations and does not expose typed
+donor/vector inputs for an image operator. Please close that gap with:
+
+1. **Runtime-derived topology.** Return a versioned topology identity from the
+   exact loaded Krea profile. It must identify the selected conditioner
+   layers, post-fusion and post-projection conditioning sites, valid
+   text-token residual boundaries, widths, dtypes, layouts, token domains,
+   branch semantics, and loaded transformer-block count. Callers must not
+   hard-code published architecture dimensions or layer numbers as runtime
+   authority.
+2. **Bounded capture.** Capture digests, deterministic statistics, or bounded
+   device-resident snapshots at exact pre-denoiser and denoising-transition
+   sites. Plans must bound sites, token ranges, branches, transitions,
+   elements, resident bytes, and any returned host bytes.
+3. **Typed donor and vector values.** Let installed image operators consume
+   an SSA donor activation or sealed low-rank vector bank without serializing
+   a full tensor into schema-control bytes. A vector bank must bind topology,
+   site, width, rank, representation, ordered vector identities, and aggregate
+   content identity.
+4. **Installed operations.** Provide versioned donor transplantation, scaled
+   vector addition/subtraction, orthogonal projection removal, and an
+   explicitly separate one-sided-projection schema. Every invocation selects
+   exact token positions, transitions, CFG branch, strength, and input value.
+   Include a plain ungated all-request mode; no classifier, policy decision,
+   prompt interpretation, or semantic gate belongs in this mechanic.
+5. **Transactional receipts and cleanup.** Receipts must bind topology, site,
+   token/transition/branch selection, operator implementation, donor/vector
+   identity, reached/application/bypass counts, bounded observations, and
+   cleanup disposition. Incomplete hook removal, donor/vector release,
+   checkpoint restoration, or device cleanup must poison the executor rather
+   than permit another request.
+6. **Copy-efficient reuse.** One admitted session must be able to reuse a
+   validated device-resident donor or vector bank across a bounded sequence of
+   jobs without repeated host/device copies. Placement and transfer
+   measurements remain outside deterministic semantic identities.
+
+Model-free acceptance should establish topology mismatch rejection, bounded
+capture, same-run no-op donor transplantation, zero-strength byte identity,
+nonzero branch reach, token/transition/branch isolation, cancellation, cleanup
+poisoning, and complete receipt lineage. Opt-in model acceptance should then
+show exact-site capture and causal output-byte change on a caller-supplied Krea
+artifact. Neither gate should claim semantic efficacy.
+
+The consumer-owned coordinator will route sealed vector banks and snapshots,
+account their actual residency, and preserve the one-resident-model and
+bounded-queue rules. Logit Loom should continue to supply only the in-process
+executor mechanics: no worker process, socket, port, HTTP/JSON route, prompt
+policy, retry, or fallback.
+
 ## Required outcome
 
 Publish a Rust-first, policy-neutral image-inference surface that can:
