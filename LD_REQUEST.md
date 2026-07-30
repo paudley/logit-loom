@@ -99,6 +99,41 @@ donor/vector inputs for an image operator. Please close that gap with:
    jobs without repeated host/device copies. Placement and transfer
    measurements remain outside deterministic semantic identities.
 
+After an always-on activation intervention has been mechanically and
+externally evaluated, the consumer needs an optional offline route for
+materializing the same linear edit into a derived model component. This
+should be a Rust library/tool over caller-supplied verified descriptors, not a
+model server or an inference fallback:
+
+- accept an exact floating-point source component, runtime-compatible topology
+  and weight-layout authority, an exact orthonormal basis, declared parameter
+  selectors, feature axis, projection orientation, scalar representation, and
+  deterministic reduction policy;
+- apply an explicit transform such as `W' = (I - UU^T)W` or
+  `W' = W(I - UU^T)` only when the declared feature axis makes that expression
+  shape-correct; do not infer orientation from a parameter name;
+- create a new component without modifying the source and emit a manifest
+  binding source bytes, topology, every selected tensor, basis, formula,
+  implementation, output bytes, and per-tensor before/after identities;
+- preserve unselected tensor bytes and metadata exactly, reject aliases,
+  unknown layouts, non-finite bases, non-orthonormal bases, unsupported sparse
+  or quantized tensors, and partial output;
+- require transformation of the verified floating-point source before any
+  separately pinned quantization/conversion step; never silently
+  dequantize/requantize an admitted production component; and
+- reload the derived component through the ordinary exact-profile path. The
+  derived profile and conversion receipt must have new identities and must
+  remain distinguishable from the source profile.
+
+Model-free artifact tests should prove byte-identical no-op copying,
+single-tensor golden projection, unchanged unselected tensors, deterministic
+repetition, hostile-shape/layout rejection, create-new failure behavior, and
+complete mutation-manifest verification. An opt-in comparison may establish
+that the baked component and the corresponding always-on runtime projection
+produce mechanically consistent activations or outputs within a declared
+numeric tolerance. It must not infer semantic equivalence from shared
+lineage.
+
 Model-free acceptance should establish topology mismatch rejection, bounded
 capture, same-run no-op donor transplantation, zero-strength byte identity,
 nonzero branch reach, token/transition/branch isolation, cancellation, cleanup
