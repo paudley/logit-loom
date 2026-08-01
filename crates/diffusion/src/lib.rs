@@ -9,8 +9,10 @@ mod execution;
 mod execution_v2;
 mod execution_v3;
 mod image_program;
+mod krea_activation;
 mod observer;
 mod pipeline;
+mod projected_component;
 
 pub use contract::{
     DiffusionCheckpointReceipt, DiffusionPlan, DiffusionSchedule, InterventionFailure,
@@ -47,8 +49,10 @@ pub use image_program::{
     MAX_IMAGE_PROGRAM_STAGES, MAX_IMAGE_PROGRAM_VALUE_BYTES, MAX_IMAGE_PROGRAM_VALUES,
     image_program_value_content,
 };
+pub use krea_activation::*;
 pub use observer::{ObserverReceipt, ObserverSet, StepObserver};
 pub use pipeline::{ChannelBias, Intervention, Pipeline};
+pub use projected_component::*;
 
 pub use logit_loom_core::{ControlFlow, Digest};
 pub use logit_loom_executor::BufferSpec;
