@@ -9,6 +9,7 @@ mod error;
 mod execution;
 mod ffi;
 mod image;
+mod krea_activation;
 mod native_program;
 mod program;
 mod resident;
@@ -37,6 +38,7 @@ pub use image::{
     MAX_VAE_TENSOR_RANK, PixelReceipt, VaeImageOutput, VaeOperationReceipt, VaeTensor,
     VaeTensorOutput,
 };
+pub use krea_activation::{KreaActivationExecutionV1, KreaActivationInputBuffer};
 pub use native_program::{
     RejectResidentArtifactPaths, ResidentArtifactPathResolver, SdcppResidentProgram,
     resident_checkpoint_compatibility_v1, resident_checkpoint_conversion_v1,
@@ -58,7 +60,10 @@ pub const PROGRAM_ABI_VERSION: u32 = 3;
 /// Version of the native model-block operator and application-attestation
 /// extension.
 pub const MODEL_BLOCK_ABI_VERSION: u32 = 5;
+/// Version of the native Krea activation topology, capture, resident-input,
+/// operator, and cleanup extension.
+pub const KREA_ACTIVATION_ABI_VERSION: u32 = 6;
 /// Version of the safe Rust execution contract layered over the companion.
-pub const ADAPTER_CONTRACT_VERSION: u32 = 7;
+pub const ADAPTER_CONTRACT_VERSION: u32 = 8;
 /// Exact stable-diffusion.cpp revision required by this adapter.
 pub const UPSTREAM_COMMIT: &str = "ea4e566ccffa10f853ecc3f29e74b1820bc91beb";

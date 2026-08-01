@@ -27,7 +27,11 @@ The companion ABI exposes:
   with loaded-topology validation;
 - a model-block application ABI v5 extension that returns actual-transition
   bitmaps, graph-branch counts, loaded topology, and confirmed request-local
-  control cleanup; and
+  control cleanup;
+- a Krea activation ABI v6 extension that publishes the loaded activation
+  topology, retains generation-checked donor/vector inputs, installs exact
+  request-local captures and operations, reports callback/resource/placement
+  evidence, and clears inputs and hooks idempotently; and
 - explicit continue, cooperative-stop, callback-error, unsupported-mechanic,
   invalid-argument, and native-error results.
 
@@ -63,8 +67,10 @@ It checks out the exact revision, applies
 [`logit-loom-image-v2.patch`](logit-loom-image-v2.patch) and
 [`logit-loom-program-v3.patch`](logit-loom-program-v3.patch), then the
 [`logit-loom-model-block-v4.patch`](logit-loom-model-block-v4.patch) extension,
-and finally
+then
 [`logit-loom-model-block-application-v5.patch`](logit-loom-model-block-application-v5.patch),
+and finally
+[`logit-loom-krea-activation-v6.patch`](logit-loom-krea-activation-v6.patch),
 initializes only the required `ggml` submodule, and builds a shared library.
 Existing incompatible source changes are rejected. The script never runs from
 tests, CI, documentation, package builds, or `make check`.

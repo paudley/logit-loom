@@ -25,6 +25,13 @@ The crate also defines compatible worker-local whole-image contract families:
 - `ImageProgramPlanV1` and `ImageProgramReceiptV1` define a separate bounded
   resident program over typed single-assignment values and multiple ordered
   native, mask-blend, checkpoint-restore, and checkpoint-capture stages.
+- `KreaActivationPlanV1`, `KreaActivationReceiptV1`, and
+  `KreaActivationMeasurementsV1` define topology-bound activation capture,
+  resident donor/vector inputs, ordered operations, exact application
+  evidence, resource bounds, and cleanup without semantic labels.
+- `ProjectedComponentPlanV1` defines a deterministic create-new projection
+  transform for selected `F32` `SafeTensors` matrices with exact source, basis,
+  output, and per-tensor lineage.
 
 The single-primary contracts define one bounded RGB8 diffusion primary
 followed by zero or more exact integer `MaskBlend` stages. The resident-program
@@ -41,6 +48,21 @@ Source images and masks are bound to the native stage canvas. Reference images
 instead retain their own bounded, tightly packed RGB8 or RGBA8 dimensions in
 the serialized value specification and plan identity; the contract performs no
 implicit resize, crop, or byte transformation.
+
+Krea activation plans bind exact runtime-discovered sites, widths, token
+domains, CFG branches, and logical boundaries. They have no optional
+enablement field. Sealed donor tensors and vector banks may be imported once
+and reused in one resident session; a device-snapshot capture may be consumed
+as a same-run SSA donor without a host-to-device transfer. Public operations
+cover donor transplant, scaled vector add/subtract, orthogonal projection
+removal, and one-sided projection removal. Receipts establish what ran and
+measurements establish observed residency/copies; neither assigns a concept to
+an activation.
+
+The projected-component reference transform never mutates its source. It
+preserves the `SafeTensors` header, metadata, offsets, length, and unselected
+bytes while creating a separately identified output for later ordinary
+artifact import.
 
 `mask_blend_rgb8` validates every length before its first write. These
 contracts contain no paths, transport, queue, native handles, or feature-gated

@@ -28,7 +28,7 @@ latency for every completed step. These non-deterministic deployment
 measurements are separate from mechanical receipts and do not affect replay or
 content identities.
 
-The safe Rust adapter contract is version 6. Its native-facing paths are
+The safe Rust adapter contract is version 8. Its native-facing paths are
 intentionally explicit:
 
 - The full-state path copies each post-Euler host `f32` tensor for
@@ -66,7 +66,7 @@ or model.
 
 `SdcppResidentProgram` implements that backend over the mandatory
 stable-diffusion.cpp program ABI v3, model-block ABI v4, and application ABI
-v5. One arena can
+v5. Krea activation ABI v6 is also mandatory. One arena can
 execute multiple ordered diffusion and direct-VAE stages, scheduled
 request-local `LoRA` scales, authenticated checkpoint restore/capture,
 scheduler-state interventions and observations, exact-step Krea residual block
@@ -80,6 +80,19 @@ RGB8/RGBA8 dimensions and bytes. PNG values bind decoded geometry, RGB or RGBA
 color, a deterministic encoder identity, and a bounded encoded length. Every
 intermediate remains behind a generation-checked native handle; cleanup
 uncertainty poisons the owner.
+
+`SdcppResidentProgram::install_krea_activation` installs one complete
+topology-bound activation plan for its diffusion stage. The adapter discovers
+exact conditioning, text-residual, and transformer-residual sites from the
+resident Krea runtime; imports sealed donors or vector banks once; retains and
+re-verifies their generation-checked native handles across same-session jobs;
+and lowers exact token, CFG-branch, and logical-boundary selections. Same-run
+device-snapshot captures can feed later donor operations without a
+host-to-device copy. Captures and operations return exact callback evidence,
+observed resource peaks, and placement/transfer accounting. Release and final
+clear are idempotent; any post-native mismatch or cleanup uncertainty poisons
+the owner. Supplying a plan enables all of its mechanics; there is no partial
+or optional activation mode.
 
 Image-v2 success confirms that every requested `LoRA` participated in at least
 one native model tensor. The native stack is cleared before reusable returns;

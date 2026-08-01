@@ -48,7 +48,7 @@ pub enum KreaActivationLayoutV1 {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum KreaActivationBoundaryKindV1 {
-    /// The site is evaluated once after conditioning and before denoising.
+    /// One logical boundary after conditioning and before denoising.
     PreDenoiser,
     /// The site is evaluated inside selected denoising transitions.
     Transition,
@@ -315,7 +315,7 @@ impl KreaTokenSelectionV1 {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum KreaActivationBoundaryV1 {
-    /// Run once after conditioning and before denoising.
+    /// Apply at one logical boundary after conditioning and before denoising.
     PreDenoiser,
     /// Run at selected denoising transitions.
     Transitions {
@@ -1012,6 +1012,7 @@ impl KreaActivationPlanV1 {
             }
         }
         let mut prior_operation = None;
+        let mut consumed_inputs = BTreeSet::new();
         for operation in &self.operations {
             if prior_operation.is_some_and(|prior| prior >= operation.operation) {
                 return Err(CoreError::invalid(
@@ -1020,7 +1021,14 @@ impl KreaActivationPlanV1 {
                 ));
             }
             operation.validate_for(topology, step_count, &inputs, &captures)?;
+            consumed_inputs.insert(operation.operator.input());
             prior_operation = Some(operation.operation);
+        }
+        if consumed_inputs.len() != inputs.len() {
+            return Err(CoreError::invalid(
+                "Krea activation plan",
+                "every retained input must have a declared operation consumer",
+            ));
         }
         if retained_device > self.maximum_device_bytes || retained_host > self.maximum_host_bytes {
             return Err(CoreError::invalid(

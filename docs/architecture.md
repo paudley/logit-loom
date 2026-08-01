@@ -11,6 +11,10 @@ Bounded resident staged image programs are recorded in
 [ADR 0003](adr/0003-resident-image-programs.md).
 Typed Krea model-block residual operators are recorded in
 [ADR 0004](adr/0004-krea-model-block-operators.md).
+Topology-bound Krea activation mechanics are recorded in
+[ADR 0005](adr/0005-krea-activation-mechanics.md).
+Create-new projected components are recorded in
+[ADR 0006](adr/0006-derived-projected-components.md).
 
 Logit Loom separates stable mechanics contracts from callback execution and
 from fast-moving model backends. Token candidates and diffusion tensors remain
@@ -42,6 +46,7 @@ image lane
   ├─ logit-loom-diffusion
   └─ companion ABI v1 + image ABI v2 + program ABI v3
        + model-block ABI v4 + application ABI v5
+       + Krea activation ABI v6
        → pinned stable-diffusion.cpp
 ```
 
@@ -109,11 +114,29 @@ arena with generation-checked private handles. Ordinary repository tests and
 the retained native build establish contract/lowering and compilation only;
 model-backed behavior remains opt-in acceptance.
 
+`KreaActivationPlanV1` adds a separate topology-bound contract for Krea
+conditioning outputs, text and transformer residuals, exact token domains,
+CFG branches, and logical pre-denoiser or transition boundaries. It can retain
+sealed donor tensors and vector banks once per resident session, consume
+same-run device snapshots without another host-to-device transfer, and apply
+ordered donor, scaled-vector, orthogonal-projection, or one-sided-projection
+operations inside the same native generation call. The plan is always present
+in the public crate and has no optional enablement field. Exact capture and
+application evidence, observed resource peaks, placement/copy accounting, and
+confirmed cleanup remain distinct from claims about what an activation means.
+
+`ProjectedComponentPlanV1` is an offline create-new SafeTensors transform. It
+binds source, topology, basis, selected matrices, matrix side, strength,
+reduction rule, output, and per-tensor before/after lineage. The reference
+implementation preserves the source and every unselected byte. A derived
+component is a separate ordinary artifact; projection is not a hidden model
+load option.
+
 The stable-diffusion.cpp adapter supports only the exact catalogued MiniT2I and
 Krea 2 component layouts. It dynamically loads companion ABI version 1 plus
 the required image ABI version 2, program ABI version 3, model-block ABI
-version 4, and model-block application ABI version 5 at the exact upstream
-commit recorded in ADR 0001. Before context
+version 4, model-block application ABI version 5, and Krea activation ABI
+version 6 at the exact upstream commit recorded in ADR 0001. Before context
 creation it verifies component bytes, the library digest, required symbols,
 ABI/revision, the bounded device report, and exact non-CPU backend names. No
 failed placement is retried on CPU.
@@ -162,6 +185,14 @@ counts, loaded topology, and confirmed request-local cleanup in a separate
 receipt bound to the unchanged program receipt. The native Krea
 topology determines whether a requested zero-based block exists; the public
 operator does not hard-code a layer count or semantic interpretation.
+Safe contract v8 additionally requires Krea activation ABI v6. It discovers
+the loaded activation topology, imports sealed values into generation-checked
+resident handles, installs complete request-local capture and operation arrays,
+and accepts results only after exact callback, resource, placement, transfer,
+and cleanup validation. The resident program retains one installed activation
+plan across same-session jobs and re-verifies every native input handle before
+reuse. Clearing the plan or session releases those inputs idempotently;
+uncertainty poisons the owner.
 Uninstalled model components/sites and every conditioning selector fail
 whole-program preflight. See
 [worker-local image execution](image-execution.md) for the support matrix and

@@ -11,8 +11,8 @@ use std::{
 use libloading::Library;
 
 use crate::{
-    COMPANION_ABI_VERSION, Error, IMAGE_ABI_VERSION, MODEL_BLOCK_ABI_VERSION, PROGRAM_ABI_VERSION,
-    Result, UPSTREAM_COMMIT,
+    COMPANION_ABI_VERSION, Error, IMAGE_ABI_VERSION, KREA_ACTIVATION_ABI_VERSION,
+    MODEL_BLOCK_ABI_VERSION, PROGRAM_ABI_VERSION, Result, UPSTREAM_COMMIT,
 };
 
 pub(crate) const PROFILE_MINIT2I: i32 = 1;
@@ -56,6 +56,37 @@ pub(crate) const MODEL_COMPONENT_KREA2_V5: i32 = 1;
 pub(crate) const MODEL_BLOCK_RESIDUAL_V5: i32 = 1;
 pub(crate) const STEP_ALL_V5: i32 = 1;
 pub(crate) const STEP_EXACT_V5: i32 = 2;
+
+pub(crate) const KREA_CONDITIONER_LAYER_V6: i32 = 1;
+pub(crate) const KREA_POST_FUSION_V6: i32 = 2;
+pub(crate) const KREA_POST_PROJECTION_V6: i32 = 3;
+pub(crate) const KREA_TEXT_RESIDUAL_V6: i32 = 4;
+pub(crate) const KREA_TRANSFORMER_RESIDUAL_V6: i32 = 5;
+pub(crate) const KREA_PRE_DENOISER_V6: i32 = 1;
+pub(crate) const KREA_TRANSITION_V6: i32 = 2;
+pub(crate) const KREA_TEXT_V6: i32 = 1;
+pub(crate) const KREA_IMAGE_V6: i32 = 2;
+pub(crate) const KREA_REFERENCE_V6: i32 = 3;
+pub(crate) const KREA_CONDITIONAL_V6: i32 = 1;
+pub(crate) const KREA_UNCONDITIONAL_V6: i32 = 2;
+pub(crate) const KREA_CAPTURE_DIGEST_V6: i32 = 1;
+pub(crate) const KREA_CAPTURE_STATISTICS_V6: i32 = 2;
+pub(crate) const KREA_CAPTURE_DEVICE_SNAPSHOT_V6: i32 = 3;
+pub(crate) const KREA_DONOR_F32_ROWS_V6: i32 = 1;
+pub(crate) const KREA_VECTOR_F32_ROWS_V6: i32 = 2;
+pub(crate) const KREA_ORTHONORMAL_F32_ROWS_V6: i32 = 3;
+pub(crate) const KREA_DONOR_TRANSPLANT_V6: i32 = 1;
+pub(crate) const KREA_SCALED_VECTOR_ADD_V6: i32 = 2;
+pub(crate) const KREA_SCALED_VECTOR_SUBTRACT_V6: i32 = 3;
+pub(crate) const KREA_PROJECTION_REMOVAL_V6: i32 = 4;
+pub(crate) const KREA_ONE_SIDED_REMOVAL_V6: i32 = 5;
+pub(crate) const KREA_RESIDENT_INPUT_V6: i32 = 1;
+pub(crate) const KREA_CAPTURE_INPUT_V6: i32 = 2;
+pub(crate) const KREA_ALL_TOKENS_V6: i32 = 1;
+pub(crate) const KREA_TOKEN_RANGES_V6: i32 = 2;
+pub(crate) const KREA_CAPTURE_EVENT_V6: i32 = 1;
+pub(crate) const KREA_APPLICATION_BEFORE_EVENT_V6: i32 = 2;
+pub(crate) const KREA_APPLICATION_AFTER_EVENT_V6: i32 = 3;
 
 const MAX_DEVICE_REPORT_BYTES: usize = 64 * 1024;
 const MAX_DEVICE_LINES: usize = 64;
@@ -269,6 +300,179 @@ pub(crate) struct NativeModelBlockApplicationV5 {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub(crate) struct KreaInputHandleV6 {
+    pub generation: u64,
+    pub slot: u32,
+    pub reserved: u32,
+}
+
+impl KreaInputHandleV6 {
+    pub(crate) const EMPTY: Self = Self {
+        generation: 0,
+        slot: u32::MAX,
+        reserved: 0,
+    };
+}
+
+#[derive(Clone, Copy, Default)]
+#[repr(C)]
+pub(crate) struct KreaSiteV6 {
+    pub site: u32,
+    pub kind: i32,
+    pub index: u32,
+    pub width: u32,
+    pub boundary_mask: u32,
+    pub domain_mask: u32,
+    pub branch_mask: u32,
+}
+
+#[derive(Clone, Copy)]
+#[repr(C)]
+pub(crate) struct KreaTopologyV6 {
+    pub abi_version: u32,
+    pub conditioner_layers: u32,
+    pub transformer_blocks: u32,
+    pub site_count: usize,
+}
+
+impl Default for KreaTopologyV6 {
+    fn default() -> Self {
+        Self {
+            abi_version: KREA_ACTIVATION_ABI_VERSION,
+            conditioner_layers: 0,
+            transformer_blocks: 0,
+            site_count: 0,
+        }
+    }
+}
+
+#[repr(C)]
+pub(crate) struct KreaInputV6 {
+    pub abi_version: u32,
+    pub site: u32,
+    pub rows: u32,
+    pub representation: i32,
+    pub values: *const f32,
+    pub element_count: usize,
+}
+
+#[derive(Clone, Copy)]
+#[repr(C)]
+pub(crate) struct KreaInputDescriptionV6 {
+    pub abi_version: u32,
+    pub handle: KreaInputHandleV6,
+    pub site: u32,
+    pub width: u32,
+    pub rows: u32,
+    pub representation: i32,
+    pub bytes: u64,
+    pub host_to_device_transfers: u64,
+    pub host_to_device_bytes: u64,
+}
+
+impl Default for KreaInputDescriptionV6 {
+    fn default() -> Self {
+        Self {
+            abi_version: 0,
+            handle: KreaInputHandleV6::EMPTY,
+            site: 0,
+            width: 0,
+            rows: 0,
+            representation: 0,
+            bytes: 0,
+            host_to_device_transfers: 0,
+            host_to_device_bytes: 0,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+#[repr(C)]
+pub(crate) struct KreaTokenRangeV6 {
+    pub start: u32,
+    pub end: u32,
+}
+
+#[derive(Clone, Copy)]
+#[repr(C)]
+pub(crate) struct KreaTokenSelectionV6 {
+    pub domain: i32,
+    pub selection: i32,
+    pub ranges: *const KreaTokenRangeV6,
+    pub range_count: usize,
+}
+
+#[derive(Clone, Copy)]
+#[repr(C)]
+pub(crate) struct KreaBoundarySelectionV6 {
+    pub boundary: i32,
+    pub step_selection: i32,
+    pub steps: *const u32,
+    pub step_count: usize,
+}
+
+#[derive(Clone, Copy)]
+#[repr(C)]
+pub(crate) struct KreaCaptureV6 {
+    pub capture_index: u32,
+    pub site: u32,
+    pub tokens: KreaTokenSelectionV6,
+    pub boundary: KreaBoundarySelectionV6,
+    pub branch: i32,
+    pub retention: i32,
+    pub maximum_elements: u64,
+    pub maximum_host_bytes: u64,
+    pub maximum_device_bytes: u64,
+}
+
+#[derive(Clone, Copy)]
+#[repr(C)]
+pub(crate) struct KreaOperationV6 {
+    pub operation_index: u32,
+    pub site: u32,
+    pub tokens: KreaTokenSelectionV6,
+    pub boundary: KreaBoundarySelectionV6,
+    pub branch: i32,
+    pub operation: i32,
+    pub input_source: i32,
+    pub resident_input: KreaInputHandleV6,
+    pub capture_input: u32,
+    pub vector: u32,
+    pub strength: f32,
+}
+
+#[derive(Clone, Copy, Default)]
+#[repr(C)]
+pub(crate) struct KreaCaptureResultV6 {
+    pub capture_index: u32,
+    pub reached: u64,
+    pub elements: u64,
+}
+
+#[derive(Clone, Copy, Default)]
+#[repr(C)]
+pub(crate) struct KreaApplicationResultV6 {
+    pub operation_index: u32,
+    pub reached: u64,
+    pub applied: u64,
+    pub unchanged: u64,
+}
+
+#[repr(C)]
+pub(crate) struct ProgramImageParamsV6 {
+    pub abi_version: u32,
+    pub image: ProgramImageParamsV5,
+    pub captures: *const KreaCaptureV6,
+    pub capture_count: usize,
+    pub operations: *const KreaOperationV6,
+    pub operation_count: usize,
+    pub maximum_host_bytes: u64,
+    pub maximum_device_bytes: u64,
+    pub maximum_applications: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ProgramOutputV3 {
     pub width: u32,
     pub height: u32,
@@ -317,6 +521,31 @@ impl Default for ProgramImageResultV5 {
 }
 
 #[repr(C)]
+pub(crate) struct ProgramImageResultV6 {
+    pub abi_version: u32,
+    pub image: ProgramImageResultV5,
+    pub capture_count: usize,
+    pub operation_count: usize,
+    pub activation_controls_cleared: u32,
+    pub peak_host_bytes: u64,
+    pub peak_device_bytes: u64,
+}
+
+impl Default for ProgramImageResultV6 {
+    fn default() -> Self {
+        Self {
+            abi_version: KREA_ACTIVATION_ABI_VERSION,
+            image: ProgramImageResultV5::default(),
+            capture_count: 0,
+            operation_count: 0,
+            activation_controls_cleared: 0,
+            peak_host_bytes: 0,
+            peak_device_bytes: 0,
+        }
+    }
+}
+
+#[repr(C)]
 pub(crate) struct Step {
     pub abi_version: u32,
     pub index: u32,
@@ -353,6 +582,8 @@ pub(crate) type ConditionCallback =
     unsafe extern "C" fn(*const ConditionTensor, *mut c_void) -> i32;
 pub(crate) type StepCallback = unsafe extern "C" fn(*const Step, *mut c_void) -> i32;
 pub(crate) type ValueReadCallback = unsafe extern "C" fn(*const u8, usize, *mut c_void) -> i32;
+pub(crate) type KreaEventCallback =
+    unsafe extern "C" fn(i32, u32, u64, *const f32, usize, *mut c_void) -> i32;
 
 type AbiVersion = unsafe extern "C" fn() -> u32;
 type UpstreamCommit = unsafe extern "C" fn() -> *const c_char;
@@ -427,6 +658,35 @@ type ProgramGenerateImageV5 = unsafe extern "C" fn(
     usize,
     *mut ProgramImageResultV5,
 ) -> i32;
+type KreaTopologyFnV6 =
+    unsafe extern "C" fn(*const c_void, *mut KreaTopologyV6, *mut KreaSiteV6, usize) -> i32;
+type KreaImportInputV6 =
+    unsafe extern "C" fn(*mut c_void, *const KreaInputV6, *mut KreaInputDescriptionV6) -> i32;
+type KreaDescribeInputV6 =
+    unsafe extern "C" fn(*const c_void, KreaInputHandleV6, *mut KreaInputDescriptionV6) -> i32;
+type KreaReleaseInputV6 = unsafe extern "C" fn(*mut c_void, KreaInputHandleV6) -> i32;
+type KreaClearInputsV6 = unsafe extern "C" fn(*mut c_void) -> i32;
+type ProgramGenerateImageV6 = unsafe extern "C" fn(
+    *mut c_void,
+    *const ProgramImageParamsV6,
+    Option<ConditionCallback>,
+    *mut c_void,
+    Option<StepCallback>,
+    *mut c_void,
+    Option<KreaEventCallback>,
+    *mut c_void,
+    *mut ValueHandleV3,
+    usize,
+    *mut NativeModelBlockApplicationV5,
+    usize,
+    *mut u64,
+    usize,
+    *mut KreaCaptureResultV6,
+    usize,
+    *mut KreaApplicationResultV6,
+    usize,
+    *mut ProgramImageResultV6,
+) -> i32;
 type ProgramDescribeV3 =
     unsafe extern "C" fn(*const c_void, ValueHandleV3, *mut ValueDescriptorV3) -> i32;
 type ProgramReadV3 = unsafe extern "C" fn(
@@ -462,6 +722,12 @@ struct Functions {
     program_vae_decode_v3: ProgramVaeDecodeV3,
     program_generate_image_v3: ProgramGenerateImageV3,
     program_generate_image_v5: ProgramGenerateImageV5,
+    krea_topology_v6: KreaTopologyFnV6,
+    krea_import_input_v6: KreaImportInputV6,
+    krea_describe_input_v6: KreaDescribeInputV6,
+    krea_release_input_v6: KreaReleaseInputV6,
+    krea_clear_inputs_v6: KreaClearInputsV6,
+    program_generate_image_v6: ProgramGenerateImageV6,
     program_describe_v3: ProgramDescribeV3,
     program_read_v3: ProgramReadV3,
     program_copy_v3: ProgramCopyV3,
@@ -542,6 +808,15 @@ impl NativeApi {
                 program_generate_image_v5: load_symbol(
                     &library,
                     b"sd_loom_program_generate_image_v5\0",
+                )?,
+                krea_topology_v6: load_symbol(&library, b"sd_loom_krea_topology_v6\0")?,
+                krea_import_input_v6: load_symbol(&library, b"sd_loom_krea_import_input_v6\0")?,
+                krea_describe_input_v6: load_symbol(&library, b"sd_loom_krea_describe_input_v6\0")?,
+                krea_release_input_v6: load_symbol(&library, b"sd_loom_krea_release_input_v6\0")?,
+                krea_clear_inputs_v6: load_symbol(&library, b"sd_loom_krea_clear_inputs_v6\0")?,
+                program_generate_image_v6: load_symbol(
+                    &library,
+                    b"sd_loom_program_generate_image_v6\0",
                 )?,
                 program_describe_v3: load_symbol(&library, b"sd_loom_program_describe_v3\0")?,
                 program_read_v3: load_symbol(&library, b"sd_loom_program_read_v3\0")?,
@@ -947,6 +1222,139 @@ impl NativeApi {
                 transition_masks.as_mut_ptr(),
                 transition_masks.len(),
                 result_out,
+            )
+        }
+    }
+
+    /// Queries the exact loaded Krea topology. Passing an empty site slice is
+    /// the count-only phase of the native two-call contract.
+    ///
+    /// # Safety
+    ///
+    /// `context` must identify the live context that owns this API table.
+    pub(crate) unsafe fn krea_topology_v6(
+        &self,
+        context: *const c_void,
+        topology: &mut KreaTopologyV6,
+        sites: &mut [KreaSiteV6],
+    ) -> i32 {
+        // SAFETY: Forwarded from this method's caller contract.
+        unsafe {
+            (self.functions.krea_topology_v6)(
+                context,
+                topology,
+                if sites.is_empty() {
+                    ptr::null_mut()
+                } else {
+                    sites.as_mut_ptr()
+                },
+                sites.len(),
+            )
+        }
+    }
+
+    /// Imports one finite Krea input into native resident device storage.
+    ///
+    /// # Safety
+    ///
+    /// The context and input pointer must remain live for the synchronous call.
+    pub(crate) unsafe fn krea_import_input_v6(
+        &self,
+        context: *mut c_void,
+        input: &KreaInputV6,
+        description: &mut KreaInputDescriptionV6,
+    ) -> i32 {
+        // SAFETY: Forwarded from this method's caller contract.
+        unsafe { (self.functions.krea_import_input_v6)(context, input, description) }
+    }
+
+    /// Re-reads native placement evidence for one resident Krea input.
+    ///
+    /// # Safety
+    ///
+    /// The context and handle must belong to the same live session.
+    pub(crate) unsafe fn krea_describe_input_v6(
+        &self,
+        context: *const c_void,
+        input: KreaInputHandleV6,
+        description: &mut KreaInputDescriptionV6,
+    ) -> i32 {
+        // SAFETY: Forwarded from this method's caller contract.
+        unsafe { (self.functions.krea_describe_input_v6)(context, input, description) }
+    }
+
+    /// Releases one native resident Krea input.
+    ///
+    /// # Safety
+    ///
+    /// The context and handle must belong to the same live session.
+    pub(crate) unsafe fn krea_release_input_v6(
+        &self,
+        context: *mut c_void,
+        input: KreaInputHandleV6,
+    ) -> i32 {
+        // SAFETY: Forwarded from this method's caller contract.
+        unsafe { (self.functions.krea_release_input_v6)(context, input) }
+    }
+
+    /// Clears every native resident Krea input and advances its handle epoch.
+    ///
+    /// # Safety
+    ///
+    /// `context` must identify the live context that owns this API table.
+    pub(crate) unsafe fn krea_clear_inputs_v6(&self, context: *mut c_void) -> i32 {
+        // SAFETY: Forwarded from this method's caller contract.
+        unsafe { (self.functions.krea_clear_inputs_v6)(context) }
+    }
+
+    /// Executes one resident image operation with native Krea activation
+    /// controls and exact event callbacks.
+    ///
+    /// # Safety
+    ///
+    /// Every nested array, callback state, handle, and output slice must stay
+    /// live for the complete synchronous call.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) unsafe fn program_generate_image_v6(
+        &self,
+        program: *mut c_void,
+        params: &ProgramImageParamsV6,
+        condition_callback: ConditionCallback,
+        condition_callback_data: *mut c_void,
+        step_callback: StepCallback,
+        step_callback_data: *mut c_void,
+        activation_callback: KreaEventCallback,
+        activation_callback_data: *mut c_void,
+        snapshots: &mut [ValueHandleV3],
+        model_blocks: &mut [NativeModelBlockApplicationV5],
+        transition_masks: &mut [u64],
+        captures: &mut [KreaCaptureResultV6],
+        applications: &mut [KreaApplicationResultV6],
+        result: &mut ProgramImageResultV6,
+    ) -> i32 {
+        debug_assert_eq!(params.abi_version, KREA_ACTIVATION_ABI_VERSION);
+        // SAFETY: Forwarded from this method's caller contract.
+        unsafe {
+            (self.functions.program_generate_image_v6)(
+                program,
+                params,
+                Some(condition_callback),
+                condition_callback_data,
+                Some(step_callback),
+                step_callback_data,
+                Some(activation_callback),
+                activation_callback_data,
+                snapshots.as_mut_ptr(),
+                snapshots.len(),
+                model_blocks.as_mut_ptr(),
+                model_blocks.len(),
+                transition_masks.as_mut_ptr(),
+                transition_masks.len(),
+                captures.as_mut_ptr(),
+                captures.len(),
+                applications.as_mut_ptr(),
+                applications.len(),
+                result,
             )
         }
     }

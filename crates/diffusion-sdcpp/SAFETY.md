@@ -16,7 +16,8 @@ The safe public adapter relies on all of the following conditions:
    `native/stable-diffusion.cpp/logit-loom-model-block-v4.patch` and its
    application-evidence extension in
    `native/stable-diffusion.cpp/logit-loom-model-block-application-v5.patch`,
-   for the
+   plus the Krea activation extension in
+   `native/stable-diffusion.cpp/logit-loom-krea-activation-v6.patch`, for the
    lifetime of the loaded library. Every image, tensor, program parameter, and
    value descriptor carries its exact extension version, which the companion
    checks before reading the rest of that descriptor.
@@ -81,6 +82,17 @@ The safe public adapter relies on all of the following conditions:
     request-owned scheduled controls. The result is accepted only when exact
     application counts and transition masks fit their caller-owned buffers and
     native code confirms that request-local controls were cleared.
+17. Activation-v6 topology, resident-input descriptions, capture and operation
+    arrays, nested token ranges, callback state, result arrays, and content
+    identities remain live for each synchronous native call. Rust validates
+    every site width, mask, shape, selector, resource bound, input consumer,
+    and orthonormal vector bank before native entry. Native handles are private,
+    generation checked, and re-described before same-session reuse. Callback
+    pointers are checked before slices are formed; panics and errors do not
+    unwind across C. Native observed peaks, counts, identities, placement,
+    transfers, and cleanup must match the plan and callback stream. Individual
+    release followed by global clear is idempotent; uncertainty poisons the
+    owner before reuse.
 
 The exact ABI/commit checks turn an accidental ordinary stable-diffusion.cpp
 library or another companion revision into a load error before any model
@@ -97,7 +109,9 @@ post-observation cancellation, whole-plan receipt lineage, and compile-fail
 liveness, scheduled-adapter target identity, typed PNG lowering, incremental
 native hashing, exact model-block control encoding and installation,
 transition-mask and graph-action application receipts, output atomicity,
-cleanup poisoning, and handle release. The public
+cleanup poisoning, handle release, Krea topology publication, resident-input
+reuse, capture/application callback evidence, resource peaks, stale handles,
+and idempotent activation cleanup. The public
 `probe_companion` path checks all required symbol sets, companion ABI, commit,
 library bytes, and device-report handling against a caller-built companion
 without loading a model.

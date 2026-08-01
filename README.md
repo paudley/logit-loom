@@ -62,6 +62,13 @@ execution, and native details isolated in an adapter.
   prompt, source, mask, reference, LoRA, tensor, schedule, placement, and
   output-buffer identities to a serializable plan, then keep transport,
   admission, and retry policy in the downstream application.
+- **Install exact Krea activation programs.** Discover the resident topology,
+  retain sealed donor/vector inputs, select tokens, CFG branches, and logical
+  boundaries, and receive exact application/resource/cleanup evidence without
+  assigning semantic meaning to an activation.
+- **Create derived components without mutating their source.** Apply one
+  identity-bound projection to selected SafeTensors matrices and retain exact
+  source, basis, output, and per-tensor lineage for ordinary later import.
 
 ## Crates
 
@@ -73,7 +80,7 @@ execution, and native details isolated in an adapter.
 | [`logit-loom-executor`](crates/executor) | Transport-neutral worker-local lifecycle, borrowed-buffer, cancellation, cleanup, and failure contracts. |
 | [`logit-loom`](crates/loom) | Safe transform pipelines, observer fan-out, cancellation, and first-party transforms. |
 | [`logit-loom-llamacpp`](crates/llamacpp) | llama.cpp model/session integration through `llama-cpp-4`. |
-| [`logit-loom-diffusion`](crates/diffusion) | Backend-neutral diffusion plans, checkpoints, transactional state interventions, observations, and versioned whole-image graphs. |
+| [`logit-loom-diffusion`](crates/diffusion) | Backend-neutral diffusion plans, checkpoints, transactional state interventions, Krea activation mechanics, projected-component transforms, observations, and versioned whole-image graphs. |
 | [`logit-loom-diffusion-sdcpp`](crates/diffusion-sdcpp) | Safe single-owner adapter and whole-plan lowerer for the versioned stable-diffusion.cpp companion ABI. |
 | [`logit-loom-tokenizer`](crates/tokenizer) | Unpublished safe ranked-BPE, direct sink/count, dedicated-pool, batching, chunking, cancellation, cache, and oracle-qualification mechanics. |
 
@@ -236,8 +243,12 @@ receipts suitable for inspection or replay checks.
   stable-diffusion.cpp program ABI implements native execution, scheduled
   adapters, independently sized bounded reference images, RGB8/RGBA8/PNG
   outputs, exact-step loaded-topology-validated Krea residual block controls,
-  and exact arena cleanup; model-backed acceptance remains a separate opt-in
-  boundary.
+  topology-bound Krea activation captures and operations, resident donor/vector
+  reuse, and exact arena cleanup; model-backed acceptance remains a separate
+  opt-in boundary.
+- A deterministic create-new projected-component transform for selected
+  SafeTensors matrices, preserving the verified source and every unselected
+  byte while recording complete derivation lineage.
 - An exact dynamic companion ABI for MiniT2I and Krea with transactional
   post-Euler state callbacks, deterministic-prefix checkpoints, explicit
   accelerator placement, per-step native timing outside deterministic

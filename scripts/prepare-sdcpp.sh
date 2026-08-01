@@ -47,6 +47,7 @@ patch_files=(
     "${repo_root}/native/stable-diffusion.cpp/logit-loom-program-v3.patch"
     "${repo_root}/native/stable-diffusion.cpp/logit-loom-model-block-v4.patch"
     "${repo_root}/native/stable-diffusion.cpp/logit-loom-model-block-application-v5.patch"
+    "${repo_root}/native/stable-diffusion.cpp/logit-loom-krea-activation-v6.patch"
 )
 source_dir="$(realpath -m -- "${source_dir}")"
 build_dir="$(realpath -m -- "${build_dir}")"
@@ -109,11 +110,21 @@ if [[ "${actual_commit}" != "${upstream_commit}" ]]; then
     git -C "${source_dir}" checkout --detach "${upstream_commit}"
 fi
 
-for patch_file in "${patch_files[@]}"; do
-    if git -C "${source_dir}" apply -p0 --whitespace=nowarn --check "${patch_file}"; then
-        git -C "${source_dir}" apply -p0 --whitespace=nowarn "${patch_file}"
-    elif git -C "${source_dir}" apply -p0 --whitespace=nowarn --reverse --check "${patch_file}"; then
+applied_prefix=0
+for ((index=${#patch_files[@]} - 1; index >= 0; index--)); do
+    patch_file="${patch_files[index]}"
+    if git -C "${source_dir}" apply -p0 --whitespace=nowarn --reverse --check "${patch_file}"; then
+        applied_prefix=$((index + 1))
+        break
+    fi
+done
+
+for ((index=0; index<${#patch_files[@]}; index++)); do
+    patch_file="${patch_files[index]}"
+    if ((index < applied_prefix)); then
         echo "Logit Loom companion patch is already applied: $(basename -- "${patch_file}")"
+    elif git -C "${source_dir}" apply -p0 --whitespace=nowarn --check "${patch_file}"; then
+        git -C "${source_dir}" apply -p0 --whitespace=nowarn "${patch_file}"
     else
         echo "native checkout has changes incompatible with $(basename -- "${patch_file}")" >&2
         exit 1

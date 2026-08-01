@@ -18,8 +18,9 @@ use logit_loom_diffusion::{
     ImageProgramNativeStageV1, ImageProgramPlanV1, ImageProgramStageOperationV1,
     ImageProgramStageReceiptV1, ImageProgramStageV1, ImageProgramValueMeasurementV1,
     ImageProgramValuePlacementV1, ImageProgramValueReceiptV1, ImageProgramValueSpecV1,
-    Intervention, MAX_IMAGE_DIMENSION, MAX_IMAGE_PROGRAM_VALUE_BYTES, ObservationKind, Pipeline,
-    SeedSelection, StepContext, StepSelector, TensorDType, TensorLayout, TensorSelector,
+    Intervention, KreaActivationPlanV1, KreaActivationTerminalV1, KreaActivationTopologyV1,
+    MAX_IMAGE_DIMENSION, MAX_IMAGE_PROGRAM_VALUE_BYTES, ObservationKind, Pipeline, SeedSelection,
+    StepContext, StepSelector, TensorDType, TensorLayout, TensorSelector,
 };
 use logit_loom_executor::{CancellationProbe, ExecutorState, InputBuffer};
 
@@ -34,10 +35,13 @@ use crate::{
         lora_target_v1,
     },
     ffi::{
-        self, ImageViewV2, LoraScalePointV3, LoraScheduleV3, ModelBlockOperatorV5,
-        NativeModelBlockApplicationV5, ProgramImageParamsV3, ProgramImageParamsV5,
-        ProgramImageResultV3, ProgramImageResultV5, ProgramOutputV3, TensorViewV2,
-        ValueDescriptorV3, ValueHandleV3,
+        self, ImageViewV2, KreaApplicationResultV6, KreaCaptureResultV6, LoraScalePointV3,
+        LoraScheduleV3, ModelBlockOperatorV5, NativeModelBlockApplicationV5, ProgramImageParamsV3,
+        ProgramImageParamsV5, ProgramImageParamsV6, ProgramImageResultV3, ProgramImageResultV5,
+        ProgramImageResultV6, ProgramOutputV3, TensorViewV2, ValueDescriptorV3, ValueHandleV3,
+    },
+    krea_activation::{
+        InstalledKreaActivation, KreaCallbackState, LoweredKreaActivation, krea_event_callback,
     },
     runtime::{
         CallbackState, condition_callback, native_status_error, path_c_string, step_callback,
@@ -205,6 +209,8 @@ pub struct SdcppResidentProgram<'a, R = RejectResidentArtifactPaths> {
     checkpoint_states: HashMap<u16, DiffusionCheckpoint>,
     captured_states: HashMap<u16, CapturedState>,
     text_values: HashMap<u16, String>,
+    krea_activation: Option<InstalledKreaActivation>,
+    krea_activation_executions: Vec<crate::KreaActivationExecutionV1>,
 }
 
 impl<R> std::fmt::Debug for SdcppResidentProgram<'_, R> {
@@ -214,6 +220,7 @@ impl<R> std::fmt::Debug for SdcppResidentProgram<'_, R> {
             .field("runtime", &self.runtime)
             .field("arena_active", &self.arena.is_some())
             .field("live_handles", &self.handles.len())
+            .field("krea_activation", &self.krea_activation.is_some())
             .finish_non_exhaustive()
     }
 }
@@ -245,6 +252,8 @@ impl<'a, R> SdcppResidentProgram<'a, R> {
             checkpoint_states: HashMap::new(),
             captured_states: HashMap::new(),
             text_values: HashMap::new(),
+            krea_activation: None,
+            krea_activation_executions: Vec::new(),
         }
     }
 
@@ -275,6 +284,64 @@ impl<'a, R> SdcppResidentProgram<'a, R> {
     /// Returns the mutable installed path resolver.
     pub fn artifact_paths_mut(&mut self) -> &mut R {
         &mut self.artifact_paths
+    }
+
+    /// Imports and installs one complete Krea activation plan for subsequent
+    /// resident image jobs on this same native session.
+    ///
+    /// Sealed values are copied to device storage exactly once here. Capture
+    /// sources remain device-local within each native call. The installation
+    /// remains active across programs that retain the model session until the
+    /// caller explicitly clears it or a program requests session clearing.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an active arena, a second installation, invalid
+    /// topology/plan/input bytes, or uncertain native placement.
+    pub fn install_krea_activation(
+        &mut self,
+        topology: KreaActivationTopologyV1,
+        plan: KreaActivationPlanV1,
+        inputs: &[crate::KreaActivationInputBuffer<'_>],
+    ) -> Result<()> {
+        if self.arena.is_some() {
+            return Err(Error::Invalid(
+                "cannot install Krea activation while a program arena is active".to_owned(),
+            ));
+        }
+        if self.krea_activation.is_some() {
+            return Err(Error::Invalid(
+                "a Krea activation plan is already installed".to_owned(),
+            ));
+        }
+        let activation = InstalledKreaActivation::install(self.runtime, topology, plan, inputs)?;
+        self.krea_activation = Some(activation);
+        Ok(())
+    }
+
+    /// Releases every installed resident Krea input and advances the native
+    /// activation-handle epoch.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error while an arena is active or if native release cannot
+    /// be confirmed. Release uncertainty poisons the runtime.
+    pub fn clear_krea_activation(&mut self) -> Result<()> {
+        if self.arena.is_some() {
+            return Err(Error::Invalid(
+                "cannot clear Krea activation while a program arena is active".to_owned(),
+            ));
+        }
+        if let Some(activation) = self.krea_activation.take() {
+            activation.release(self.runtime)?;
+        }
+        Ok(())
+    }
+
+    /// Removes all completed Krea activation executions accumulated since the
+    /// previous call without changing the installed resident plan.
+    pub fn take_krea_activation_executions(&mut self) -> Vec<crate::KreaActivationExecutionV1> {
+        std::mem::take(&mut self.krea_activation_executions)
     }
 
     fn arena(&self) -> Result<NonNull<c_void>> {
@@ -471,6 +538,40 @@ impl<R> SdcppResidentProgram<'_, R> {
                 | ImageProgramStageOperationV1::RestoreCheckpoint { .. }
                 | ImageProgramStageOperationV1::CaptureCheckpoint { .. } => {}
             }
+        }
+        Ok(())
+    }
+
+    fn validate_krea_activation_program(&self, plan: &ImageProgramPlanV1) -> Result<()> {
+        let Some(activation) = &self.krea_activation else {
+            return Ok(());
+        };
+        let mut diffusion_stages = plan.stages.iter().filter_map(|stage| {
+            let ImageProgramStageOperationV1::Native { plan } = &stage.operation else {
+                return None;
+            };
+            uses_diffusion(plan.operation).then_some(plan)
+        });
+        let stage = diffusion_stages.next().ok_or_else(|| {
+            Error::Invalid(
+                "an installed Krea activation plan requires one diffusion stage".to_owned(),
+            )
+        })?;
+        if diffusion_stages.next().is_some() {
+            return Err(Error::Invalid(
+                "one Krea activation plan cannot span multiple diffusion stages".to_owned(),
+            ));
+        }
+        let schedule = stage.schedule.as_ref().ok_or_else(|| {
+            Error::Invalid("the Krea activation diffusion stage has no schedule".to_owned())
+        })?;
+        let transitions = schedule.sigmas.len().checked_sub(1).ok_or_else(|| {
+            Error::Invalid("the Krea activation schedule has no transition".to_owned())
+        })?;
+        if u32::try_from(transitions).ok() != Some(activation.plan.step_count) {
+            return Err(Error::Invalid(
+                "Krea activation transition count differs from the diffusion stage".to_owned(),
+            ));
         }
         Ok(())
     }
@@ -708,7 +809,8 @@ impl<R: ResidentArtifactPathResolver> ResidentImageProgramBackend for SdcppResid
             &bindings,
             &restore_implementation,
             &capture_implementation,
-        )
+        )?;
+        self.validate_krea_activation_program(plan)
     }
 
     fn begin_program(
@@ -717,6 +819,9 @@ impl<R: ResidentArtifactPathResolver> ResidentImageProgramBackend for SdcppResid
         inputs: &[InputBuffer<'_>],
     ) -> Result<Vec<ImageProgramValueMeasurementV1>> {
         self.validate_program(plan)?;
+        if let Some(activation) = &self.krea_activation {
+            activation.verify_resident(self.runtime)?;
+        }
         let prepared = self.prepare_inputs(plan, inputs)?;
         let liveness = plan.liveness().map_err(logit_loom_diffusion::Error::from)?;
         let mut arena = std::ptr::null_mut();
@@ -848,6 +953,9 @@ impl<R: ResidentArtifactPathResolver> ResidentImageProgramBackend for SdcppResid
         }
         self.runtime.state = ExecutorState::Resident;
         let disposition = if clear {
+            // Successful native session clearing includes the v6 resident
+            // activation store and advances its handle generation.
+            self.krea_activation.take();
             let cleared_epoch = self.runtime.session_epoch;
             self.runtime.session_epoch =
                 self.runtime.session_epoch.checked_add(1).ok_or_else(|| {
@@ -880,6 +988,7 @@ impl<R: ResidentArtifactPathResolver> ResidentImageProgramBackend for SdcppResid
         self.checkpoint_states.clear();
         self.captured_states.clear();
         self.text_values.clear();
+        self.krea_activation.take();
         self.runtime.state = ExecutorState::Poisoned;
     }
 }
@@ -1399,6 +1508,7 @@ impl<R: ResidentArtifactPathResolver> SdcppResidentProgram<'_, R> {
         })
     }
 
+    #[allow(clippy::too_many_lines)]
     fn run_diffusion_call<'c>(
         &mut self,
         stage: &ImageProgramStageV1,
@@ -1441,11 +1551,32 @@ impl<R: ResidentArtifactPathResolver> SdcppResidentProgram<'_, R> {
         let callback_pointer = (&raw mut callbacks).cast::<c_void>();
         let params = Self::diffusion_params(native, prepared)?;
         let mut snapshot_handles = vec![ValueHandleV3::EMPTY; prepared.snapshot_steps.len()];
+        let mut krea_call = match &self.krea_activation {
+            Some(activation) => {
+                activation.verify_resident(self.runtime)?;
+                Some((activation.lower()?, activation.callback_state()))
+            }
+            None => None,
+        };
+        let krea_callback_pointer = krea_call
+            .as_mut()
+            .map_or(std::ptr::null_mut(), |(_, callback)| {
+                (&raw mut *callback).cast::<c_void>()
+            });
+        let krea_native = krea_call
+            .as_ref()
+            .map(|(lowered, _)| (lowered, krea_callback_pointer));
         // SAFETY: Every handle and borrowed array remains live for this
         // synchronous call. Both callbacks contain panics and validate all
         // native descriptors before forming Rust slices.
-        let invocation = unsafe {
-            self.invoke_diffusion_native(params, prepared, callback_pointer, &mut snapshot_handles)
+        let mut invocation = unsafe {
+            self.invoke_diffusion_native(
+                params,
+                prepared,
+                callback_pointer,
+                &mut snapshot_handles,
+                krea_native,
+            )
         }?;
         let callback_error = callbacks.take_error();
         let last_step = callbacks.last_completed_step();
@@ -1455,14 +1586,26 @@ impl<R: ResidentArtifactPathResolver> SdcppResidentProgram<'_, R> {
         if let Some(error) = callback_error {
             return Err(Error::Callback(error));
         }
+        if let Some(error) = krea_call
+            .as_mut()
+            .and_then(|(_, callback)| callback.take_error())
+        {
+            return Err(Error::Callback(error));
+        }
         if invocation.status == ffi::STATUS_STOPPED {
-            return Ok(DiffusionCallOutcome::Cancelled {
-                step: last_step.ok_or_else(|| {
-                    Error::Incompatible(
-                        "native cancellation returned without a completed boundary".to_owned(),
-                    )
-                })?,
-            });
+            let step = last_step.ok_or_else(|| {
+                Error::Incompatible(
+                    "native cancellation returned without a completed boundary".to_owned(),
+                )
+            })?;
+            self.finish_krea_invocation(
+                invocation.krea_activation.take(),
+                krea_call,
+                KreaActivationTerminalV1::Cancelled {
+                    after_transition: Some(step),
+                },
+            )?;
+            return Ok(DiffusionCallOutcome::Cancelled { step });
         }
         Self::require_stage_status(invocation.status, "resident diffusion")?;
         let model_block_applications =
@@ -1481,6 +1624,11 @@ impl<R: ResidentArtifactPathResolver> SdcppResidentProgram<'_, R> {
         let actual_plan = actual_plan.ok_or_else(|| {
             Error::Incompatible("resident diffusion produced no exact step plan".to_owned())
         })?;
+        self.finish_krea_invocation(
+            invocation.krea_activation.take(),
+            krea_call,
+            KreaActivationTerminalV1::Completed,
+        )?;
         Ok(DiffusionCallOutcome::Completed(Box::new(
             CompletedDiffusionCall {
                 result,
@@ -1493,6 +1641,36 @@ impl<R: ResidentArtifactPathResolver> SdcppResidentProgram<'_, R> {
         )))
     }
 
+    fn finish_krea_invocation(
+        &mut self,
+        native: Option<NativeKreaInvocation>,
+        callback: Option<(LoweredKreaActivation, KreaCallbackState)>,
+        terminal: KreaActivationTerminalV1,
+    ) -> Result<()> {
+        match (native, callback, self.krea_activation.as_mut()) {
+            (None, None, None) => Ok(()),
+            (Some(native), Some((_lowered, callback)), Some(activation)) => {
+                let execution = activation.finish_job(
+                    self.runtime.session_epoch,
+                    terminal,
+                    &native.captures,
+                    &native.applications,
+                    native.peak_host_bytes,
+                    native.peak_device_bytes,
+                    callback,
+                )?;
+                self.krea_activation_executions.push(execution);
+                Ok(())
+            }
+            _ => {
+                self.runtime.state = ExecutorState::Poisoned;
+                Err(Error::Poisoned(
+                    "native Krea activation invocation coverage differs".to_owned(),
+                ))
+            }
+        }
+    }
+
     /// Invokes the exact resident ABI selected by the prepared operators.
     ///
     /// # Safety
@@ -1500,15 +1678,17 @@ impl<R: ResidentArtifactPathResolver> SdcppResidentProgram<'_, R> {
     /// The callback state, every array nested beneath `params` and `prepared`,
     /// snapshot storage, and result storage must remain live for the complete
     /// synchronous native call.
+    #[allow(clippy::too_many_lines)]
     unsafe fn invoke_diffusion_native(
         &mut self,
         params: ProgramImageParamsV3,
         prepared: &PreparedDiffusionCall,
         callback_pointer: *mut c_void,
         snapshot_handles: &mut [ValueHandleV3],
+        krea_activation: Option<(&LoweredKreaActivation, *mut c_void)>,
     ) -> Result<NativeDiffusionInvocation> {
         let arena = self.arena()?.as_ptr();
-        if prepared.model_block_operators.is_empty() {
+        if prepared.model_block_operators.is_empty() && krea_activation.is_none() {
             let mut result = ProgramImageResultV3::default();
             // SAFETY: Forwarded from this method's caller contract.
             let status = unsafe {
@@ -1529,14 +1709,19 @@ impl<R: ResidentArtifactPathResolver> SdcppResidentProgram<'_, R> {
                 applications: Vec::new(),
                 transition_masks: Vec::new(),
                 transition_words_per_operator: 0,
+                krea_activation: None,
             });
         }
         let step_count = params.sigma_count.checked_sub(1).ok_or_else(|| {
             Error::Invalid("resident diffusion schedule has no transition".to_owned())
         })?;
-        let transition_words_per_operator = step_count.checked_add(63).ok_or_else(|| {
-            Error::Invalid("resident model-block transition count overflowed".to_owned())
-        })? / 64;
+        let transition_words_per_operator = if prepared.model_block_operators.is_empty() {
+            0
+        } else {
+            step_count.checked_add(63).ok_or_else(|| {
+                Error::Invalid("resident model-block transition count overflowed".to_owned())
+            })? / 64
+        };
         let transition_mask_words = prepared
             .model_block_operators
             .len()
@@ -1553,6 +1738,78 @@ impl<R: ResidentArtifactPathResolver> SdcppResidentProgram<'_, R> {
             model_block_operators: pointer_or_null(&prepared.model_block_operators),
             model_block_operator_count: prepared.model_block_operators.len(),
         };
+        if let Some((activation, activation_callback_pointer)) = krea_activation {
+            let mut captures = vec![KreaCaptureResultV6::default(); activation.captures.len()];
+            let mut activation_applications =
+                vec![KreaApplicationResultV6::default(); activation.operations.len()];
+            let params = ProgramImageParamsV6 {
+                abi_version: crate::KREA_ACTIVATION_ABI_VERSION,
+                image: params,
+                captures: pointer_or_null(&activation.captures),
+                capture_count: activation.captures.len(),
+                operations: pointer_or_null(&activation.operations),
+                operation_count: activation.operations.len(),
+                maximum_host_bytes: self
+                    .krea_activation
+                    .as_ref()
+                    .map_or(0, |installed| installed.plan.maximum_host_bytes),
+                maximum_device_bytes: self
+                    .krea_activation
+                    .as_ref()
+                    .map_or(0, |installed| installed.plan.maximum_device_bytes),
+                maximum_applications: self
+                    .krea_activation
+                    .as_ref()
+                    .map_or(0, |installed| installed.plan.maximum_applications),
+            };
+            let mut result = ProgramImageResultV6::default();
+            // SAFETY: Forwarded from this method's caller contract.
+            let status = unsafe {
+                self.runtime.api.program_generate_image_v6(
+                    arena,
+                    &params,
+                    condition_callback,
+                    callback_pointer,
+                    step_callback,
+                    callback_pointer,
+                    krea_event_callback,
+                    activation_callback_pointer,
+                    snapshot_handles,
+                    &mut applications,
+                    &mut transition_masks,
+                    &mut captures,
+                    &mut activation_applications,
+                    &mut result,
+                )
+            };
+            if result.abi_version != crate::KREA_ACTIVATION_ABI_VERSION
+                || result.image.abi_version != MODEL_BLOCK_ABI_VERSION
+                || result.image.image.abi_version != PROGRAM_ABI_VERSION
+                || result.image.model_block_application_count != applications.len()
+                || result.image.transition_words_per_operator != transition_words_per_operator
+                || result.image.controls_cleared != 1
+                || result.capture_count != captures.len()
+                || result.operation_count != activation_applications.len()
+                || result.activation_controls_cleared != 1
+            {
+                return Err(Error::Poisoned(
+                    "native Krea activation evidence or cleanup attestation differs".to_owned(),
+                ));
+            }
+            return Ok(NativeDiffusionInvocation {
+                status,
+                result: result.image.image,
+                applications,
+                transition_masks,
+                transition_words_per_operator,
+                krea_activation: Some(NativeKreaInvocation {
+                    captures,
+                    applications: activation_applications,
+                    peak_host_bytes: result.peak_host_bytes,
+                    peak_device_bytes: result.peak_device_bytes,
+                }),
+            });
+        }
         let mut result = ProgramImageResultV5::default();
         // SAFETY: Forwarded from this method's caller contract.
         let status = unsafe {
@@ -1585,6 +1842,7 @@ impl<R: ResidentArtifactPathResolver> SdcppResidentProgram<'_, R> {
             applications,
             transition_masks,
             transition_words_per_operator,
+            krea_activation: None,
         })
     }
 
@@ -1883,6 +2141,11 @@ impl<R> Drop for SdcppResidentProgram<'_, R> {
                     .api
                     .program_finish_v3(arena.as_ptr(), true, &mut ignored_peak)
             };
+            self.krea_activation.take();
+            self.runtime.state = ExecutorState::Poisoned;
+        } else if let Some(activation) = self.krea_activation.take()
+            && activation.release(self.runtime).is_err()
+        {
             self.runtime.state = ExecutorState::Poisoned;
         }
     }
@@ -1984,6 +2247,14 @@ struct NativeDiffusionInvocation {
     applications: Vec<NativeModelBlockApplicationV5>,
     transition_masks: Vec<u64>,
     transition_words_per_operator: usize,
+    krea_activation: Option<NativeKreaInvocation>,
+}
+
+struct NativeKreaInvocation {
+    captures: Vec<KreaCaptureResultV6>,
+    applications: Vec<KreaApplicationResultV6>,
+    peak_host_bytes: u64,
+    peak_device_bytes: u64,
 }
 
 fn verified_model_block_applications(

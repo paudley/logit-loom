@@ -54,5 +54,5 @@ pub use observer::{ObserverReceipt, ObserverSet, StepObserver};
 pub use pipeline::{ChannelBias, Intervention, Pipeline};
 pub use projected_component::*;
 
-pub use logit_loom_core::{ControlFlow, Digest};
+pub use logit_loom_core::{ActivationStatisticsV1, ControlFlow, Digest};
 pub use logit_loom_executor::BufferSpec;

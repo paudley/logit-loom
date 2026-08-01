@@ -86,6 +86,16 @@ and does not reinterpret version 1 identities. Final pixel bytes retain the
 timing, schedule interpretation, state-byte encoding, or serialized-shape
 changes require new domains rather than reinterpretation.
 
+Krea activation mechanics use distinct domains including
+`krea-activation-topology-v1`, `krea-activation-input-content-v1`,
+`krea-activation-plan-v1`, and `krea-activation-receipt-v1`. Topology,
+deterministic evidence, and non-deterministic placement, transfer, and resource
+measurements remain separate. Create-new component transforms use
+`projected-component-plan-v1`, `projected-component-source-v1`,
+`projected-component-basis-f32-le-v1`, `projected-component-output-v1`, and
+`projected-component-manifest-v1`. Derived output bytes never inherit the
+source artifact identity.
+
 `logit-loom-llamacpp` pins public `llama-cpp-4` 0.4.2 successor revision
 `d76356b9725a3736212b3bfd16c66fc80c995c29` from
 `https://github.com/paudley/llama-cpp-rs`, carrying literal llama.cpp revision
@@ -153,10 +163,11 @@ The default feature set is useful for API compilation and does not promise an
 accelerated runtime.
 
 The image adapter dynamically loads companion ABI version `1` and requires
-whole-image extension version `2`, resident-program extension version `3`, and
-model-block extension version `4`, built from
+whole-image extension version `2`, resident-program extension version `3`,
+model-block extension version `4`, application-evidence extension version `5`,
+and Krea activation extension version `6`, built from
 `stable-diffusion.cpp@ea4e566ccffa10f853ecc3f29e74b1820bc91beb`. The safe
-Rust adapter contract is version `6`. The exact ABIs, extensions, commit,
+Rust adapter contract is version `8`. The exact ABIs, extensions, commit,
 required symbol set, and shared-library bytes are checked before model context
 creation. A library carrying only the earlier step-v1 symbols is incompatible
 with this adapter version. Updating the upstream revision, companion layout,
@@ -179,9 +190,9 @@ model-specific target selectors, PNG encoding, arbitrary model-block
 operators, and multiple native inference operations require another reviewed
 adapter contract; a lowerer must reject them instead of approximating them.
 
-Safe contract version `6` retains the version-four `ImageExecutionPlanV3`
-lowering and requires resident-program extension v3 plus model-block extension
-v4 for
+Safe contract version `8` retains the version-four `ImageExecutionPlanV3`
+lowering and requires resident-program extension v3, model-block extension v4,
+application-evidence extension v5, and Krea activation extension v6 for
 `ImageProgramPlanV1`. The resident contract supports multiple native/VAE
 stages, typed values, scheduled adapters, checkpoint and snapshot mechanics,
 Krea residual block scaling at exact denoising transitions, and explicit
@@ -189,6 +200,22 @@ value-arena cleanup. Source images and masks remain stage-canvas bound;
 reference images preserve their own bounded RGB8/RGBA8 geometry and exact
 bytes. The Krea block count is discovered from loaded weights and does not
 assign semantic meaning to any block.
+
+Activation ABI v6 adds runtime-derived site widths and supported
+site/domain/branch/boundary masks; generation-checked resident donor/vector
+handles; request-local capture and operation arrays; callback evidence;
+observed host/device peaks; and explicit release/clear calls. Supplying an
+activation plan installs it completely; there is no compatibility mode that
+silently drops an operation. Sealed inputs are imported once and re-verified
+before each same-session job. Same-run device-snapshot donors report no
+host-to-device transfer. Any layout, selector, callback, handle, resource, or
+cleanup change requires a new activation ABI and safe contract version.
+
+The projected-component transform is not part of the native ABI. It creates a
+new immutable SafeTensors artifact before ordinary import. Its exact source,
+basis, topology, tensor selection, formula, reduction, implementation, output,
+and manifest identities are compatibility inputs; changing any transform
+mechanic requires a new versioned domain.
 
 The companion is prepared explicitly for `vulkan`, `hip`, `cuda`, or `metal`.
 This is independent of the llama.cpp Cargo feature selection. A model-free

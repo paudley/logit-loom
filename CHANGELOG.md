@@ -59,6 +59,15 @@ include breaking API changes.
   with native Krea graph-branch accounting, exact selected-transition bitmaps,
   loaded-topology evidence, request-local cleanup confirmation, and a separate
   digest-bound `ModelBlockApplicationReceiptV1`.
+- Krea activation ABI version 6 and safe adapter contract version 8, with
+  runtime-derived sites, exact token/CFG/boundary selection, resident sealed
+  donor and vector inputs, same-run device-snapshot donors, ordered transplant
+  and projection operations, exact callback/resource/placement evidence,
+  same-session reuse, and idempotent cleanup poisoning.
+- A deterministic create-new projected SafeTensors component transform with
+  exact source, topology, orthonormal basis, formula, implementation, output,
+  and per-tensor before/after lineage; source and unselected bytes are
+  preserved.
 - A reproducible native companion patch/build script, model-free ABI probe,
   complete MiniT2I and Krea checkpoint experiments, and an output-free
   model-acceptance report schema.

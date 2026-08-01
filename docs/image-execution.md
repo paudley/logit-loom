@@ -18,6 +18,8 @@ semantic evaluation.
   deterministic compositing graph, explicit output routes, and request-scope
   cleanup. The separately versioned `ImageProgramPlanV1` family describes
   multiple resident native/VAE stages over typed single-assignment values.
+  `KreaActivationPlanV1` describes exact topology-bound capture, donor,
+  vector, and projection mechanics without assigning them semantic meaning.
 - `logit-loom-diffusion-sdcpp` implements a strict version-two subset over a
   pinned stable-diffusion.cpp companion. `ImagePlanExecutor` is a
   single-owner, synchronous, in-process `LocalExecutor`.
@@ -99,8 +101,8 @@ contained by the existing transactional full-state path.
 
 ## Resident-program support matrix
 
-Program ABI v3, model-block ABI v4, application ABI v5, and safe adapter
-contract v7 provide this exact resident surface:
+Program ABI v3, model-block ABI v4, application ABI v5, Krea activation ABI
+v6, and safe adapter contract v8 provide this exact resident surface:
 
 | Mechanic | Resident adapter behavior |
 | --- | --- |
@@ -109,6 +111,7 @@ contract v7 provide this exact resident surface:
 | LoRA | Ordered request-local fixed or scheduled scales at exact pre-denoiser boundaries; every adapter must participate in a native model tensor |
 | Checkpoint | Authenticated restore/capture with exact runtime compatibility and post-Euler boundary identity |
 | Operator | Installed scheduler-state channel bias plus Krea residual block scaling at all or exact selected transitions; application receipts retain the actual transition bitmap, loaded topology, graph-action counts, and cleanup confirmation; uninstalled model components/sites and conditioning selectors fail during whole-program preflight |
+| Krea activation | Loaded-topology-bound conditioning, text-residual, and transformer-residual captures and ordered donor, scaled-vector, orthogonal-projection-removal, or one-sided-projection-removal operations over exact token domains, CFG branches, and logical boundaries; sealed inputs import once and are re-verified for same-session reuse; same-run capture donors remain device resident |
 | Observation | Scheduler-state digest, statistics, and exact selected-boundary snapshots |
 | Compositing | Ordered deterministic tight-RGB8 mask blends |
 | Output | Individually typed RGB8, RGBA8, bounded PNG (RGB or RGBA plus encoder identity), tensor, checkpoint, snapshot, and final program-receipt routes |
@@ -121,6 +124,22 @@ Krea block indices are checked against the topology detected from the loaded
 weights. It does not reinterpret opaque conditioning, infer semantic block
 roles, invent additional hook sites, approximate a scheduled adapter, select a
 seed for the coordinator, or fall back to another backend.
+
+An installed Krea activation plan applies to the resident program's single
+diffusion stage; plans with another stage count or transition count are
+rejected before native entry. There is no optional activation toggle. Each
+sealed donor or vector bank crosses the native boundary once, receives a
+generation-checked resident handle, and is reused only after its identity,
+shape, device, and byte count are re-verified. A device-snapshot capture may
+feed a later operation at the same boundary and CFG branch without a
+host-to-device copy. Captures used only for evidence may instead retain a
+digest or deterministic statistics.
+
+The plan declares inclusive host/device/application bounds. Native ABI v6
+returns observed peaks, exact reached/applied/unchanged counts, content
+lineage, and input placement/copy/job accounting. A mismatch after native
+entry or uncertain input/hook cleanup poisons the owner. Explicit release,
+session clear, and owner drop all use idempotent cleanup.
 
 ## Single-primary stable-diffusion.cpp support matrix
 
@@ -162,11 +181,13 @@ A downstream worker should:
 
 1. verify artifact bytes and bind them to an exact load identity;
 2. create one `Sdcpp` owner on an explicitly selected accelerator;
-3. construct one version-two plan and exact ordered input/output bindings;
+3. construct one version-two plan or resident program and exact ordered
+   input/output bindings;
 4. provide an `ArtifactPathResolver` only when fixed `LoRA` inputs need a
    confined synchronous descriptor path;
-5. call `ImagePlanExecutor::execute` and retain the plan, receipt, output, and
-   checkpoint identities;
+5. call `ImagePlanExecutor::execute` or install a complete activation plan and
+   execute `SdcppResidentProgram`, retaining the plan, receipt, output,
+   activation evidence, and checkpoint identities;
 6. honor `Rejected`, `Cancelled`, and `Poisoned` failure dispositions; and
 7. discard the owner after any `Poisoned` result.
 
