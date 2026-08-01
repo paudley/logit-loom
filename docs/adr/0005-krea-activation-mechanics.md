@@ -60,8 +60,10 @@ native applications. Native execution reports the observed host and device
 peaks, exact capture/application counts, before/after content identities,
 unchanged writes, imported-input placement and copy accounting, terminal
 boundary, and confirmed cleanup. Evidence inconsistent with the plan poisons
-the resident owner. Clearing an activation plan releases every imported input;
-release and final clear are idempotent.
+the resident owner. A newly loaded runtime begins at nonzero session epoch
+`1`, so its first receipt is already a valid stale-handle identity; confirmed
+clears advance that epoch. Clearing an activation plan releases every imported
+input; release and final clear are idempotent.
 
 The logical pre-denoiser boundary is evidenced once per generation. The
 companion may reconstruct the corresponding operation inside its native graph

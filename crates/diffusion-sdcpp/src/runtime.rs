@@ -47,6 +47,7 @@ const MAX_PATH_BYTES: usize = 4_096;
 const MAX_CONDITION_TENSORS: u32 = 256;
 const MAX_CONDITION_BYTES: u64 = 1024 * 1024 * 1024;
 const MAX_CONDITION_LABEL_BYTES: usize = 256;
+const INITIAL_SESSION_EPOCH: u64 = 1;
 
 /// Verifies and inspects one exact companion shared library without loading a
 /// model or requiring an accelerator.
@@ -284,7 +285,7 @@ impl Sdcpp {
             native_receipt,
             options,
             state: ExecutorState::Resident,
-            session_epoch: 0,
+            session_epoch: INITIAL_SESSION_EPOCH,
             krea_activation: None,
             _single_owner: PhantomData,
         };
@@ -2290,6 +2291,11 @@ mod tests {
     use std::{collections::BTreeMap, ffi::CString};
 
     use super::*;
+
+    #[test]
+    fn new_runtime_epoch_is_a_valid_receipt_identity() {
+        assert_ne!(INITIAL_SESSION_EPOCH, 0);
+    }
 
     struct MutateProgram {
         implementation: Digest,

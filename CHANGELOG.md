@@ -119,6 +119,9 @@ include breaking API changes.
 
 ### Changed
 
+- Newly loaded stable-diffusion.cpp sessions now begin at nonzero runtime epoch
+  `1`, so first-operation Krea activation receipts have a valid stale-handle
+  identity before any explicit session clear.
 - Resident native stages now accept bounded tight RGB8/RGBA8 reference images
   at their own serialized dimensions while source images and masks remain
   canvas-bound. Lowering preserves the exact reference bytes and geometry; no
