@@ -38,7 +38,7 @@ logit-loom-models = { version = "=0.2.0", path = "models" }
 logit-loom-tokenizer = { version = "=0.2.0", path = "crates/tokenizer" }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.150"
-sha2 = "0.10.9"
+sha2 = "0.11.0"
 thiserror = "2.0.19"
 tokenizers = { version = "=0.23.1", default-features = false, features = ["onig"] }
 wide = "=0.7.33"
