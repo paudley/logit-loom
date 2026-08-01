@@ -82,7 +82,8 @@ intermediate remains behind a generation-checked native handle; cleanup
 uncertainty poisons the owner.
 
 `SdcppResidentProgram::install_krea_activation` installs one complete
-topology-bound activation plan for its diffusion stage. The adapter discovers
+topology-bound activation plan on the loaded runtime for its diffusion stage.
+Temporary resident-program borrows do not release that installation. The adapter discovers
 exact conditioning, text-residual, and transformer-residual sites from the
 resident Krea runtime; imports sealed donors or vector banks once; retains and
 re-verifies their generation-checked native handles across same-session jobs;

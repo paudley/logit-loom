@@ -209,7 +209,6 @@ pub struct SdcppResidentProgram<'a, R = RejectResidentArtifactPaths> {
     checkpoint_states: HashMap<u16, DiffusionCheckpoint>,
     captured_states: HashMap<u16, CapturedState>,
     text_values: HashMap<u16, String>,
-    krea_activation: Option<InstalledKreaActivation>,
     krea_activation_executions: Vec<crate::KreaActivationExecutionV1>,
 }
 
@@ -220,7 +219,7 @@ impl<R> std::fmt::Debug for SdcppResidentProgram<'_, R> {
             .field("runtime", &self.runtime)
             .field("arena_active", &self.arena.is_some())
             .field("live_handles", &self.handles.len())
-            .field("krea_activation", &self.krea_activation.is_some())
+            .field("krea_activation", &self.runtime.krea_activation.is_some())
             .finish_non_exhaustive()
     }
 }
@@ -252,7 +251,6 @@ impl<'a, R> SdcppResidentProgram<'a, R> {
             checkpoint_states: HashMap::new(),
             captured_states: HashMap::new(),
             text_values: HashMap::new(),
-            krea_activation: None,
             krea_activation_executions: Vec::new(),
         }
     }
@@ -309,13 +307,13 @@ impl<'a, R> SdcppResidentProgram<'a, R> {
                 "cannot install Krea activation while a program arena is active".to_owned(),
             ));
         }
-        if self.krea_activation.is_some() {
+        if self.runtime.krea_activation.is_some() {
             return Err(Error::Invalid(
                 "a Krea activation plan is already installed".to_owned(),
             ));
         }
         let activation = InstalledKreaActivation::install(self.runtime, topology, plan, inputs)?;
-        self.krea_activation = Some(activation);
+        self.runtime.krea_activation = Some(activation);
         Ok(())
     }
 
@@ -332,7 +330,7 @@ impl<'a, R> SdcppResidentProgram<'a, R> {
                 "cannot clear Krea activation while a program arena is active".to_owned(),
             ));
         }
-        if let Some(activation) = self.krea_activation.take() {
+        if let Some(activation) = self.runtime.krea_activation.take() {
             activation.release(self.runtime)?;
         }
         Ok(())
@@ -543,7 +541,7 @@ impl<R> SdcppResidentProgram<'_, R> {
     }
 
     fn validate_krea_activation_program(&self, plan: &ImageProgramPlanV1) -> Result<()> {
-        let Some(activation) = &self.krea_activation else {
+        let Some(activation) = &self.runtime.krea_activation else {
             return Ok(());
         };
         let mut diffusion_stages = plan.stages.iter().filter_map(|stage| {
@@ -819,8 +817,10 @@ impl<R: ResidentArtifactPathResolver> ResidentImageProgramBackend for SdcppResid
         inputs: &[InputBuffer<'_>],
     ) -> Result<Vec<ImageProgramValueMeasurementV1>> {
         self.validate_program(plan)?;
-        if let Some(activation) = &self.krea_activation {
-            activation.verify_resident(self.runtime)?;
+        if let Some(activation) = self.runtime.krea_activation.take() {
+            let result = activation.verify_resident(self.runtime);
+            self.runtime.krea_activation = Some(activation);
+            result?;
         }
         let prepared = self.prepare_inputs(plan, inputs)?;
         let liveness = plan.liveness().map_err(logit_loom_diffusion::Error::from)?;
@@ -955,7 +955,7 @@ impl<R: ResidentArtifactPathResolver> ResidentImageProgramBackend for SdcppResid
         let disposition = if clear {
             // Successful native session clearing includes the v6 resident
             // activation store and advances its handle generation.
-            self.krea_activation.take();
+            self.runtime.krea_activation.take();
             let cleared_epoch = self.runtime.session_epoch;
             self.runtime.session_epoch =
                 self.runtime.session_epoch.checked_add(1).ok_or_else(|| {
@@ -988,7 +988,7 @@ impl<R: ResidentArtifactPathResolver> ResidentImageProgramBackend for SdcppResid
         self.checkpoint_states.clear();
         self.captured_states.clear();
         self.text_values.clear();
-        self.krea_activation.take();
+        self.runtime.krea_activation.take();
         self.runtime.state = ExecutorState::Poisoned;
     }
 }
@@ -1551,10 +1551,13 @@ impl<R: ResidentArtifactPathResolver> SdcppResidentProgram<'_, R> {
         let callback_pointer = (&raw mut callbacks).cast::<c_void>();
         let params = Self::diffusion_params(native, prepared)?;
         let mut snapshot_handles = vec![ValueHandleV3::EMPTY; prepared.snapshot_steps.len()];
-        let mut krea_call = match &self.krea_activation {
+        let mut krea_call = match self.runtime.krea_activation.take() {
             Some(activation) => {
-                activation.verify_resident(self.runtime)?;
-                Some((activation.lower()?, activation.callback_state()))
+                let prepared = activation
+                    .verify_resident(self.runtime)
+                    .and_then(|()| Ok((activation.lower()?, activation.callback_state())));
+                self.runtime.krea_activation = Some(activation);
+                Some(prepared?)
             }
             None => None,
         };
@@ -1647,11 +1650,12 @@ impl<R: ResidentArtifactPathResolver> SdcppResidentProgram<'_, R> {
         callback: Option<(LoweredKreaActivation, KreaCallbackState)>,
         terminal: KreaActivationTerminalV1,
     ) -> Result<()> {
-        match (native, callback, self.krea_activation.as_mut()) {
+        let runtime_epoch = self.runtime.session_epoch;
+        match (native, callback, self.runtime.krea_activation.as_mut()) {
             (None, None, None) => Ok(()),
             (Some(native), Some((_lowered, callback)), Some(activation)) => {
                 let execution = activation.finish_job(
-                    self.runtime.session_epoch,
+                    runtime_epoch,
                     terminal,
                     &native.captures,
                     &native.applications,
@@ -1750,14 +1754,17 @@ impl<R: ResidentArtifactPathResolver> SdcppResidentProgram<'_, R> {
                 operations: pointer_or_null(&activation.operations),
                 operation_count: activation.operations.len(),
                 maximum_host_bytes: self
+                    .runtime
                     .krea_activation
                     .as_ref()
                     .map_or(0, |installed| installed.plan.maximum_host_bytes),
                 maximum_device_bytes: self
+                    .runtime
                     .krea_activation
                     .as_ref()
                     .map_or(0, |installed| installed.plan.maximum_device_bytes),
                 maximum_applications: self
+                    .runtime
                     .krea_activation
                     .as_ref()
                     .map_or(0, |installed| installed.plan.maximum_applications),
@@ -2141,11 +2148,7 @@ impl<R> Drop for SdcppResidentProgram<'_, R> {
                     .api
                     .program_finish_v3(arena.as_ptr(), true, &mut ignored_peak)
             };
-            self.krea_activation.take();
-            self.runtime.state = ExecutorState::Poisoned;
-        } else if let Some(activation) = self.krea_activation.take()
-            && activation.release(self.runtime).is_err()
-        {
+            self.runtime.krea_activation.take();
             self.runtime.state = ExecutorState::Poisoned;
         }
     }

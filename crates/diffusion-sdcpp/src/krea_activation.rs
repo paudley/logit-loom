@@ -1344,6 +1344,55 @@ mod tests {
         assert_eq!(execution.measurements.peak_host_bytes, 16);
         assert_eq!(execution.measurements.peak_device_bytes, 8);
         assert_eq!(execution.measurements.inputs[0].jobs, 1);
+        assert_eq!(execution.measurements.inputs[0].host_to_device_transfers, 1);
+
+        let mut callback = installed.callback_state();
+        let callback_pointer = (&raw mut callback).cast::<c_void>();
+        // SAFETY: The same resident input is exercised by a second complete
+        // synchronous job without performing another import.
+        unsafe {
+            assert_eq!(
+                krea_event_callback(
+                    ffi::KREA_APPLICATION_BEFORE_EVENT_V6,
+                    0,
+                    1,
+                    values.as_ptr(),
+                    values.len(),
+                    callback_pointer,
+                ),
+                ffi::CALLBACK_CONTINUE
+            );
+            assert_eq!(
+                krea_event_callback(
+                    ffi::KREA_APPLICATION_AFTER_EVENT_V6,
+                    0,
+                    1,
+                    values.as_ptr(),
+                    values.len(),
+                    callback_pointer,
+                ),
+                ffi::CALLBACK_CONTINUE
+            );
+        }
+        let reused = installed
+            .finish_job(
+                7,
+                KreaActivationTerminalV1::Completed,
+                &[],
+                &[KreaApplicationResultV6 {
+                    operation_index: 0,
+                    reached: 1,
+                    applied: 1,
+                    unchanged: 1,
+                }],
+                16,
+                8,
+                callback,
+            )
+            .unwrap();
+        assert_eq!(reused.measurements.inputs[0].jobs, 2);
+        assert_eq!(reused.measurements.inputs[0].host_to_device_transfers, 1);
+        assert_eq!(reused.measurements.inputs[0].host_to_device_bytes, 8);
     }
 
     #[test]

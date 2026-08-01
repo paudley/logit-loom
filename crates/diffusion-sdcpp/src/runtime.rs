@@ -95,6 +95,7 @@ pub struct Sdcpp {
     options: SdcppOptions,
     pub(crate) state: ExecutorState,
     pub(crate) session_epoch: u64,
+    pub(crate) krea_activation: Option<crate::krea_activation::InstalledKreaActivation>,
     _single_owner: PhantomData<Rc<()>>,
 }
 
@@ -108,6 +109,7 @@ impl std::fmt::Debug for Sdcpp {
             .field("options", &self.options)
             .field("state", &self.state)
             .field("session_epoch", &self.session_epoch)
+            .field("krea_activation", &self.krea_activation.is_some())
             .finish_non_exhaustive()
     }
 }
@@ -283,6 +285,7 @@ impl Sdcpp {
             options,
             state: ExecutorState::Resident,
             session_epoch: 0,
+            krea_activation: None,
             _single_owner: PhantomData,
         };
         let after_load = verify_profile_artifacts(&catalog, artifacts)?;
@@ -1042,6 +1045,9 @@ impl Sdcpp {
                 self.state
             )));
         }
+        if let Some(activation) = self.krea_activation.take() {
+            activation.release(self)?;
+        }
         // SAFETY: This value exclusively owns the live context and no
         // operation is running while the executor is resident.
         let status = unsafe { self.api.clear_session_v2(self.context.as_ptr()) };
@@ -1084,6 +1090,9 @@ impl Sdcpp {
                 "cannot close stable-diffusion.cpp while in {:?}",
                 self.state
             )));
+        }
+        if let Some(activation) = self.krea_activation.take() {
+            activation.release(&mut self)?;
         }
         // SAFETY: This value exclusively owns the live context and consumes
         // itself immediately after this synchronous cleanup.
@@ -1161,6 +1170,9 @@ fn open_companion(path: &Path) -> Result<(NativeApi, String, Vec<String>)> {
 
 impl Drop for Sdcpp {
     fn drop(&mut self) {
+        if let Some(activation) = self.krea_activation.take() {
+            let _ = activation.release(self);
+        }
         // SAFETY: `context` is owned by this value and is released exactly once
         // while the corresponding `api` library remains loaded.
         unsafe { self.api.free_context(self.context.as_ptr()) };
