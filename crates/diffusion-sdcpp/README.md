@@ -14,7 +14,7 @@ sets. The caller supplies:
 - explicit accelerator and parameter backends;
 - thread and flash-attention settings;
 - exact prompt, seed, shape, guidance, and sigma schedule; and
-- either an optional synchronous step program or an image-ABI-v2 whole-image
+- either an optional synchronous step program or an image-ABI-v3 whole-image
   request.
 
 The adapter verifies artifact bytes, companion ABI and upstream commit,
@@ -28,7 +28,7 @@ latency for every completed step. These non-deterministic deployment
 measurements are separate from mechanical receipts and do not affect replay or
 content identities.
 
-The safe Rust adapter contract is version 8. Its native-facing paths are
+The safe Rust adapter contract is version 9. Its native-facing paths are
 intentionally explicit:
 
 - The full-state path copies each post-Euler host `f32` tensor for
@@ -41,6 +41,11 @@ intentionally explicit:
 - `generate_advanced_program_to` combines the advanced image inputs and fixed
   request-local `LoRA` stack with the full-state step program in the same
   native generation call.
+- `generate_from_checkpoint` and
+  `generate_advanced_program_from_checkpoint_to` authenticate a post-step
+  checkpoint against the reconstructed plan and backend, initialize the native
+  latent from its finite state, and begin at its exact next Euler transition.
+  Completed denoise transitions are not replayed.
 
 `ImagePlanExecutor` implements the single-owner
 `LocalExecutor<ImageExecutionPlanV3>` boundary. It validates resident
@@ -95,7 +100,7 @@ clear are idempotent; any post-native mismatch or cleanup uncertainty poisons
 the owner. Supplying a plan enables all of its mechanics; there is no partial
 or optional activation mode.
 
-Image-v2 success confirms that every requested `LoRA` participated in at least
+Image-v3 success confirms that every requested `LoRA` participated in at least
 one native model tensor. The native stack is cleared before reusable returns;
 uncertain cleanup poisons the single-owner session. Direct bounded Krea VAE
 encode/decode exchanges finite native-layout tensors without making that

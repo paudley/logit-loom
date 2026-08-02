@@ -16,9 +16,10 @@ The companion ABI exposes:
 - exact conditioning tensors, including retained tokenizer ID tensors;
 - one mutable boundary after each Euler state update, with native
   denoiser-plus-update elapsed time measured immediately before the callback;
-- an image ABI v2 extension for bounded source/mask/reference views, negative
+- an image ABI v3 extension for bounded source/mask/reference views, negative
   conditioning, fixed request-local `LoRA` entries, direct VAE tensors, and explicit
-  session cleanup;
+  session cleanup, plus exact native continuation from a finite post-Euler
+  checkpoint at its recorded next transition;
 - a mandatory program ABI v3 value arena for multiple diffusion/VAE stages,
   scheduled request-local `LoRA` scales, checkpoint and snapshot state,
   deterministic joins, exact RGB8/RGBA8 conversion, bounded deterministic
@@ -35,7 +36,7 @@ The companion ABI exposes:
 - explicit continue, cooperative-stop, callback-error, unsupported-mechanic,
   invalid-argument, and native-error results.
 
-Image ABI v2 checks that every requested `LoRA` participates in at least one
+Image ABI v3 checks that every requested `LoRA` participates in at least one
 model tensor before reporting success. It clears the request-local adapter
 stack on reusable return paths. A native exception still returns an error so
 the safe Rust owner can poison and replace the session.
@@ -69,8 +70,10 @@ It checks out the exact revision, applies
 [`logit-loom-model-block-v4.patch`](logit-loom-model-block-v4.patch) extension,
 then
 [`logit-loom-model-block-application-v5.patch`](logit-loom-model-block-application-v5.patch),
-and finally
+then
 [`logit-loom-krea-activation-v6.patch`](logit-loom-krea-activation-v6.patch),
+and finally
+[`logit-loom-resume-v7.patch`](logit-loom-resume-v7.patch),
 initializes only the required `ggml` submodule, and builds a shared library.
 Existing incompatible source changes are rejected. The script never runs from
 tests, CI, documentation, package builds, or `make check`.

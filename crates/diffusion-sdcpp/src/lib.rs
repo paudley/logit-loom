@@ -52,9 +52,9 @@ pub use resident::{
 pub use runtime::{Sdcpp, probe_companion};
 
 /// Companion ABI version implemented by this adapter.
-pub const COMPANION_ABI_VERSION: u32 = 1;
-/// Version of the whole-image extension layered over companion ABI v1.
-pub const IMAGE_ABI_VERSION: u32 = 2;
+pub const COMPANION_ABI_VERSION: u32 = 2;
+/// Version of the whole-image extension layered over companion ABI v2.
+pub const IMAGE_ABI_VERSION: u32 = 3;
 /// Version of the resident native value-arena extension.
 pub const PROGRAM_ABI_VERSION: u32 = 3;
 /// Version of the native model-block operator and application-attestation
@@ -64,6 +64,6 @@ pub const MODEL_BLOCK_ABI_VERSION: u32 = 5;
 /// operator, and cleanup extension.
 pub const KREA_ACTIVATION_ABI_VERSION: u32 = 6;
 /// Version of the safe Rust execution contract layered over the companion.
-pub const ADAPTER_CONTRACT_VERSION: u32 = 8;
+pub const ADAPTER_CONTRACT_VERSION: u32 = 9;
 /// Exact stable-diffusion.cpp revision required by this adapter.
 pub const UPSTREAM_COMMIT: &str = "ea4e566ccffa10f853ecc3f29e74b1820bc91beb";

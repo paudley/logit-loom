@@ -6,7 +6,7 @@ Unsafe Rust is confined to the private dynamic-ABI module in `src/ffi.rs` and
 the narrowly scoped descriptor/slice/callback operations in `src/runtime.rs`.
 The safe public adapter relies on all of the following conditions:
 
-1. The loaded library exports companion ABI version 1 and reports exact
+1. The loaded library exports companion ABI version 2 and reports exact
    upstream commit `ea4e566ccffa10f853ecc3f29e74b1820bc91beb`.
 2. Resolved symbols retain the C signatures declared in
    `native/stable-diffusion.cpp/logit-loom-step-v1.patch` and
@@ -17,10 +17,15 @@ The safe public adapter relies on all of the following conditions:
    application-evidence extension in
    `native/stable-diffusion.cpp/logit-loom-model-block-application-v5.patch`,
    plus the Krea activation extension in
-   `native/stable-diffusion.cpp/logit-loom-krea-activation-v6.patch`, for the
-   lifetime of the loaded library. Every image, tensor, program parameter, and
-   value descriptor carries its exact extension version, which the companion
-   checks before reading the rest of that descriptor.
+   `native/stable-diffusion.cpp/logit-loom-krea-activation-v6.patch`, and the
+   continuation extension in
+   `native/stable-diffusion.cpp/logit-loom-resume-v7.patch`, for the lifetime
+   of the loaded library. Resume state is a finite, exact-length `f32` slice
+   borrowed only for the synchronous call and paired with a validated
+   nonterminal next-step index. The companion copies it into the matching
+   latent before beginning that Euler transition. Every image, tensor, program
+   parameter, and value descriptor carries its exact extension version, which
+   the companion checks before reading the rest of that descriptor.
 3. A non-null native context returned by `sd_loom_new_ctx_v1` belongs to the
    adapter and is released exactly once with `free_sd_ctx` before unloading
    the library.

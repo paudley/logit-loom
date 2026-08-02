@@ -118,6 +118,9 @@ pub(crate) struct ImageParams {
     pub cfg_scale: f32,
     pub sigmas: *const f32,
     pub sigma_count: usize,
+    pub resume_state: *const f32,
+    pub resume_state_len: usize,
+    pub resume_next_step: u32,
 }
 
 #[derive(Clone, Copy)]
@@ -166,6 +169,9 @@ pub(crate) struct ImageParamsV2 {
     pub reference_image_count: usize,
     pub loras: *const LoraV2,
     pub lora_count: usize,
+    pub resume_state: *const f32,
+    pub resume_state_len: usize,
+    pub resume_next_step: u32,
 }
 
 #[repr(C)]

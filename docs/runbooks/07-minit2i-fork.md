@@ -47,7 +47,7 @@ cargo run --quiet -p logit-loom-diffusion-sdcpp \
 ```
 
 The probe performs no model inference. It checks the shared-library digest,
-companion ABI `1`, exact upstream commit, required symbols, and native device
+companion ABI `2`, exact upstream commit, required symbols, and native device
 report. Select the exact non-CPU device name from that report:
 
 ```sh

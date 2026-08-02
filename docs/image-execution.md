@@ -143,8 +143,8 @@ session clear, and owner drop all use idempotent cleanup.
 
 ## Single-primary stable-diffusion.cpp support matrix
 
-The image extension is layered over companion ABI v1, is required by safe
-adapter contract v6, and provides the following exact legacy subset:
+The image extension is layered over companion ABI v2, is required by safe
+adapter contract v9, and provides the following exact legacy subset:
 
 | Mechanic | Current adapter behavior |
 | --- | --- |
@@ -153,7 +153,7 @@ adapter contract v6, and provides the following exact legacy subset:
 | Inpaint/outpaint | Exact source and Gray8 mask at output geometry; canvas expansion remains caller-owned |
 | References | Up to 16 tightly packed RGB8/RGBA8 images in declared order |
 | LoRA | Up to 32 caller-verified local artifacts with one fixed scale per complete request and one of two exact whole-model target identities |
-| Checkpoint | One optional authenticated restore and one optional post-step capture, routed as a versioned opaque envelope with at most 16,777,216 `f32` state elements |
+| Checkpoint | One optional authenticated restore and one optional post-step capture, routed as a versioned opaque envelope with at most 16,777,216 `f32` state elements; direct continuation begins at the recorded next Euler transition without replaying completed transitions |
 | Operator | Ordered installed scheduler-state channel bias at `All` or exact selected steps |
 | Observation | Scheduler-state digest or numerical-statistics lineage; snapshots are rejected |
 | Cancellation | Cooperative stop after the exact post-operator observation boundary of a completed Euler transition |

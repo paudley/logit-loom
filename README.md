@@ -250,12 +250,14 @@ receipts suitable for inspection or replay checks.
   SafeTensors matrices, preserving the verified source and every unselected
   byte while recording complete derivation lineage.
 - An exact dynamic companion ABI for MiniT2I and Krea with transactional
-  post-Euler state callbacks, deterministic-prefix checkpoints, explicit
+  post-Euler state callbacks, exact native checkpoint continuation, explicit
   accelerator placement, per-step native timing outside deterministic
   receipts, and no CPU-only retry.
-- Image ABI v2 text-to-image, image-to-image, inpaint, outpaint, reference
+- Image ABI v3 text-to-image, image-to-image, inpaint, outpaint, reference
   images, fixed request-local LoRA stacks, direct Krea VAE encode/decode, and
-  verified native LoRA participation.
+  verified native LoRA participation. Direct continuation initializes the
+  latent from an authenticated checkpoint and skips completed Euler
+  transitions.
 - Content-bound plans and mechanical execution receipts.
 
 See [architecture](docs/architecture.md) for boundaries and

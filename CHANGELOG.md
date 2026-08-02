@@ -38,14 +38,18 @@ include breaking API changes.
 - Serializable whole-image execution plans and receipts for exact
   text-to-image, image-to-image, inpaint, outpaint, VAE, LoRA, installed
   operator, observation, placement, and buffer mechanics.
-- `logit-loom-diffusion-sdcpp`, a safe adapter over companion ABI version 1 for
+- `logit-loom-diffusion-sdcpp`, a safe adapter over companion ABI version 2 for
   an exact pinned stable-diffusion.cpp revision, with explicit accelerator
   placement and focused unsafe-boundary tests.
-- Stable-diffusion.cpp image ABI version 2 and safe adapter contract version 5,
+- Stable-diffusion.cpp image ABI version 3 and safe adapter contract version 9,
   with direct caller-owned RGB output, bounded source/mask/reference inputs,
   negative conditioning, fixed request-local LoRA stacks with verified tensor
   participation and cleanup, direct Krea VAE encode/decode, lifecycle epochs,
   and reuse-aware error classification.
+- Exact native Euler continuation from authenticated post-step diffusion
+  checkpoints. The companion initializes the latent from the captured finite
+  state and begins at the recorded next transition, so completed denoise steps
+  are not replayed.
 - Version-two whole-image plans and stable-diffusion.cpp lowering for
   authenticated checkpoint envelopes, installed scheduler-state operators,
   observations, exact post-step cancellation, bounded deterministic RGB8

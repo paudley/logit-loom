@@ -166,8 +166,8 @@ execution contracts, and receipts. `logit-loom-executor` supplies the
 transport-neutral lifecycle, buffer, cancellation, cleanup, and failure seam
 used by local workers.
 
-`logit-loom-diffusion-sdcpp` binds those contracts to companion ABI version 1
-plus image extension version 2 for the exact catalogued MiniT2I and Krea
+`logit-loom-diffusion-sdcpp` binds those contracts to companion ABI version 2
+plus image extension version 3 for the exact catalogued MiniT2I and Krea
 component layouts. The caller builds the pinned native companion, supplies
 every artifact path, selects an exact non-CPU backend, and chooses the prompt,
 seed, shape, guidance, and custom Euler schedule. `ImagePlanExecutor` lowers

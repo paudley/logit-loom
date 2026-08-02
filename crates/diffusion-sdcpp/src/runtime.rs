@@ -30,11 +30,11 @@ use crate::{
     ADAPTER_CONTRACT_VERSION, AdvancedGenerationOutput, AdvancedGenerationReceipt,
     AdvancedImageRequest, AdvancedProgramGenerationOutput, AdvancedProgramGenerationReceipt,
     BoundaryControl, BoundaryReceipt, COMPANION_ABI_VERSION, CompanionReceipt,
-    ControlledGenerationOutput, ControlledGenerationReceipt, Error, GenerationMeasurements,
-    GenerationOutput, GenerationReceipt, IMAGE_ABI_VERSION, ImageExecutionBindings,
-    ImageOutputSink, ImagePixels, ImageRequest, NativeRuntimeReceipt, Profile, ProfileArtifacts,
-    ProfileReceipt, Result, SdcppOptions, StepProgram, StepReceipt, UPSTREAM_COMMIT,
-    VaeImageOutput, VaeOperationReceipt, VaeTensor, VaeTensorOutput,
+    ControlledGenerationOutput, ControlledGenerationReceipt, DiffusionCheckpoint, Error,
+    GenerationMeasurements, GenerationOutput, GenerationReceipt, IMAGE_ABI_VERSION,
+    ImageExecutionBindings, ImageOutputSink, ImagePixels, ImageRequest, NativeRuntimeReceipt,
+    Profile, ProfileArtifacts, ProfileReceipt, Result, SdcppOptions, StepProgram, StepReceipt,
+    UPSTREAM_COMMIT, VaeImageOutput, VaeOperationReceipt, VaeTensor, VaeTensorOutput,
     contract::component_map,
     ffi::{
         self, ConditionTensor, ContextParams, ImageParams, ImageParamsV2, ImageViewV2, LoraV2,
@@ -129,6 +129,93 @@ struct AdvancedNativeInputs {
     loras: Vec<LoraV2>,
 }
 
+struct NativeResumeState {
+    values: Vec<f32>,
+    next_step: u32,
+}
+
+pub(crate) struct CallbackResume<'a> {
+    checkpoint: &'a DiffusionCheckpoint,
+    backend: Digest,
+}
+
+impl NativeResumeState {
+    fn from_checkpoint(
+        checkpoint: Option<&DiffusionCheckpoint>,
+        schedule_steps: usize,
+    ) -> Result<Option<Self>> {
+        let Some(checkpoint) = checkpoint else {
+            return Ok(None);
+        };
+        let next_step = checkpoint.receipt().next_step;
+        let next_step_usize = usize::try_from(next_step)
+            .map_err(|_| Error::Invalid("checkpoint continuation step exceeds usize".to_owned()))?;
+        if next_step == 0 || next_step_usize >= schedule_steps {
+            return Err(Error::Invalid(
+                "checkpoint continuation must leave at least one diffusion step".to_owned(),
+            ));
+        }
+        let values = checkpoint
+            .state_bytes()
+            .chunks_exact(4)
+            .map(|bytes| {
+                let value =
+                    f32::from_bits(u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]));
+                if value.is_finite() {
+                    Ok(value)
+                } else {
+                    Err(Error::Incompatible(
+                        "checkpoint contains a non-finite scheduler value".to_owned(),
+                    ))
+                }
+            })
+            .collect::<Result<Vec<_>>>()?;
+        if values.is_empty() {
+            return Err(Error::Invalid(
+                "checkpoint contains no scheduler state".to_owned(),
+            ));
+        }
+        Ok(Some(Self { values, next_step }))
+    }
+
+    fn parts(value: Option<&Self>) -> (*const f32, usize, u32) {
+        value.map_or((std::ptr::null(), 0, 0), |resume| {
+            (
+                resume.values.as_ptr(),
+                resume.values.len(),
+                resume.next_step,
+            )
+        })
+    }
+}
+
+fn native_image_params(
+    request: &ImageRequest,
+    prompt: &CString,
+    resume: Option<&NativeResumeState>,
+) -> Result<ImageParams> {
+    let width = i32::try_from(request.width())
+        .map_err(|_| Error::Invalid("image width exceeds i32".to_owned()))?;
+    let height = i32::try_from(request.height())
+        .map_err(|_| Error::Invalid("image height exceeds i32".to_owned()))?;
+    let seed =
+        i64::try_from(request.seed()).map_err(|_| Error::Invalid("seed exceeds i64".to_owned()))?;
+    let (resume_state, resume_state_len, resume_next_step) = NativeResumeState::parts(resume);
+    Ok(ImageParams {
+        abi_version: COMPANION_ABI_VERSION,
+        prompt: prompt.as_ptr(),
+        width,
+        height,
+        seed,
+        cfg_scale: request.cfg_scale(),
+        sigmas: request.schedule().sigmas.as_ptr(),
+        sigma_count: request.schedule().sigmas.len(),
+        resume_state,
+        resume_state_len,
+        resume_next_step,
+    })
+}
+
 impl AdvancedNativeInputs {
     fn new(request: &AdvancedImageRequest<'_>) -> Result<Self> {
         let base = request.base();
@@ -183,8 +270,13 @@ impl AdvancedNativeInputs {
         })
     }
 
-    fn params(&self, request: &AdvancedImageRequest<'_>) -> ImageParamsV2 {
+    fn params(
+        &self,
+        request: &AdvancedImageRequest<'_>,
+        resume: Option<&NativeResumeState>,
+    ) -> ImageParamsV2 {
         let base = request.base();
+        let (resume_state, resume_state_len, resume_next_step) = NativeResumeState::parts(resume);
         ImageParamsV2 {
             abi_version: IMAGE_ABI_VERSION,
             operation: self.operation,
@@ -203,11 +295,52 @@ impl AdvancedNativeInputs {
             reference_image_count: self.reference_images.len(),
             loras: pointer_or_null(&self.loras),
             lora_count: self.loras.len(),
+            resume_state,
+            resume_state_len,
+            resume_next_step,
         }
     }
 }
 
 impl Sdcpp {
+    fn native_resume(
+        &self,
+        request: &ImageRequest,
+        checkpoint: Option<&DiffusionCheckpoint>,
+    ) -> Result<Option<NativeResumeState>> {
+        request.validate_for(self.profile)?;
+        NativeResumeState::from_checkpoint(checkpoint, request.schedule().steps())
+    }
+
+    fn advanced_native_resume(
+        &self,
+        request: &AdvancedImageRequest<'_>,
+        checkpoint: Option<&DiffusionCheckpoint>,
+    ) -> Result<Option<NativeResumeState>> {
+        request.validate_for(self.profile)?;
+        NativeResumeState::from_checkpoint(checkpoint, request.base().schedule().steps())
+    }
+
+    fn callback_resume<'a>(
+        &self,
+        checkpoint: Option<&'a DiffusionCheckpoint>,
+    ) -> Result<Option<CallbackResume<'a>>> {
+        checkpoint
+            .map(|checkpoint| {
+                let backend = image_execution_backend_identity(&self.native_receipt)?;
+                if checkpoint.receipt().backend != backend {
+                    return Err(Error::Incompatible(
+                        "checkpoint native backend identity differs".to_owned(),
+                    ));
+                }
+                Ok(CallbackResume {
+                    checkpoint,
+                    backend,
+                })
+            })
+            .transpose()
+    }
+
     /// Verifies exact artifacts, loads the companion library, requires the
     /// requested accelerator devices, and creates one native context.
     ///
@@ -371,35 +504,43 @@ impl Sdcpp {
         request: &ImageRequest,
         program: &mut dyn StepProgram,
     ) -> Result<GenerationOutput> {
-        self.run_operation(|runtime| runtime.generate_inner(request, program))
+        self.run_operation(|runtime| runtime.generate_inner(request, program, None))
+    }
+
+    /// Continues one exact generation from a previously captured post-step
+    /// scheduler checkpoint without replaying completed denoise transitions.
+    ///
+    /// Conditioning is reconstructed from the same request so the checkpoint
+    /// can be checked against the complete native plan. The native Euler loop
+    /// begins at `checkpoint.receipt().next_step` with the checkpoint state as
+    /// its initial latent.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when checkpoint lineage, backend identity, tensor
+    /// geometry, or the native continuation boundary differs.
+    pub fn generate_from_checkpoint(
+        &mut self,
+        request: &ImageRequest,
+        checkpoint: &DiffusionCheckpoint,
+        program: &mut dyn StepProgram,
+    ) -> Result<GenerationOutput> {
+        self.run_operation(|runtime| runtime.generate_inner(request, program, Some(checkpoint)))
     }
 
     fn generate_inner(
         &mut self,
         request: &ImageRequest,
         program: &mut dyn StepProgram,
+        checkpoint: Option<&DiffusionCheckpoint>,
     ) -> Result<GenerationOutput> {
-        request.validate_for(self.profile)?;
+        let resume = self.native_resume(request, checkpoint)?;
         let prompt = bounded_c_string("prompt", request.prompt())?;
-        let width = i32::try_from(request.width())
-            .map_err(|_| Error::Invalid("image width exceeds i32".to_owned()))?;
-        let height = i32::try_from(request.height())
-            .map_err(|_| Error::Invalid("image height exceeds i32".to_owned()))?;
-        let seed = i64::try_from(request.seed())
-            .map_err(|_| Error::Invalid("seed exceeds i64".to_owned()))?;
-        let native_params = ImageParams {
-            abi_version: COMPANION_ABI_VERSION,
-            prompt: prompt.as_ptr(),
-            width,
-            height,
-            seed,
-            cfg_scale: request.cfg_scale(),
-            sigmas: request.schedule().sigmas.as_ptr(),
-            sigma_count: request.schedule().sigmas.len(),
-        };
+        let native_params = native_image_params(request, &prompt, resume.as_ref())?;
         let components = component_map(&self.profile_receipt, &self.native_receipt)?;
         let request_receipt = request.receipt()?;
         let program_identity = program.implementation().clone();
+        let callback_resume = self.callback_resume(checkpoint)?;
         let mut callbacks = CallbackState::new_full(
             self.profile,
             &self.profile_receipt,
@@ -407,6 +548,7 @@ impl Sdcpp {
             request,
             components,
             program,
+            callback_resume,
         )?;
         let callback_pointer = (&raw mut callbacks).cast::<c_void>();
         let mut image = std::ptr::null_mut();
@@ -463,6 +605,7 @@ impl Sdcpp {
                 session_epoch: self.session_epoch,
                 request: request_receipt,
                 plan,
+                resumed_from: checkpoint.map(|value| value.receipt().clone()),
                 program: program_identity,
                 condition_tensors: callbacks.condition_tensors,
                 condition_bytes: callbacks.condition_bytes,
@@ -534,22 +677,7 @@ impl Sdcpp {
             )));
         }
         let prompt = bounded_c_string("prompt", request.prompt())?;
-        let width = i32::try_from(request.width())
-            .map_err(|_| Error::Invalid("image width exceeds i32".to_owned()))?;
-        let height = i32::try_from(request.height())
-            .map_err(|_| Error::Invalid("image height exceeds i32".to_owned()))?;
-        let seed = i64::try_from(request.seed())
-            .map_err(|_| Error::Invalid("seed exceeds i64".to_owned()))?;
-        let native_params = ImageParams {
-            abi_version: COMPANION_ABI_VERSION,
-            prompt: prompt.as_ptr(),
-            width,
-            height,
-            seed,
-            cfg_scale: request.cfg_scale(),
-            sigmas: request.schedule().sigmas.as_ptr(),
-            sigma_count: request.schedule().sigmas.len(),
-        };
+        let native_params = native_image_params(request, &prompt, None)?;
         let components = component_map(&self.profile_receipt, &self.native_receipt)?;
         let request_receipt = request.receipt()?;
         let control_identity = control.implementation().clone();
@@ -654,7 +782,26 @@ impl Sdcpp {
         sink: &mut dyn ImageOutputSink,
     ) -> Result<AdvancedProgramGenerationOutput> {
         self.run_operation(|runtime| {
-            runtime.generate_advanced_program_to_inner(request, program, sink)
+            runtime.generate_advanced_program_to_inner(request, program, sink, None)
+        })
+    }
+
+    /// Continues one exact advanced image request from a captured scheduler
+    /// checkpoint without replaying completed denoise transitions.
+    ///
+    /// # Errors
+    ///
+    /// Returns a request, checkpoint-lineage, callback, native-output,
+    /// scoped-cleanup, sink, or accounting error.
+    pub fn generate_advanced_program_from_checkpoint_to(
+        &mut self,
+        request: &AdvancedImageRequest<'_>,
+        checkpoint: &DiffusionCheckpoint,
+        program: &mut dyn StepProgram,
+        sink: &mut dyn ImageOutputSink,
+    ) -> Result<AdvancedProgramGenerationOutput> {
+        self.run_operation(|runtime| {
+            runtime.generate_advanced_program_to_inner(request, program, sink, Some(checkpoint))
         })
     }
 
@@ -663,9 +810,10 @@ impl Sdcpp {
         request: &AdvancedImageRequest<'_>,
         program: &mut dyn StepProgram,
         sink: &mut dyn ImageOutputSink,
+        checkpoint: Option<&DiffusionCheckpoint>,
     ) -> Result<AdvancedProgramGenerationOutput> {
-        request.validate_for(self.profile)?;
         let base = request.base();
+        let resume = self.advanced_native_resume(request, checkpoint)?;
         let expected = expected_rgb_bytes(base)?;
         if sink.expected_len() != expected {
             return Err(Error::Invalid(format!(
@@ -677,7 +825,7 @@ impl Sdcpp {
         let request_receipt = request.receipt()?;
         let request_identity = request_receipt.digest()?;
         let native_inputs = AdvancedNativeInputs::new(request)?;
-        let native_params = native_inputs.params(request);
+        let native_params = native_inputs.params(request, resume.as_ref());
         let mut components = component_map(&self.profile_receipt, &self.native_receipt)?;
         if components
             .insert("image-request-v2".to_owned(), request_identity)
@@ -688,6 +836,7 @@ impl Sdcpp {
             ));
         }
         let program_identity = program.implementation().clone();
+        let callback_resume = self.callback_resume(checkpoint)?;
         let mut callbacks = CallbackState::new_full(
             self.profile,
             &self.profile_receipt,
@@ -695,6 +844,7 @@ impl Sdcpp {
             base,
             components,
             program,
+            callback_resume,
         )?;
         let callback_pointer = (&raw mut callbacks).cast::<c_void>();
         let mut image = std::ptr::null_mut();
@@ -753,6 +903,7 @@ impl Sdcpp {
                     session_epoch: self.session_epoch,
                     request: base.receipt()?,
                     plan,
+                    resumed_from: checkpoint.map(|value| value.receipt().clone()),
                     program: program_identity,
                     condition_tensors: callbacks.condition_tensors,
                     condition_bytes: callbacks.condition_bytes,
@@ -812,7 +963,7 @@ impl Sdcpp {
         let request_receipt = request.receipt()?;
         let request_identity = request_receipt.digest()?;
         let native_inputs = AdvancedNativeInputs::new(request)?;
-        let native_params = native_inputs.params(request);
+        let native_params = native_inputs.params(request, None);
         let mut components = component_map(&self.profile_receipt, &self.native_receipt)?;
         if components
             .insert("image-request-v2".to_owned(), request_identity)
@@ -1287,6 +1438,9 @@ pub(crate) struct CallbackState<'a> {
     request: &'a ImageRequest,
     components: BTreeMap<String, Digest>,
     program: CallbackProgram<'a>,
+    resume_checkpoint: Option<&'a DiffusionCheckpoint>,
+    resume_backend: Option<Digest>,
+    resume_next_step: u32,
     condition_hasher: blake3::Hasher,
     condition_tensors: u32,
     condition_bytes: u64,
@@ -1322,6 +1476,7 @@ impl<'a> CallbackState<'a> {
         request: &'a ImageRequest,
         components: BTreeMap<String, Digest>,
         program: &'a mut dyn StepProgram,
+        resume: Option<CallbackResume<'a>>,
     ) -> Result<Self> {
         let mut condition_hasher = blake3::Hasher::new();
         condition_hasher.update(b"logit-loom\0sdcpp-conditioning-tensors-v1\0");
@@ -1329,6 +1484,12 @@ impl<'a> CallbackState<'a> {
         condition_hasher.update(&request.width().to_le_bytes());
         condition_hasher.update(&request.height().to_le_bytes());
         condition_hasher.update(&request.cfg_scale().to_bits().to_le_bytes());
+        let resume_next_step = resume
+            .as_ref()
+            .map_or(0, |value| value.checkpoint.receipt().next_step);
+        let (resume_checkpoint, resume_backend) = resume.map_or((None, None), |value| {
+            (Some(value.checkpoint), Some(value.backend))
+        });
         Ok(Self {
             profile,
             profile_receipt,
@@ -1336,6 +1497,9 @@ impl<'a> CallbackState<'a> {
             request,
             components,
             program: CallbackProgram::Full(program),
+            resume_checkpoint,
+            resume_backend,
+            resume_next_step,
             condition_hasher,
             condition_tensors: 0,
             condition_bytes: 0,
@@ -1343,7 +1507,7 @@ impl<'a> CallbackState<'a> {
             steps: Vec::with_capacity(request.schedule().steps()),
             boundaries: Vec::new(),
             step_latency_milliseconds: Vec::with_capacity(request.schedule().steps()),
-            next_step: 0,
+            next_step: resume_next_step,
             error: None,
         })
     }
@@ -1411,6 +1575,9 @@ impl<'a> CallbackState<'a> {
             request,
             components,
             program,
+            resume_checkpoint: None,
+            resume_backend: None,
+            resume_next_step: 0,
             condition_hasher,
             condition_tensors: 0,
             condition_bytes: 0,
@@ -1549,6 +1716,19 @@ impl<'a> CallbackState<'a> {
             self.request.schedule().clone(),
         )
         .map_err(logit_loom_diffusion::Error::from)?;
+        if let Some(checkpoint) = self.resume_checkpoint {
+            checkpoint
+                .receipt()
+                .validate_for(&plan)
+                .map_err(logit_loom_diffusion::Error::from)?;
+            if self.resume_backend.as_ref() != Some(&checkpoint.receipt().backend)
+                || checkpoint.receipt().next_step != self.resume_next_step
+            {
+                return Err(Error::Incompatible(
+                    "checkpoint backend or continuation boundary differs".to_owned(),
+                ));
+            }
+        }
         self.program.begin(&plan)?;
         self.plan = Some(plan);
         Ok(())
@@ -2385,13 +2565,26 @@ mod tests {
         state: &mut [f32],
         elapsed_milliseconds: f64,
     ) -> i32 {
+        call_step_at(callbacks, state, 0, 2, 1.0, 0.5, elapsed_milliseconds)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn call_step_at(
+        callbacks: &mut CallbackState<'_>,
+        state: &mut [f32],
+        index: u32,
+        count: u32,
+        sigma_from: f32,
+        sigma_to: f32,
+        elapsed_milliseconds: f64,
+    ) -> i32 {
         let shape = [16_i64, 16, 3, 1];
         let step = Step {
             abi_version: COMPANION_ABI_VERSION,
-            index: 0,
-            count: 2,
-            sigma_from: 1.0,
-            sigma_to: 0.5,
+            index,
+            count,
+            sigma_from,
+            sigma_to,
             state: state.as_mut_ptr(),
             state_len: state.len(),
             shape: shape.as_ptr(),
@@ -2424,6 +2617,7 @@ mod tests {
             &request,
             components,
             &mut program,
+            None,
         )
         .expect("callback state");
         assert_eq!(call_condition(&mut callbacks), ffi::CALLBACK_CONTINUE);
@@ -2446,6 +2640,110 @@ mod tests {
         assert!(unsafe { validated_shape(shape.as_ptr(), 2, 20, 4) }.is_err());
         // SAFETY: Nullness is handled before dereference.
         assert!(unsafe { validated_shape(std::ptr::null(), 2, 24, 4) }.is_err());
+    }
+
+    #[test]
+    fn resume_state_starts_at_the_exact_next_transition() {
+        let (profile, native) = callback_receipts();
+        let request = ImageRequest::linear_euler("test", 16, 16, 7, 1.0, 2).expect("valid request");
+        let mut components = BTreeMap::new();
+        components.insert("model".to_owned(), Digest::of_bytes("model", b"test"));
+        let mut first_program = MutateProgram {
+            implementation: Digest::of_bytes("program", b"test"),
+            panic: false,
+            fail: false,
+        };
+        let backend = image_execution_backend_identity(&native).expect("backend identity");
+        let mut first = CallbackState::new_full(
+            Profile::MiniT2iB16,
+            &profile,
+            &native,
+            &request,
+            components.clone(),
+            &mut first_program,
+            None,
+        )
+        .expect("initial callback state");
+        assert_eq!(call_condition(&mut first), ffi::CALLBACK_CONTINUE);
+        let mut state = vec![0.0; 16 * 16 * 3];
+        assert_eq!(
+            call_step(&mut first, &mut state, 0.0),
+            ffi::CALLBACK_CONTINUE
+        );
+        let plan = first.plan.clone().expect("initialized plan");
+        let boundary = StepContext::for_plan(&plan, 0).expect("first boundary");
+        let checkpoint = DiffusionCheckpoint::capture(&plan, &backend, &boundary, &state)
+            .expect("checkpoint capture");
+        let native_resume = NativeResumeState::from_checkpoint(Some(&checkpoint), 2)
+            .expect("valid continuation")
+            .expect("resume state");
+        assert_eq!(native_resume.next_step, 1);
+        assert_eq!(native_resume.values, state);
+
+        let mut resumed_program = MutateProgram {
+            implementation: Digest::of_bytes("program", b"test"),
+            panic: false,
+            fail: false,
+        };
+        let mut resumed = CallbackState::new_full(
+            Profile::MiniT2iB16,
+            &profile,
+            &native,
+            &request,
+            components,
+            &mut resumed_program,
+            Some(CallbackResume {
+                checkpoint: &checkpoint,
+                backend,
+            }),
+        )
+        .expect("resumed callback state");
+        assert_eq!(call_condition(&mut resumed), ffi::CALLBACK_CONTINUE);
+        assert_eq!(
+            call_step_at(&mut resumed, &mut state, 1, 2, 0.5, 0.0, 0.0),
+            ffi::CALLBACK_CONTINUE
+        );
+        assert_eq!(resumed.steps.len(), 1);
+        assert_eq!(resumed.steps[0].step_index, 1);
+    }
+
+    #[test]
+    fn resume_state_rejects_zero_or_completed_continuations() {
+        let (profile, native) = callback_receipts();
+        let request = ImageRequest::linear_euler("test", 16, 16, 7, 1.0, 2).expect("valid request");
+        let mut components = BTreeMap::new();
+        components.insert("model".to_owned(), Digest::of_bytes("model", b"test"));
+        let tensor = TensorSpec::new(
+            vec![16, 16, 3, 1],
+            TensorDType::F32,
+            TensorLayout::DimensionZeroFastest,
+            format!("host-f32:{}", native.backend),
+        )
+        .expect("valid tensor");
+        let plan = DiffusionPlan::new(
+            components,
+            Digest::of_bytes("conditioning", b"test"),
+            rng_identity(&native, &profile).expect("rng"),
+            request.seed(),
+            tensor,
+            request.schedule().clone(),
+        )
+        .expect("valid plan");
+        let final_boundary = StepContext::for_plan(&plan, 1).expect("final boundary");
+        let checkpoint = DiffusionCheckpoint::capture(
+            &plan,
+            &image_execution_backend_identity(&native).expect("backend"),
+            &final_boundary,
+            &vec![0.0; 16 * 16 * 3],
+        )
+        .expect("final checkpoint");
+        assert!(NativeResumeState::from_checkpoint(Some(&checkpoint), 2).is_err());
+        let mut zero_receipt = checkpoint.receipt().clone();
+        zero_receipt.next_step = 0;
+        let zero_checkpoint =
+            DiffusionCheckpoint::from_parts(zero_receipt, checkpoint.state_bytes().to_vec())
+                .expect("authenticated zero-position fixture");
+        assert!(NativeResumeState::from_checkpoint(Some(&zero_checkpoint), 2).is_err());
     }
 
     #[test]

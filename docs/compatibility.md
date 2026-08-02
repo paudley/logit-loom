@@ -79,10 +79,10 @@ domains are not reinterpreted. Image ABI v2 requests use
 `sdcpp-image-request-v2`; source, mask, reference, LoRA, and VAE byte
 identities have separate versioned domains rather than incorporating local
 paths. Image experiment reports identify an exact serialized native generation
-receipt under
-`sdcpp-generation-receipt-v2`; version 2 adds the exact native session epoch
-and does not reinterpret version 1 identities. Final pixel bytes retain the
-`sdcpp-image-u8-v1` identity assigned by the adapter. Tensor layout, callback
+receipt under `sdcpp-generation-receipt-v3`; version 3 adds optional exact
+direct-continuation checkpoint lineage, while version 2 added the exact native
+session epoch. Earlier identities are not reinterpreted. Final pixel bytes
+retain the `sdcpp-image-u8-v1` identity assigned by the adapter. Tensor layout, callback
 timing, schedule interpretation, state-byte encoding, or serialized-shape
 changes require new domains rather than reinterpretation.
 
@@ -162,12 +162,12 @@ supported deployment combination explicitly instead of enabling every feature.
 The default feature set is useful for API compilation and does not promise an
 accelerated runtime.
 
-The image adapter dynamically loads companion ABI version `1` and requires
-whole-image extension version `2`, resident-program extension version `3`,
+The image adapter dynamically loads companion ABI version `2` and requires
+whole-image extension version `3`, resident-program extension version `3`,
 model-block extension version `4`, application-evidence extension version `5`,
 and Krea activation extension version `6`, built from
 `stable-diffusion.cpp@ea4e566ccffa10f853ecc3f29e74b1820bc91beb`. The safe
-Rust adapter contract is version `8`. The exact ABIs, extensions, commit,
+Rust adapter contract is version `9`. The exact ABIs, extensions, commit,
 required symbol set, and shared-library bytes are checked before model context
 creation. A library carrying only the earlier step-v1 symbols is incompatible
 with this adapter version. Updating the upstream revision, companion layout,
@@ -175,14 +175,18 @@ Euler callback boundary, image operation layout, or native tensor
 interpretation is a reviewed compatibility event and requires renewed
 model-backed acceptance.
 
-The version `1` step descriptor includes a finite, nonnegative elapsed-time
+The version `2` step descriptor includes a finite, nonnegative elapsed-time
 field measured across the native denoiser and Euler update immediately before
 the Rust callback. The adapter retains those per-step values as
 non-deterministic deployment measurements outside plans, receipts, checkpoint
 lineage, and content identities. Any future descriptor-layout change requires
 a new companion ABI version.
 
-Image extension version `2` adds exact RGB/RGBA/Gray byte views, bounded
+Image extension version `3` retains the version-two image mechanics and adds
+an optional exact post-step scheduler-state continuation pointer, element
+count, and next-transition index. The companion validates the finite state
+against the native latent geometry and begins Euler sampling at that exact
+index. Version `2` originally added exact RGB/RGBA/Gray byte views, bounded
 negative conditioning and references, fixed request-local LoRA bindings,
 direct VAE tensors, and explicit native session cleanup. It supports only one
 fixed scale for each LoRA during a complete request. Per-step scale schedules,
@@ -190,7 +194,7 @@ model-specific target selectors, PNG encoding, arbitrary model-block
 operators, and multiple native inference operations require another reviewed
 adapter contract; a lowerer must reject them instead of approximating them.
 
-Safe contract version `8` retains the version-four `ImageExecutionPlanV3`
+Safe contract version `9` retains the version-four `ImageExecutionPlanV3`
 lowering and requires resident-program extension v3, model-block extension v4,
 application-evidence extension v5, and Krea activation extension v6 for
 `ImageProgramPlanV1`. The resident contract supports multiple native/VAE
@@ -278,11 +282,14 @@ therefore process-local and thread-affine. Logit Loom does not substitute the
 serializable receipt for unavailable native sampler state.
 
 Diffusion checkpoints are exact post-Euler host `f32` bytes bound to the full
-`DiffusionPlan`, companion/runtime identity, and completed step. Restore is
-deterministic-prefix replay: the adapter recomputes and authenticates the
-selected boundary before copying checkpoint bytes. It does not promise native
-skip-ahead, cross-backend portability, or compatibility across conditioning
-or schedule changes.
+`DiffusionPlan`, companion/runtime identity, and completed step. Before native
+entry, the adapter authenticates the state envelope, step range, and current
+backend. Native conditioning reconstructs the plan; the first resumed boundary
+must authenticate that plan before any result is accepted. The companion
+copies the finite checkpoint state into the latent and resumes at the recorded
+next Euler transition without replaying completed transitions. It does not
+promise cross-backend portability or compatibility across conditioning or
+schedule changes.
 
 ## Optional model profile compatibility
 
@@ -314,7 +321,7 @@ the acquisition command does not accept credentials as arguments.
 ## Artifact compatibility
 
 Text `LoRA` compatibility is ultimately validated by llama.cpp at
-load/application. Image ABI v2 additionally requires every requested
+load/application. Image ABI v3 additionally requires every requested
 request-local LoRA to match and participate in at least one native model tensor
 before returning success; absence of a compatible target is a rejected
 mechanic, not a successful no-op.

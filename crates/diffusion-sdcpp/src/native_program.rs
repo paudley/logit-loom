@@ -1533,7 +1533,7 @@ impl<R: ResidentArtifactPathResolver> SdcppResidentProgram<'_, R> {
                 .digest()
                 .map_err(logit_loom_diffusion::Error::from)?,
             prepared.restore.clone(),
-            checkpoint_backend,
+            checkpoint_backend.clone(),
             cancellation,
         )?;
         let profile = self.runtime.profile;
@@ -1547,6 +1547,7 @@ impl<R: ResidentArtifactPathResolver> SdcppResidentProgram<'_, R> {
             &request,
             components,
             &mut stage_program,
+            None,
         )?;
         let callback_pointer = (&raw mut callbacks).cast::<c_void>();
         let params = Self::diffusion_params(native, prepared)?;

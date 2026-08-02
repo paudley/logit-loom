@@ -221,8 +221,8 @@
 +        condition_callback == nullptr ||
 +        callback == nullptr ||
 +        params->abi_version != SD_LOOM_IMAGE_ABI_VERSION ||
-+        !sd_loom_bounded_string_v2(params->prompt, 64 * 1024, false) ||
-+        !sd_loom_bounded_string_v2(params->negative_prompt, 64 * 1024, true) ||
++        !sd_loom_bounded_string_v2(params->prompt, 4 * 1024 * 1024, false) ||
++        !sd_loom_bounded_string_v2(params->negative_prompt, 4 * 1024 * 1024, true) ||
 +        params->width <= 0 ||
 +        params->height <= 0 ||
 +        params->width > 4096 ||

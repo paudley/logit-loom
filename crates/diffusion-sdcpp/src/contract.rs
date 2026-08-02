@@ -15,8 +15,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::{Error, Result};
 
-/// Maximum prompt bytes passed to the native conditioner.
-pub const MAX_PROMPT_BYTES: usize = 64 * 1024;
+/// Maximum UTF-8 bytes accepted before caller-owned token-context admission,
+/// without imposing the former hidden 64 KiB native-adapter cap.
+pub const MAX_PROMPT_BYTES: usize = 4 * 1024 * 1024;
 /// Maximum output image dimension.
 pub const MAX_IMAGE_DIMENSION: u32 = 4_096;
 /// Maximum native backend label bytes.
@@ -700,6 +701,9 @@ pub struct GenerationReceipt {
     pub request: ImageRequestReceipt,
     /// Exact diffusion plan after native conditioning.
     pub plan: DiffusionPlan,
+    /// Exact parent checkpoint for a direct native continuation, or `None`
+    /// when this invocation began from its declared seed.
+    pub resumed_from: Option<DiffusionCheckpointReceipt>,
     /// Exact step-program identity.
     pub program: Digest,
     /// Number of condition tensors hashed.
@@ -917,7 +921,14 @@ impl DiffusionCheckpoint {
         })
     }
 
-    pub(crate) fn capture(
+    /// Captures the exact finite post-step scheduler state for a validated
+    /// native plan and backend.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when plan identity, step accounting, serialization,
+    /// or checkpoint bounds cannot be represented exactly.
+    pub fn capture(
         plan: &DiffusionPlan,
         backend: &Digest,
         context: &StepContext,

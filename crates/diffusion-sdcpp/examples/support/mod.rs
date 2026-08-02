@@ -185,7 +185,7 @@ pub fn run_identities(
 ) -> Result<RunIdentities, Box<dyn std::error::Error>> {
     Ok(RunIdentities {
         plan_identity: receipt.plan.digest()?,
-        receipt_identity: Digest::of_serializable("sdcpp-generation-receipt-v2", receipt)?,
+        receipt_identity: Digest::of_serializable("sdcpp-generation-receipt-v3", receipt)?,
         output_identity: receipt.image.clone(),
         completed_steps: u32::try_from(receipt.steps.len())?,
     })

@@ -129,6 +129,13 @@ the checkpoint identity, replace it with the checkpoint bytes, then continue.
 This is an exact branch boundary, but it does not skip the native computation
 before that step. Receipts state that replay mode explicitly.
 
+Safe adapter contract v9 later added a distinct direct-continuation path over
+companion/image ABIs v2/v3. That path reconstructs and authenticates the same
+plan, initializes the native latent from the finite checkpoint state, and
+begins at the recorded next Euler transition without replaying completed
+transitions. The deterministic-prefix `ForkProgram::replay` path above remains
+available and retains its existing identity.
+
 ## Safety contract
 
 Local unsafe code is limited to the adapter's private dynamic-ABI module.

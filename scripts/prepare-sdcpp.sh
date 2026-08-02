@@ -48,6 +48,7 @@ patch_files=(
     "${repo_root}/native/stable-diffusion.cpp/logit-loom-model-block-v4.patch"
     "${repo_root}/native/stable-diffusion.cpp/logit-loom-model-block-application-v5.patch"
     "${repo_root}/native/stable-diffusion.cpp/logit-loom-krea-activation-v6.patch"
+    "${repo_root}/native/stable-diffusion.cpp/logit-loom-resume-v7.patch"
 )
 source_dir="$(realpath -m -- "${source_dir}")"
 build_dir="$(realpath -m -- "${build_dir}")"

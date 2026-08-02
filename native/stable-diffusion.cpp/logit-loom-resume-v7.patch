@@ -1,0 +1,212 @@
+diff --git a/include/stable-diffusion.h b/include/stable-diffusion.h
+index ff1e974..dbbe0ce 100644
+--- a/include/stable-diffusion.h
++++ b/include/stable-diffusion.h
+@@ -422,8 +422,8 @@ typedef bool (*sd_graph_eval_callback_t)(struct ggml_tensor* t, bool ask, void*
+ 
+ // Logit Loom companion ABI. This surface is maintained by the Logit Loom
+ // patch and is not part of upstream stable-diffusion.cpp.
+-#define SD_LOOM_ABI_VERSION 1
+-#define SD_LOOM_IMAGE_ABI_VERSION 2
++#define SD_LOOM_ABI_VERSION 2
++#define SD_LOOM_IMAGE_ABI_VERSION 3
+ #define SD_LOOM_PROGRAM_ABI_VERSION 3
+ #define SD_LOOM_MODEL_BLOCK_ABI_VERSION 4
+ #define SD_LOOM_MODEL_BLOCK_APPLICATION_ABI_VERSION 5
+@@ -476,6 +476,9 @@ typedef struct {
+     float cfg_scale;
+     const float* sigmas;
+     size_t sigma_count;
++    const float* resume_state;
++    size_t resume_state_len;
++    uint32_t resume_next_step;
+ } sd_loom_image_params_v1_t;
+ 
+ typedef struct {
+@@ -544,6 +547,9 @@ typedef struct {
+     size_t reference_image_count;
+     const sd_loom_lora_v2_t* loras;
+     size_t lora_count;
++    const float* resume_state;
++    size_t resume_state_len;
++    uint32_t resume_next_step;
+ } sd_loom_image_params_v2_t;
+ 
+ typedef struct {
+diff --git a/src/runtime/denoiser.hpp b/src/runtime/denoiser.hpp
+index fb5bbfb..8dba2fd 100644
+--- a/src/runtime/denoiser.hpp
++++ b/src/runtime/denoiser.hpp
+@@ -1561,9 +1561,27 @@ static sd::Tensor<float> sample_euler(denoise_cb_t model,
+                                       const std::vector<float>& sigmas,
+                                       sd_loom_step_cb_v1_t step_callback,
+                                       void* step_callback_data,
+-                                      int32_t* step_callback_status) {
++                                      int32_t* step_callback_status,
++                                      const float* resume_state,
++                                      size_t resume_state_len,
++                                      uint32_t resume_next_step) {
+     int steps = static_cast<int>(sigmas.size()) - 1;
+-    for (int i = 0; i < steps; i++) {
++    if (resume_next_step > 0) {
++        if (resume_state == nullptr ||
++            resume_next_step >= static_cast<uint32_t>(steps) ||
++            resume_state_len != static_cast<size_t>(x.numel()) ||
++            std::any_of(resume_state,
++                        resume_state + resume_state_len,
++                        [](float value) { return !std::isfinite(value); })) {
++            *step_callback_status = SD_LOOM_STATUS_CALLBACK_ERROR;
++            return {};
++        }
++        std::copy(resume_state, resume_state + resume_state_len, x.data());
++    } else if (resume_state != nullptr || resume_state_len != 0) {
++        *step_callback_status = SD_LOOM_STATUS_CALLBACK_ERROR;
++        return {};
++    }
++    for (int i = static_cast<int>(resume_next_step); i < steps; i++) {
+         auto step_started = std::chrono::steady_clock::now();
+         float sigma       = sigmas[i];
+         auto denoised_opt = model(x, sigma, i + 1);
+@@ -2707,7 +2725,10 @@ static sd::Tensor<float> sample_k_diffusion(sample_method_t method,
+                                             std::shared_ptr<Denoiser> denoiser_for_dispatch,
+                                             sd_loom_step_cb_v1_t step_callback,
+                                             void* step_callback_data,
+-                                            int32_t* step_callback_status) {
++                                            int32_t* step_callback_status,
++                                            const float* resume_state,
++                                            size_t resume_state_len,
++                                            uint32_t resume_next_step) {
+     if (step_callback != nullptr && method != EULER_SAMPLE_METHOD) {
+         *step_callback_status = SD_LOOM_STATUS_UNSUPPORTED;
+         return {};
+@@ -2727,7 +2748,10 @@ static sd::Tensor<float> sample_k_diffusion(sample_method_t method,
+                                 sigmas,
+                                 step_callback,
+                                 step_callback_data,
+-                                step_callback_status);
++                                step_callback_status,
++                                resume_state,
++                                resume_state_len,
++                                resume_next_step);
+         case HEUN_SAMPLE_METHOD:
+             return sample_heun(model, std::move(x), sigmas);
+         case DPM2_SAMPLE_METHOD:
+diff --git a/src/stable-diffusion.cpp b/src/stable-diffusion.cpp
+index 09fe8f8..3d1b648 100644
+--- a/src/stable-diffusion.cpp
++++ b/src/stable-diffusion.cpp
+@@ -235,6 +235,9 @@ public:
+     sd_loom_step_cb_v1_t loom_step_callback = nullptr;
+     void* loom_step_callback_data            = nullptr;
+     int32_t loom_step_status                  = SD_LOOM_STATUS_OK;
++    const float* loom_resume_state            = nullptr;
++    size_t loom_resume_state_len              = 0;
++    uint32_t loom_resume_next_step            = 0;
+     uint64_t loom_program_generation          = 0;
+     bool loom_program_active                  = false;
+     std::vector<sd_loom_scheduled_model_block_v4_t> loom_model_block_controls;
+@@ -2775,7 +2778,10 @@ public:
+                                          denoiser,
+                                          loom_step_callback,
+                                          loom_step_callback_data,
+-                                         &loom_step_status);
++                                         &loom_step_status,
++                                         loom_resume_state,
++                                         loom_resume_state_len,
++                                         loom_resume_next_step);
+         if (x0_opt.empty()) {
+             LOG_ERROR("Diffusion model sampling failed");
+             if (control_net) {
+@@ -3737,6 +3743,20 @@ static bool sd_loom_nonempty(const char* value) {
+     return value != nullptr && value[0] != '\0';
+ }
+ 
++static bool sd_loom_valid_resume(const float* state,
++                                 size_t state_len,
++                                 uint32_t next_step,
++                                 size_t sigma_count) {
++    if (next_step == 0) {
++        return state == nullptr && state_len == 0;
++    }
++    return state != nullptr &&
++           state_len > 0 &&
++           state_len <= 16 * 1024 * 1024 &&
++           sigma_count >= 2 &&
++           next_step < sigma_count - 1;
++}
++
+ static void sd_loom_discard_progress(int, int, float, void*) {
+ }
+ 
+@@ -5803,6 +5823,10 @@ int32_t sd_loom_generate_image_v1(sd_ctx_t* sd_ctx,
+         params->sigmas == nullptr ||
+         params->sigma_count < 2 ||
+         params->sigma_count > 4097 ||
++        !sd_loom_valid_resume(params->resume_state,
++                              params->resume_state_len,
++                              params->resume_next_step,
++                              params->sigma_count) ||
+         sd_ctx->sd->loom_condition_callback != nullptr ||
+         sd_ctx->sd->loom_step_callback != nullptr) {
+         return SD_LOOM_STATUS_INVALID_ARGUMENT;
+@@ -5834,6 +5858,9 @@ int32_t sd_loom_generate_image_v1(sd_ctx_t* sd_ctx,
+     sd_ctx->sd->loom_step_callback      = callback;
+     sd_ctx->sd->loom_step_callback_data = callback_data;
+     sd_ctx->sd->loom_step_status        = SD_LOOM_STATUS_OK;
++    sd_ctx->sd->loom_resume_state       = params->resume_state;
++    sd_ctx->sd->loom_resume_state_len   = params->resume_state_len;
++    sd_ctx->sd->loom_resume_next_step   = params->resume_next_step;
+ 
+     sd_image_t* images = nullptr;
+     int image_count    = 0;
+@@ -5845,6 +5872,9 @@ int32_t sd_loom_generate_image_v1(sd_ctx_t* sd_ctx,
+     sd_ctx->sd->loom_step_callback      = nullptr;
+     sd_ctx->sd->loom_step_callback_data = nullptr;
+     sd_ctx->sd->loom_step_status        = SD_LOOM_STATUS_OK;
++    sd_ctx->sd->loom_resume_state       = nullptr;
++    sd_ctx->sd->loom_resume_state_len   = 0;
++    sd_ctx->sd->loom_resume_next_step   = 0;
+ 
+     if (status == SD_LOOM_STATUS_CALLBACK_ERROR ||
+         status == SD_LOOM_STATUS_UNSUPPORTED) {
+@@ -5958,6 +5988,9 @@ static void sd_loom_reset_callbacks(sd_ctx_t* sd_ctx) {
+     sd_ctx->sd->loom_step_callback           = nullptr;
+     sd_ctx->sd->loom_step_callback_data      = nullptr;
+     sd_ctx->sd->loom_step_status             = SD_LOOM_STATUS_OK;
++    sd_ctx->sd->loom_resume_state            = nullptr;
++    sd_ctx->sd->loom_resume_state_len        = 0;
++    sd_ctx->sd->loom_resume_next_step        = 0;
+ }
+ 
+ int32_t sd_loom_generate_image_v2(sd_ctx_t* sd_ctx,
+@@ -5991,6 +6024,10 @@ int32_t sd_loom_generate_image_v2(sd_ctx_t* sd_ctx,
+         params->strength <= 0.f ||
+         params->strength > 1.f ||
+         !sd_loom_valid_schedule_v2(params->sigmas, params->sigma_count) ||
++        !sd_loom_valid_resume(params->resume_state,
++                              params->resume_state_len,
++                              params->resume_next_step,
++                              params->sigma_count) ||
+         params->reference_image_count > 16 ||
+         params->lora_count > 32 ||
+         (params->reference_image_count > 0 && params->reference_images == nullptr) ||
+@@ -6081,6 +6118,9 @@ int32_t sd_loom_generate_image_v2(sd_ctx_t* sd_ctx,
+     sd_ctx->sd->loom_step_callback           = callback;
+     sd_ctx->sd->loom_step_callback_data      = callback_data;
+     sd_ctx->sd->loom_step_status             = SD_LOOM_STATUS_OK;
++    sd_ctx->sd->loom_resume_state            = params->resume_state;
++    sd_ctx->sd->loom_resume_state_len        = params->resume_state_len;
++    sd_ctx->sd->loom_resume_next_step        = params->resume_next_step;
+ 
+     sd_image_t* images = nullptr;
+     int image_count    = 0;
+@@ -7332,6 +7372,9 @@ int32_t sd_loom_program_generate_image_v3(
+             reference_images.size(),
+             loras.data(),
+             loras.size(),
++            nullptr,
++            0,
++            0,
+         };
+ 
+         sd_loom_program_step_state_v3_t callback_state;

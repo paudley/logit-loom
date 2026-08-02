@@ -44,7 +44,7 @@ image lane
   logit-loom-diffusion-sdcpp
   ├─ logit-loom-executor
   ├─ logit-loom-diffusion
-  └─ companion ABI v1 + image ABI v2 + program ABI v3
+  └─ companion ABI v2 + image ABI v3 + program ABI v3
        + model-block ABI v4 + application ABI v5
        + Krea activation ABI v6
        → pinned stable-diffusion.cpp
@@ -133,8 +133,8 @@ component is a separate ordinary artifact; projection is not a hidden model
 load option.
 
 The stable-diffusion.cpp adapter supports only the exact catalogued MiniT2I and
-Krea 2 component layouts. It dynamically loads companion ABI version 1 plus
-the required image ABI version 2, program ABI version 3, model-block ABI
+Krea 2 component layouts. It dynamically loads companion ABI version 2 plus
+the required image ABI version 3, program ABI version 3, model-block ABI
 version 4, model-block application ABI version 5, and Krea activation ABI
 version 6 at the exact upstream commit recorded in ADR 0001. Before context
 creation it verifies component bytes, the library digest, required symbols,
@@ -193,16 +193,23 @@ and cleanup validation. The resident program retains one installed activation
 plan across same-session jobs and re-verifies every native input handle before
 reuse. Clearing the plan or session releases those inputs idempotently;
 uncertainty poisons the owner.
+Safe contract v9 and companion/image ABIs v2/v3 add exact native continuation
+from an authenticated post-Euler checkpoint. The native latent is initialized
+from the checkpoint and the Euler loop begins at its recorded next transition;
+completed denoise transitions are not replayed.
 Uninstalled model components/sites and every conditioning selector fail
 whole-program preflight. See
 [worker-local image execution](image-execution.md) for the support matrix and
 failure rules.
 
 `DiffusionCheckpoint` stores exact little-endian state bytes plus conservative
-lineage. Initial restore uses deterministic-prefix replay: rerun the exact
-plan and seed, require the recomputed post-step identity to match, restore the
-authenticated bytes, then branch. It does not skip earlier native work or
-permit a different schedule, conditioning input, artifact set, or backend.
+lineage. Native continuation authenticates the envelope, step range, and
+backend before entry. Native conditioning reconstructs the same plan, which
+must authenticate at the first resumed boundary before a result is accepted.
+The companion copies the finite checkpoint state into the latent and starts at
+the recorded next Euler transition. It does not replay completed denoise
+transitions or permit a different schedule, conditioning input, artifact set,
+or backend. Generation receipt v3 binds the exact parent checkpoint.
 
 `Sdcpp` has one owner and is neither `Send` nor `Sync`. Raw pointers and dynamic
 symbols remain private; the complete local unsafe contract is in the adapter's
