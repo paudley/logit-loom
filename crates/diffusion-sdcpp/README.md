@@ -46,6 +46,10 @@ intentionally explicit:
   checkpoint against the reconstructed plan and backend, initialize the native
   latent from its finite state, and begin at its exact next Euler transition.
   Completed denoise transitions are not replayed.
+- `ImagePlanExecutor::execute_checkpointed` applies direct continuation to a
+  whole-image plan. Suspension returns opaque same-runtime state and writes no
+  caller output; terminal completion binds every generation and observation
+  segment into the normal whole-plan receipt.
 
 `ImagePlanExecutor` implements the single-owner
 `LocalExecutor<ImageExecutionPlanV3>` boundary. It validates resident

@@ -89,10 +89,18 @@ performs these mechanics in order:
 
 Checkpoint receipts conservatively bind the native diffusion plan, backend
 identity, continuation position, and exact finite little-endian state bytes.
-Restore replays the deterministic prefix and fails on a plan, backend,
-position, shape, or state mismatch before checkpoint bytes are committed.
+Direct restore initializes that exact finite state and begins at its recorded
+next Euler transition. A plan, backend, position, shape, or state mismatch is
+rejected before checkpoint bytes are committed.
 Checkpoint envelopes are adapter-local, versioned, and authenticated; they are
 not a portable model format.
+
+The whole-image executor also exposes checkpoint-aware attempts for local
+schedulers. Terminal cancellation and resumable suspension are separate
+signals. Suspension captures post-intervention scheduler state, clears the
+native session, initializes no output route, and returns an opaque same-runtime
+continuation. Resume starts at the recorded next transition and the terminal
+receipt binds every generation and observation segment.
 
 The deterministic compositor validates all input/output lengths before its
 first write. All route payloads are preflighted before cleanup, and route

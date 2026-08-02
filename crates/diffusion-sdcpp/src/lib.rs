@@ -27,7 +27,8 @@ pub use contract::{
 };
 pub use error::{Error, Result};
 pub use execution::{
-    ArtifactPathResolver, ChannelBiasControlV1, ImagePlanExecutor,
+    ArtifactPathResolver, ChannelBiasControlV1, CheckpointSuspensionProbe,
+    CheckpointedImageExecution, ImagePlanContinuation, ImagePlanExecutor,
     ModelBlockResidualScaleControlV1, RejectArtifactPaths, channel_bias_schema_v1, lora_target_v1,
     model_block_residual_scale_schema_v1,
 };

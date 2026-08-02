@@ -18,9 +18,63 @@ use logit_loom_executor::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    AdvancedImageRequest, DiffusionCheckpoint, Error, ImageOutputSink, ImagePixels, ImageRequest,
-    LoraBinding, MAX_CHECKPOINT_ENVELOPE_BYTES, Result, Sdcpp, StepProgram,
+    AdvancedImageRequest, AdvancedProgramGenerationReceipt, DiffusionCheckpoint, Error,
+    ImageOutputSink, ImagePixels, ImageRequest, LoraBinding, MAX_CHECKPOINT_ENVELOPE_BYTES, Result,
+    Sdcpp, StepProgram,
 };
+
+/// Worker-local signal that distinguishes checkpoint suspension from terminal
+/// cancellation.
+///
+/// This is deliberately separate from [`CancellationProbe`]: existing
+/// executors that implement only terminal cancellation cannot accidentally
+/// claim that they retained resumable state.
+pub trait CheckpointSuspensionProbe {
+    /// Reports whether execution should stop at the next exact resumable
+    /// post-Euler boundary.
+    fn is_suspension_requested(&self) -> bool;
+}
+
+/// Opaque same-runtime continuation for one interrupted whole-image plan.
+///
+/// The scheduler state is an authenticated [`DiffusionCheckpoint`]. Remaining
+/// fields retain bounded receipt, observation, and caller-requested checkpoint
+/// lineage so a resumed execution can publish one exact terminal receipt
+/// without replaying completed transitions.
+#[derive(Clone, Debug)]
+pub struct ImagePlanContinuation {
+    plan: Digest,
+    backend: Digest,
+    session_epoch: u64,
+    scheduler: DiffusionCheckpoint,
+    lineage: PlanCheckpointLineage,
+    generation_segments: Vec<AdvancedProgramGenerationReceipt>,
+    observation_segments: Vec<Vec<Digest>>,
+}
+
+impl ImagePlanContinuation {
+    /// Returns the exact plan identity that owns this continuation.
+    pub const fn plan(&self) -> &Digest {
+        &self.plan
+    }
+
+    /// Returns the authenticated native scheduler checkpoint used for direct
+    /// continuation.
+    pub const fn scheduler_checkpoint(&self) -> &DiffusionCheckpoint {
+        &self.scheduler
+    }
+}
+
+/// Result of one checkpoint-aware whole-image execution attempt.
+#[derive(Clone, Debug)]
+pub enum CheckpointedImageExecution {
+    /// The plan reached one terminal receipt and initialized its declared
+    /// outputs as normal.
+    Terminal(Box<ImageExecutionReceiptV3>),
+    /// The plan stopped without publishing outputs and retained exact state for
+    /// same-runtime continuation.
+    Suspended(Box<ImagePlanContinuation>),
+}
 
 /// Resolves an already verified opaque artifact to a caller-managed path that
 /// the pinned native ABI can reopen synchronously.
@@ -344,6 +398,209 @@ impl<R> ImagePlanExecutor<R> {
 }
 
 impl<R: ArtifactPathResolver> ImagePlanExecutor<R> {
+    /// Executes or resumes a whole-image plan with exact scheduler checkpoint
+    /// suspension.
+    ///
+    /// A suspended attempt initializes no caller output. Its returned
+    /// continuation is valid only for the same plan and backend runtime. A
+    /// resumed attempt starts directly at `next_step`; completed Euler
+    /// transitions are never replayed.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for invalid bindings, foreign continuation state,
+    /// uncertain cleanup, native failure, or inconsistent segment lineage.
+    #[allow(clippy::too_many_lines)]
+    pub fn execute_checkpointed(
+        &mut self,
+        plan: &ImageExecutionPlanV3,
+        inputs: &[InputBuffer<'_>],
+        outputs: &mut [OutputBuffer<'_>],
+        cancellation: &dyn CancellationProbe,
+        suspension: &dyn CheckpointSuspensionProbe,
+        continuation: Option<ImagePlanContinuation>,
+    ) -> Result<CheckpointedImageExecution> {
+        plan.validate().map_err(logit_loom_diffusion::Error::from)?;
+        self.validate_bindings(plan)?;
+        validate_bound_inputs(&plan.primary, inputs)?;
+        validate_bound_outputs(plan, outputs)?;
+        validate_supported_mechanics(&plan.primary)?;
+
+        let bindings = self.runtime.execution_bindings()?;
+        let plan_digest = plan.digest().map_err(logit_loom_diffusion::Error::from)?;
+        if continuation.is_none() && cancellation.is_cancelled() {
+            return self
+                .execute_inner(plan, inputs, outputs, cancellation)
+                .map(Box::new)
+                .map(CheckpointedImageExecution::Terminal);
+        }
+
+        let (
+            session_epoch,
+            lineage,
+            mut generation_segments,
+            mut observation_segments,
+            scheduler_restore,
+        ) = if let Some(continuation) = continuation {
+            if continuation.plan != plan_digest || continuation.backend != bindings.backend {
+                return Err(Error::Incompatible(
+                    "whole-image continuation owner differs from the plan or backend".to_owned(),
+                ));
+            }
+            (
+                continuation.session_epoch,
+                continuation.lineage,
+                continuation.generation_segments,
+                continuation.observation_segments,
+                Some(continuation.scheduler),
+            )
+        } else {
+            let restore = plan
+                .checkpoint
+                .restore_from
+                .map(|slot| {
+                    let input = input_for_slot(&plan.primary, inputs, slot)?;
+                    DiffusionCheckpoint::from_envelope_bytes(input.bytes())
+                })
+                .transpose()?;
+            (
+                self.runtime.session_epoch(),
+                PlanCheckpointLineage {
+                    restore,
+                    ..PlanCheckpointLineage::default()
+                },
+                Vec::new(),
+                Vec::new(),
+                None,
+            )
+        };
+
+        let request = lower_request(&plan.primary, inputs, &mut self.artifact_paths)?;
+        let mut program = PlanProgram::checkpointed(
+            plan,
+            cancellation,
+            Some(suspension),
+            lineage,
+            scheduler_restore.clone(),
+            bindings.backend.clone(),
+        )?;
+        let image_len = rgb_len(plan.primary.width, plan.primary.height)?;
+        let mut primary_bytes = vec![0_u8; image_len];
+        let mut sink = PlanImageSink(&mut primary_bytes);
+        let generated = match scheduler_restore.as_ref() {
+            Some(checkpoint) => self.runtime.generate_advanced_program_from_checkpoint_to(
+                &request,
+                checkpoint,
+                &mut program,
+                &mut sink,
+            ),
+            None => self
+                .runtime
+                .generate_advanced_program_to(&request, &mut program, &mut sink),
+        }?;
+        validate_checkpointed_generation_segment(
+            generation_segments.last(),
+            &generated.receipt,
+            scheduler_restore.as_ref(),
+        )?;
+        let completed_steps = generated
+            .receipt
+            .generation
+            .steps
+            .last()
+            .and_then(|step| step.step_index.checked_add(1))
+            .ok_or_else(|| Error::Incompatible("native completed no Euler boundary".to_owned()))?;
+        let terminal = if generated.receipt.generation.stopped {
+            ImageTerminal::CancelledAfterStep {
+                step: completed_steps - 1,
+            }
+        } else {
+            ImageTerminal::Completed
+        };
+        program.validate_terminal(&terminal)?;
+        let scheduler_checkpoint = program.take_suspension_checkpoint();
+        let observations = program.finish_observations();
+        let (checkpoint_identities, checkpoint_envelope) = program.finish_checkpoints()?;
+        let lineage = program.into_lineage();
+        generation_segments.push(generated.receipt);
+        observation_segments.push(observations);
+
+        if matches!(terminal, ImageTerminal::CancelledAfterStep { .. })
+            && suspension.is_suspension_requested()
+            && !cancellation.is_cancelled()
+        {
+            let scheduler = scheduler_checkpoint.ok_or_else(|| {
+                Error::Poisoned(
+                    "whole-image suspension stopped without an exact scheduler checkpoint"
+                        .to_owned(),
+                )
+            })?;
+            self.runtime.clear_session()?;
+            return Ok(CheckpointedImageExecution::Suspended(Box::new(
+                ImagePlanContinuation {
+                    plan: plan_digest,
+                    backend: bindings.backend,
+                    session_epoch,
+                    scheduler,
+                    lineage,
+                    generation_segments,
+                    observation_segments,
+                },
+            )));
+        }
+        if scheduler_checkpoint.is_some() {
+            return Err(Error::Poisoned(
+                "whole-image terminal execution retained scheduler state".to_owned(),
+            ));
+        }
+
+        let primary_receipt = if generation_segments.len() == 1 {
+            Digest::of_serializable(
+                "sdcpp-advanced-program-generation-receipt-v1",
+                &generation_segments[0],
+            )
+        } else {
+            Digest::of_serializable(
+                "sdcpp-checkpointed-image-plan-generation-v1",
+                &generation_segments,
+            )
+        }
+        .map_err(logit_loom_diffusion::Error::from)?;
+        let observation_identities = finish_checkpointed_observations(&observation_segments)?;
+        let (composite_bytes, composite_receipts) =
+            execute_composites(plan, inputs, &primary_bytes)?;
+        let output_receipts = preflight_route_payloads(
+            plan,
+            inputs,
+            outputs,
+            &primary_bytes,
+            &composite_bytes,
+            checkpoint_envelope.as_deref(),
+        )?;
+        let receipt = self.finish_execution(
+            plan,
+            inputs,
+            outputs,
+            CompletedExecution {
+                primary_bytes,
+                composite_bytes,
+                composite_receipts,
+                checkpoint_envelope,
+                checkpoint_identities,
+                observation_identities,
+                output_receipts,
+                primary_receipt,
+                plan_digest,
+                backend: bindings.backend,
+                profile: bindings.profile,
+                session_epoch,
+                completed_steps,
+                terminal,
+            },
+        )?;
+        Ok(CheckpointedImageExecution::Terminal(Box::new(receipt)))
+    }
+
     fn execute_inner(
         &mut self,
         plan: &ImageExecutionPlanV3,
@@ -588,6 +845,13 @@ impl ImageOutputSink for PlanImageSink<'_> {
     }
 }
 
+#[derive(Clone, Debug, Default)]
+struct PlanCheckpointLineage {
+    restore: Option<DiffusionCheckpoint>,
+    restored: Option<logit_loom_diffusion::DiffusionCheckpointReceipt>,
+    captured: Option<DiffusionCheckpoint>,
+}
+
 struct PlanProgram<'a> {
     implementation: Digest,
     expected_schedule: logit_loom_diffusion::DiffusionSchedule,
@@ -596,13 +860,14 @@ struct PlanProgram<'a> {
     operators: Vec<OperatorInvocation>,
     observations: Vec<ObservationAccumulator>,
     checkpoint: ImageCheckpointPlan,
-    restore: Option<DiffusionCheckpoint>,
-    restored: bool,
-    captured: Option<DiffusionCheckpoint>,
+    lineage: PlanCheckpointLineage,
+    scheduler_restore: Option<DiffusionCheckpoint>,
+    suspension_checkpoint: Option<DiffusionCheckpoint>,
     pipeline: Option<Pipeline>,
     actual_plan: Option<DiffusionPlan>,
     backend: Digest,
     cancellation: &'a dyn CancellationProbe,
+    suspension: Option<&'a dyn CheckpointSuspensionProbe>,
 }
 
 impl<'a> PlanProgram<'a> {
@@ -610,6 +875,27 @@ impl<'a> PlanProgram<'a> {
         plan: &ImageExecutionPlanV3,
         cancellation: &'a dyn CancellationProbe,
         restore: Option<DiffusionCheckpoint>,
+        backend: Digest,
+    ) -> Result<Self> {
+        Self::checkpointed(
+            plan,
+            cancellation,
+            None,
+            PlanCheckpointLineage {
+                restore,
+                ..PlanCheckpointLineage::default()
+            },
+            None,
+            backend,
+        )
+    }
+
+    fn checkpointed(
+        plan: &ImageExecutionPlanV3,
+        cancellation: &'a dyn CancellationProbe,
+        suspension: Option<&'a dyn CheckpointSuspensionProbe>,
+        lineage: PlanCheckpointLineage,
+        scheduler_restore: Option<DiffusionCheckpoint>,
         backend: Digest,
     ) -> Result<Self> {
         let schedule = plan.primary.schedule.clone().ok_or_else(|| {
@@ -648,35 +934,47 @@ impl<'a> PlanProgram<'a> {
             operators: plan.primary.operators.clone(),
             observations,
             checkpoint: plan.checkpoint.clone(),
-            restore,
-            restored: false,
-            captured: None,
+            lineage,
+            scheduler_restore,
+            suspension_checkpoint: None,
             pipeline: None,
             actual_plan: None,
             backend,
             cancellation,
+            suspension,
         })
     }
 
     fn validate_terminal(&self, terminal: &ImageTerminal) -> Result<()> {
         if *terminal == ImageTerminal::Completed
-            && (self.checkpoint.restore_from.is_some() != self.restored
-                || self.checkpoint.capture_after_step.is_some() != self.captured.is_some())
+            && (self.checkpoint.restore_from.is_some() != self.lineage.restored.is_some()
+                || self.checkpoint.capture_after_step.is_some() != self.lineage.captured.is_some())
         {
             return Err(Error::Incompatible(
                 "completed execution did not reach every checkpoint boundary".to_owned(),
             ));
         }
         if let ImageTerminal::CancelledAfterStep { step } = terminal {
-            let restore_reached = self
+            let restore_next_step = self
+                .lineage
                 .restore
                 .as_ref()
-                .is_some_and(|checkpoint| checkpoint.receipt().next_step <= step.saturating_add(1));
+                .map(|checkpoint| checkpoint.receipt().next_step)
+                .or_else(|| {
+                    self.lineage
+                        .restored
+                        .as_ref()
+                        .map(|receipt| receipt.next_step)
+                });
+            let restore_reached =
+                restore_next_step.is_some_and(|next| next <= step.saturating_add(1));
             let capture_reached = self
                 .checkpoint
                 .capture_after_step
                 .is_some_and(|capture| capture <= *step);
-            if restore_reached != self.restored || capture_reached != self.captured.is_some() {
+            if restore_reached != self.lineage.restored.is_some()
+                || capture_reached != self.lineage.captured.is_some()
+            {
                 return Err(Error::Incompatible(
                     "cancelled execution checkpoint lineage differs from the reached boundary"
                         .to_owned(),
@@ -692,18 +990,14 @@ impl<'a> PlanProgram<'a> {
             .as_ref()
             .ok_or_else(|| Error::Incompatible("step program was not initialized".to_owned()))?;
         let mut identities = Vec::new();
-        if self.restored {
-            let checkpoint = self.restore.as_ref().ok_or_else(|| {
-                Error::Incompatible("checkpoint restoration accounting differs".to_owned())
-            })?;
+        if let Some(restored) = &self.lineage.restored {
             identities.push(
-                checkpoint
-                    .receipt()
+                restored
                     .digest_for(plan)
                     .map_err(logit_loom_diffusion::Error::from)?,
             );
         }
-        if let Some(checkpoint) = &self.captured {
+        if let Some(checkpoint) = &self.lineage.captured {
             identities.push(
                 checkpoint
                     .receipt()
@@ -712,6 +1006,7 @@ impl<'a> PlanProgram<'a> {
             );
         }
         let envelope = self
+            .lineage
             .captured
             .as_ref()
             .map(DiffusionCheckpoint::to_envelope_bytes)
@@ -724,6 +1019,14 @@ impl<'a> PlanProgram<'a> {
             .iter()
             .map(ObservationAccumulator::finish)
             .collect()
+    }
+
+    fn take_suspension_checkpoint(&mut self) -> Option<DiffusionCheckpoint> {
+        self.suspension_checkpoint.take()
+    }
+
+    fn into_lineage(self) -> PlanCheckpointLineage {
+        self.lineage
     }
 }
 
@@ -741,13 +1044,22 @@ impl StepProgram for PlanProgram<'_> {
                 "native schedule, RNG, or seed differs from the whole-image plan".to_owned(),
             );
         }
-        if let Some(checkpoint) = &self.restore {
+        if let Some(checkpoint) = &self.lineage.restore {
             checkpoint
                 .receipt()
                 .validate_for(plan)
                 .map_err(|error| error.to_string())?;
             if checkpoint.receipt().backend != self.backend {
                 return Err("checkpoint backend identity differs".to_owned());
+            }
+        }
+        if let Some(checkpoint) = &self.scheduler_restore {
+            checkpoint
+                .receipt()
+                .validate_for(plan)
+                .map_err(|error| error.to_string())?;
+            if checkpoint.receipt().backend != self.backend {
+                return Err("scheduler checkpoint backend identity differs".to_owned());
             }
         }
         let mut stages: Vec<Box<dyn Intervention>> = Vec::with_capacity(self.operators.len());
@@ -780,22 +1092,23 @@ impl StepProgram for PlanProgram<'_> {
             .actual_plan
             .as_ref()
             .ok_or_else(|| "step program was not initialized".to_owned())?;
-        if let Some(checkpoint) = &self.restore
+        if let Some(checkpoint) = &self.lineage.restore
             && checkpoint.receipt().next_step == context.step_index.saturating_add(1)
         {
-            if self.restored {
+            if self.lineage.restored.is_some() {
                 return Err("checkpoint restore boundary repeated".to_owned());
             }
             checkpoint
                 .restore(plan, &self.backend, context, state)
                 .map_err(|error| error.to_string())?;
-            self.restored = true;
+            self.lineage.restored = Some(checkpoint.receipt().clone());
+            self.lineage.restore = None;
         }
         if self.checkpoint.capture_after_step == Some(context.step_index) {
-            if self.captured.is_some() {
+            if self.lineage.captured.is_some() {
                 return Err("checkpoint capture boundary repeated".to_owned());
             }
-            self.captured = Some(
+            self.lineage.captured = Some(
                 DiffusionCheckpoint::capture(plan, &self.backend, context, state)
                     .map_err(|error| error.to_string())?,
             );
@@ -816,11 +1129,33 @@ impl StepProgram for PlanProgram<'_> {
         for observation in &mut self.observations {
             observation.record(context, state)?;
         }
-        Ok(if self.cancellation.is_cancelled() {
-            ControlFlow::Stop
-        } else {
-            ControlFlow::Continue
-        })
+        if self.cancellation.is_cancelled() {
+            return Ok(ControlFlow::Stop);
+        }
+        if self
+            .suspension
+            .is_some_and(CheckpointSuspensionProbe::is_suspension_requested)
+        {
+            let plan = self
+                .actual_plan
+                .as_ref()
+                .ok_or_else(|| "step program was not initialized".to_owned())?;
+            let next_step = usize::try_from(context.step_index)
+                .ok()
+                .and_then(|step| step.checked_add(1))
+                .ok_or_else(|| "scheduler checkpoint step overflowed".to_owned())?;
+            if next_step < plan.schedule.steps() {
+                if self.suspension_checkpoint.is_some() {
+                    return Err("scheduler checkpoint boundary repeated".to_owned());
+                }
+                self.suspension_checkpoint = Some(
+                    DiffusionCheckpoint::capture(plan, &self.backend, context, state)
+                        .map_err(|error| error.to_string())?,
+                );
+                return Ok(ControlFlow::Stop);
+            }
+        }
+        Ok(ControlFlow::Continue)
     }
 }
 
@@ -1438,6 +1773,68 @@ fn rgb_len(width: u32, height: u32) -> Result<usize> {
         .ok_or_else(|| Error::Invalid("RGB8 canvas length overflowed".to_owned()))
 }
 
+fn validate_checkpointed_generation_segment(
+    prefix: Option<&AdvancedProgramGenerationReceipt>,
+    continuation: &AdvancedProgramGenerationReceipt,
+    restored: Option<&DiffusionCheckpoint>,
+) -> Result<()> {
+    match (prefix, restored) {
+        (None, None) if continuation.generation.resumed_from.is_none() => Ok(()),
+        (Some(prefix), Some(restored))
+            if continuation.generation.resumed_from.as_ref() == Some(restored.receipt())
+                && prefix.request == continuation.request
+                && prefix.generation.profile == continuation.generation.profile
+                && prefix.generation.native == continuation.generation.native
+                && prefix.generation.request == continuation.generation.request
+                && prefix.generation.plan == continuation.generation.plan
+                && prefix.generation.program == continuation.generation.program
+                && prefix
+                    .generation
+                    .steps
+                    .last()
+                    .and_then(|step| step.step_index.checked_add(1))
+                    == Some(restored.receipt().next_step)
+                && continuation
+                    .generation
+                    .steps
+                    .first()
+                    .is_some_and(|step| step.step_index == restored.receipt().next_step) =>
+        {
+            Ok(())
+        }
+        _ => Err(Error::Incompatible(
+            "whole-image continuation segment lineage differs".to_owned(),
+        )),
+    }
+}
+
+fn finish_checkpointed_observations(segments: &[Vec<Digest>]) -> Result<Vec<Digest>> {
+    let Some(first) = segments.first() else {
+        return Err(Error::Incompatible(
+            "whole-image execution has no observation segment".to_owned(),
+        ));
+    };
+    if segments.iter().any(|segment| segment.len() != first.len()) {
+        return Err(Error::Incompatible(
+            "whole-image observation segment arity differs".to_owned(),
+        ));
+    }
+    if segments.len() == 1 {
+        return Ok(first.clone());
+    }
+    (0..first.len())
+        .map(|observation| {
+            let lineage = segments
+                .iter()
+                .map(|segment| segment[observation].clone())
+                .collect::<Vec<_>>();
+            Digest::of_serializable("sdcpp-checkpointed-plan-observation-v1", &lineage)
+                .map_err(logit_loom_diffusion::Error::from)
+                .map_err(Into::into)
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use std::{
@@ -1810,6 +2207,66 @@ mod tests {
             stopped.finish_observations(),
             continued.finish_observations()
         );
+    }
+
+    #[test]
+    fn checkpointed_plan_suspends_with_exact_post_intervention_state() {
+        struct Suspend(AtomicBool);
+
+        impl CheckpointSuspensionProbe for Suspend {
+            fn is_suspension_requested(&self) -> bool {
+                self.0.load(Ordering::Acquire)
+            }
+        }
+
+        let mut native = diffusion_plan();
+        native.schedule = DiffusionSchedule::new(
+            Digest::of_bytes("schedule", b"checkpointed-plan"),
+            vec![2.0, 1.0, 0.0],
+        )
+        .unwrap();
+        let plan = image_plan(&native, ImageCheckpointPlan::default(), Vec::new());
+        let backend = Digest::of_bytes("backend", b"checkpointed-plan");
+        let suspension = Suspend(AtomicBool::new(true));
+        let mut program = PlanProgram::checkpointed(
+            &plan,
+            &NeverCancel,
+            Some(&suspension),
+            PlanCheckpointLineage::default(),
+            None,
+            backend.clone(),
+        )
+        .unwrap();
+        program.begin(&native).unwrap();
+        let context = StepContext::for_plan(&native, 0).unwrap();
+        let mut state = [0.0, 1.0, 2.0, 3.0];
+        program.intervene(&context, &mut state).unwrap();
+        assert_eq!(
+            program.observe(&context, &state).unwrap(),
+            ControlFlow::Stop
+        );
+        let checkpoint = program.take_suspension_checkpoint().unwrap();
+        assert_eq!(checkpoint.receipt().next_step, 1);
+        assert_eq!(checkpoint.receipt().backend, backend);
+        let expected = state
+            .iter()
+            .flat_map(|value| value.to_bits().to_le_bytes())
+            .collect::<Vec<_>>();
+        assert_eq!(checkpoint.state_bytes(), expected);
+    }
+
+    #[test]
+    fn checkpointed_observations_bind_segments_without_changing_one_segment() {
+        let first = vec![Digest::of_bytes("observation", b"first")];
+        let second = vec![Digest::of_bytes("observation", b"second")];
+        assert_eq!(
+            finish_checkpointed_observations(std::slice::from_ref(&first)).unwrap(),
+            first
+        );
+        let combined = finish_checkpointed_observations(&[first.clone(), second]).unwrap();
+        assert_eq!(combined.len(), 1);
+        assert_ne!(combined, first);
+        assert!(finish_checkpointed_observations(&[first, Vec::new()]).is_err());
     }
 
     #[test]

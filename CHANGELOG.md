@@ -50,6 +50,10 @@ include breaking API changes.
   checkpoints. The companion initializes the latent from the captured finite
   state and begins at the recorded next transition, so completed denoise steps
   are not replayed.
+- Checkpoint-aware whole-image execution that distinguishes terminal
+  cancellation from scheduler suspension, publishes no output while
+  suspended, resumes directly at the authenticated next Euler transition, and
+  binds all generation and observation segments into one terminal receipt.
 - Version-two whole-image plans and stable-diffusion.cpp lowering for
   authenticated checkpoint envelopes, installed scheduler-state operators,
   observations, exact post-step cancellation, bounded deterministic RGB8
