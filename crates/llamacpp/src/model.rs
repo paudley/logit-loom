@@ -271,7 +271,7 @@ impl Model {
     pub fn load_authorized(
         runtime: &Runtime,
         path: impl AsRef<Path>,
-        artifact: AuthorizedModelArtifact,
+        artifact: &AuthorizedModelArtifact,
         options: ModelOptions,
     ) -> Result<Self, Error> {
         validate_model_options(options)?;
@@ -533,11 +533,11 @@ fn model_artifact_digest(content_blake3: [u8; 32]) -> Digest {
     Digest::of_bytes(MODEL_ARTIFACT_DOMAIN, &content_blake3)
 }
 
-fn verify_artifact_length(path: &Path, expected: u64) -> Result<(), Error> {
+pub(crate) fn verify_artifact_length(path: &Path, expected: u64) -> Result<(), Error> {
     let actual = std::fs::metadata(path)?.len();
     if actual != expected {
         return Err(Error::Incompatible(format!(
-            "preverified model length differs: expected {expected}, observed {actual}"
+            "authorized artifact length differs: expected {expected}, observed {actual}"
         )));
     }
     Ok(())

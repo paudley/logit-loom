@@ -49,8 +49,9 @@ Preserve these unless a design change is explicitly reviewed:
 6. A `Session` has one owner and is deliberately neither `Send` nor `Sync`.
 7. Steering is explicitly scoped. Cleanup failure poisons the session instead
    of silently continuing with unknown native state.
-8. Checkpoints are bound to model bytes and a conservative backend build
-   identity. Native state bytes are opaque, not a portable file format.
+8. Checkpoints are bound to the caller-authorized model generation and a
+   conservative backend build identity. Native state bytes are opaque, not a
+   portable file format.
 9. Plans and receipts describe mechanics and lineage. They are not evidence of
    semantic correctness or efficacy.
 10. Public inputs are bounded and validated before allocation or native calls.
@@ -88,7 +89,8 @@ inference.
 - Prefer typed errors and checked conversions over panics or lossy casts.
 - Keep public contracts small, serializable, and backend-neutral when possible.
 - Put native types only in adapter crates.
-- Use content identities for artifacts and exact execution contracts.
+- Use explicit caller-authorized identities for artifacts and exact execution
+  contracts; do not silently infer identity from mutable paths.
 - State ordering, inclusivity, causal timing, and failure behavior in docs.
 - Avoid convenience APIs that hide state mutation or native fallback.
 - Do not expose raw pointers from the public API.

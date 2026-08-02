@@ -13,8 +13,42 @@ use logit_loom::{
 use crate::{
     Error, Model, Session,
     error::native,
-    model::{LORA_ARTIFACT_DOMAIN, digest_file},
+    model::{LORA_ARTIFACT_DOMAIN, digest_file, verify_artifact_length},
 };
+
+/// Provider-owned identity and exact length for an immutable `LoRA` artifact.
+///
+/// This contract is for a local model authority that has already authenticated
+/// and sealed the adapter and deliberately avoids another payload hash during
+/// native loading.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AuthorizedLoraArtifact {
+    identity: Digest,
+    byte_length: u64,
+}
+
+impl AuthorizedLoraArtifact {
+    /// Binds one provider-owned adapter identity and exact byte length.
+    #[must_use]
+    pub const fn new(identity: Digest, byte_length: u64) -> Self {
+        Self {
+            identity,
+            byte_length,
+        }
+    }
+
+    /// Returns the provider-owned adapter identity.
+    #[must_use]
+    pub const fn identity(&self) -> &Digest {
+        &self.identity
+    }
+
+    /// Returns the provider-authorized exact byte length.
+    #[must_use]
+    pub const fn byte_length(&self) -> u64 {
+        self.byte_length
+    }
+}
 
 /// Loaded model-compatible `LoRA` adapter.
 pub struct LoraAdapter {
@@ -78,6 +112,31 @@ impl Model {
             ));
         }
         Ok(LoraAdapter { native, artifact })
+    }
+
+    /// Loads an immutable `LoRA` under a provider-owned identity and length.
+    ///
+    /// Unlike [`Self::load_lora`], this path never hashes adapter payload
+    /// bytes. The provider must authenticate and seal the object before this
+    /// call, keep it immutable throughout the native load, and assign a new
+    /// identity to every replacement.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I/O, length, or native compatibility error.
+    pub fn load_lora_authorized(
+        &self,
+        path: impl AsRef<Path>,
+        artifact: AuthorizedLoraArtifact,
+    ) -> Result<LoraAdapter, Error> {
+        let path = path.as_ref();
+        verify_artifact_length(path, artifact.byte_length())?;
+        let native = self.native.lora_adapter_init(path).map_err(native)?;
+        verify_artifact_length(path, artifact.byte_length())?;
+        Ok(LoraAdapter {
+            native,
+            artifact: artifact.identity,
+        })
     }
 }
 
@@ -769,5 +828,13 @@ mod tests {
         assert!(ControlVector::new(vec![f32::NAN, 0.0], 2, 1, 1).is_err());
         assert!(ControlVector::new(vec![0.0, 1.0, 2.0], 2, 1, 1).is_err());
         assert!(ControlVector::new(vec![0.0, 1.0], 2, 0, 1).is_err());
+    }
+
+    #[test]
+    fn authorized_lora_preserves_provider_identity_without_payload() {
+        let identity = Digest::of_bytes("provider-artifact-id-v1", b"text-lora-one");
+        let artifact = AuthorizedLoraArtifact::new(identity.clone(), 4_194_304);
+        assert_eq!(artifact.identity(), &identity);
+        assert_eq!(artifact.byte_length(), 4_194_304);
     }
 }

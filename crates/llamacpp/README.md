@@ -62,13 +62,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-Local resource authorities that have already streamed an exact GGUF into an
-immutable sealed descriptor may use `Model::load_preverified` with a
-`PreverifiedModelArtifact`. That path preserves the ordinary model identity
-while avoiding another whole-file digest pass. Its caller must supply the raw
-BLAKE3 digest and exact length and keep the verified immutable object alive for
-the complete load. Mutable and ordinary filesystem paths must continue to use
-`Model::load`, which verifies the file before and after native loading.
+Local resource authorities may avoid whole-file digest passes for immutable
+sealed artifacts. `Model::load_preverified` accepts a caller-established
+BLAKE3 identity, while `Model::load_authorized` accepts a provider-owned stable
+generation identity and exact length without hashing model payload bytes.
+`Model::load_lora_authorized` provides the same provider-owned boundary for an
+already authenticated and sealed `LoRA`. Mutable and ordinary filesystem paths
+continue to use `Model::load` and `Model::load_lora`, which verify content
+before and after native loading.
 
 Generated pieces remain arbitrary bytes. Call `GenerationOutput::text` only
 when the complete output is expected to be valid UTF-8.

@@ -330,14 +330,14 @@ when their bytes happen to match. The adapter hashes each file before and after
 native loading and rejects an ordinary concurrent modification; callers should
 still treat artifact paths as immutable for the complete load.
 
-`logit-loom-llamacpp` also exposes a narrow preverified model-load contract for
-local resource authorities that already own complete BLAKE3 verification and
-immutable sealed-descriptor lifecycle. The caller supplies the raw content
-digest and exact byte length; Logit Loom preserves the ordinary model artifact
-identity and checks the length around native loading without rereading the
-entire artifact. This does not weaken or replace the ordinary path contract:
-mutable and otherwise unverified paths retain before-and-after content
-verification.
+`logit-loom-llamacpp` also exposes narrow provider-authorized model and `LoRA`
+load contracts for local resource authorities that own authentication and an
+immutable sealed-descriptor lifecycle. The caller supplies a stable artifact
+identity and exact byte length; Logit Loom checks length around native loading
+without rereading the entire payload. `Model::load_preverified` remains
+available when the authority already has a raw BLAKE3 model digest. These paths
+do not weaken or replace the ordinary path contract: mutable and otherwise
+unverified paths retain before-and-after content verification.
 Control vectors are checked before application for finite values, model
 embedding width, complete rows for layers `1..n_layer`, and an inclusive layer
 range within the model. Layer zero is not steerable.

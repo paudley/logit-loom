@@ -35,7 +35,8 @@ pub use speculation::{
     speculation_implementation_identity,
 };
 pub use steering::{
-    ControlVector, ControlVectorScope, LoraAdapter, LoraApplication, LoraScope, SteeringScope,
+    AuthorizedLoraArtifact, ControlVector, ControlVectorScope, LoraAdapter, LoraApplication,
+    LoraScope, SteeringScope,
 };
 pub use structured::{
     ByteFeedback, ByteFeedbackCandidate, ByteFeedbackError, InstalledByteFeedback,
