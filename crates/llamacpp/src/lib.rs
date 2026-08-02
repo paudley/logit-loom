@@ -23,8 +23,8 @@ pub use mechanics::{
     TextMechanicsOutput, TextMechanicsRequest, TextMechanicsResume, execute_text_mechanics,
 };
 pub use model::{
-    DevicePolicy, MAX_TOKENIZATION_BYTES, Model, ModelOptions, PreverifiedModelArtifact, Runtime,
-    Tokenization,
+    AuthorizedModelArtifact, DevicePolicy, MAX_TOKENIZATION_BYTES, Model, ModelOptions,
+    PreverifiedModelArtifact, Runtime, Tokenization,
 };
 pub use session::{GenerationOutput, PrefillOutput, Session, SessionOptions, StateSnapshot};
 pub use speculation::{

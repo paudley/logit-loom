@@ -108,6 +108,40 @@ pub struct PreverifiedModelArtifact {
     byte_length: u64,
 }
 
+/// Provider-owned identity and exact length for an immutable model artifact.
+///
+/// This contract is for a local model authority that deliberately identifies
+/// model generations without hashing model payload bytes. The provider must
+/// keep the named object immutable for the complete native load.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AuthorizedModelArtifact {
+    identity: Digest,
+    byte_length: u64,
+}
+
+impl AuthorizedModelArtifact {
+    /// Binds one provider-owned model identity and exact byte length.
+    #[must_use]
+    pub const fn new(identity: Digest, byte_length: u64) -> Self {
+        Self {
+            identity,
+            byte_length,
+        }
+    }
+
+    /// Returns the provider-owned model identity.
+    #[must_use]
+    pub const fn identity(&self) -> &Digest {
+        &self.identity
+    }
+
+    /// Returns the provider-authorized exact byte length.
+    #[must_use]
+    pub const fn byte_length(&self) -> u64 {
+        self.byte_length
+    }
+}
+
 impl PreverifiedModelArtifact {
     /// Binds an exact BLAKE3 content digest and byte length.
     #[must_use]
@@ -220,6 +254,30 @@ impl Model {
         let path = path.as_ref();
         verify_artifact_length(path, artifact.byte_length())?;
         let model = Self::load_with_artifact(runtime, path, options, artifact.artifact_digest())?;
+        verify_artifact_length(path, artifact.byte_length())?;
+        Ok(model)
+    }
+
+    /// Loads an immutable GGUF under a provider-owned identity and length.
+    ///
+    /// Unlike [`Self::load`] and [`Self::load_preverified`], this path never
+    /// hashes model payload bytes. The provider is responsible for assigning a
+    /// new identity to every replacement and for keeping the supplied object
+    /// immutable throughout this call.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I/O, length, native load, or placement error.
+    pub fn load_authorized(
+        runtime: &Runtime,
+        path: impl AsRef<Path>,
+        artifact: AuthorizedModelArtifact,
+        options: ModelOptions,
+    ) -> Result<Self, Error> {
+        validate_model_options(options)?;
+        let path = path.as_ref();
+        verify_artifact_length(path, artifact.byte_length())?;
+        let model = Self::load_with_artifact(runtime, path, options, artifact.identity().clone())?;
         verify_artifact_length(path, artifact.byte_length())?;
         Ok(model)
     }
@@ -642,6 +700,14 @@ mod tests {
         assert_eq!(preverified.artifact_digest(), streamed);
         assert_eq!(preverified.byte_length(), bytes.len() as u64);
         assert_eq!(preverified.content_blake3(), raw);
+    }
+
+    #[test]
+    fn authorized_artifact_preserves_provider_identity_without_payload() {
+        let identity = Digest::of_bytes("provider-artifact-id-v1", b"director-primary");
+        let artifact = AuthorizedModelArtifact::new(identity.clone(), 17_392_736_384);
+        assert_eq!(artifact.identity(), &identity);
+        assert_eq!(artifact.byte_length(), 17_392_736_384);
     }
 
     #[test]
