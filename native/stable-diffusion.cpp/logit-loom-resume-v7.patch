@@ -1,7 +1,7 @@
-diff --git a/include/stable-diffusion.h b/include/stable-diffusion.h
+diff --git include/stable-diffusion.h include/stable-diffusion.h
 index ff1e974..dbbe0ce 100644
---- a/include/stable-diffusion.h
-+++ b/include/stable-diffusion.h
+--- include/stable-diffusion.h
++++ include/stable-diffusion.h
 @@ -422,8 +422,8 @@ typedef bool (*sd_graph_eval_callback_t)(struct ggml_tensor* t, bool ask, void*
  
  // Logit Loom companion ABI. This surface is maintained by the Logit Loom
@@ -33,10 +33,10 @@ index ff1e974..dbbe0ce 100644
  } sd_loom_image_params_v2_t;
  
  typedef struct {
-diff --git a/src/runtime/denoiser.hpp b/src/runtime/denoiser.hpp
+diff --git src/runtime/denoiser.hpp src/runtime/denoiser.hpp
 index fb5bbfb..8dba2fd 100644
---- a/src/runtime/denoiser.hpp
-+++ b/src/runtime/denoiser.hpp
+--- src/runtime/denoiser.hpp
++++ src/runtime/denoiser.hpp
 @@ -1561,9 +1561,27 @@ static sd::Tensor<float> sample_euler(denoise_cb_t model,
                                        const std::vector<float>& sigmas,
                                        sd_loom_step_cb_v1_t step_callback,
@@ -91,10 +91,10 @@ index fb5bbfb..8dba2fd 100644
          case HEUN_SAMPLE_METHOD:
              return sample_heun(model, std::move(x), sigmas);
          case DPM2_SAMPLE_METHOD:
-diff --git a/src/stable-diffusion.cpp b/src/stable-diffusion.cpp
+diff --git src/stable-diffusion.cpp src/stable-diffusion.cpp
 index 09fe8f8..3d1b648 100644
---- a/src/stable-diffusion.cpp
-+++ b/src/stable-diffusion.cpp
+--- src/stable-diffusion.cpp
++++ src/stable-diffusion.cpp
 @@ -235,6 +235,9 @@ public:
      sd_loom_step_cb_v1_t loom_step_callback = nullptr;
      void* loom_step_callback_data            = nullptr;
