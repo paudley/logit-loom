@@ -54,6 +54,10 @@ include breaking API changes.
   cancellation from scheduler suspension, publishes no output while
   suspended, resumes directly at the authenticated next Euler transition, and
   binds all generation and observation segments into one terminal receipt.
+- Checkpoint-aware resident image-program execution with distinct suspension
+  probes, bounded authenticated live-value capture, confirmed arena teardown,
+  exact in-stage scheduler restoration, completed-prefix retention, and
+  output-free resume across multi-stage native and deterministic graphs.
 - Version-two whole-image plans and stable-diffusion.cpp lowering for
   authenticated checkpoint envelopes, installed scheduler-state operators,
   observations, exact post-step cancellation, bounded deterministic RGB8

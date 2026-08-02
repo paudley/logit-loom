@@ -42,13 +42,16 @@ pub use image::{
 pub use krea_activation::{KreaActivationExecutionV1, KreaActivationInputBuffer};
 pub use native_program::{
     RejectResidentArtifactPaths, ResidentArtifactPathResolver, SdcppResidentProgram,
+    SdcppResidentStageCheckpoint, SdcppResidentValueCheckpoint,
     resident_checkpoint_compatibility_v1, resident_checkpoint_conversion_v1,
     resident_lora_target_v1, resident_png_encoding_v1, resident_png_maximum_bytes_v1,
 };
 pub use program::{ForkProgram, PipelineProgram};
 pub use resident::{
-    ResidentImageProgramBackend, ResidentImageProgramDriver, ResidentImageProgramExecution,
+    CheckpointedResidentImageProgramExecution, ResidentImageProgramBackend,
+    ResidentImageProgramContinuation, ResidentImageProgramDriver, ResidentImageProgramExecution,
     ResidentProgramCompletedStage, ResidentProgramFinish, ResidentProgramStageTerminal,
+    ResidentProgramValueCheckpoint,
 };
 pub use runtime::{Sdcpp, probe_companion};
 

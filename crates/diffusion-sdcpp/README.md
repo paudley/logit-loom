@@ -73,6 +73,17 @@ placement/transfer measurements, and poisoning on uncertainty. Model-free
 fake-arena tests exercise those mechanics without loading a companion library
 or model.
 
+`ResidentImageProgramDriver::execute_checkpointed` separately accepts a
+checkpoint-suspension probe. At a between-stage or post-Euler safe boundary it
+copies only still-live bounded logical values to backend-private host
+representations, retains the exact in-stage scheduler checkpoint when needed,
+confirms request-arena teardown, and returns an opaque continuation without
+publishing output. Resume reconstructs a fresh arena, authenticates every
+value against the original plan and content identity, restores the exact
+stage cursor, and preserves one terminal receipt across the completed prefix.
+Cancellation never fabricates a continuation, and capture, reconstruction, or
+cleanup uncertainty poisons the backend.
+
 `SdcppResidentProgram` implements that backend over the mandatory
 stable-diffusion.cpp program ABI v3, model-block ABI v4, and application ABI
 v5. Krea activation ABI v6 is also mandatory. One arena can
@@ -86,9 +97,10 @@ against the topology detected from the loaded weights; the adapter assigns no
 semantic role to a block. Native stages keep source images and masks
 canvas-bound while forwarding bounded reference images with their own exact
 RGB8/RGBA8 dimensions and bytes. PNG values bind decoded geometry, RGB or RGBA
-color, a deterministic encoder identity, and a bounded encoded length. Every
-intermediate remains behind a generation-checked native handle; cleanup
-uncertainty poisons the owner.
+color, a deterministic encoder identity, and a bounded encoded length. During
+active execution every native intermediate remains behind a generation-checked
+handle. A suspended continuation contains bounded authenticated host copies,
+never native handles; cleanup uncertainty poisons the owner.
 
 `SdcppResidentProgram::install_krea_activation` installs one complete
 topology-bound activation plan on the loaded runtime for its diffusion stage.

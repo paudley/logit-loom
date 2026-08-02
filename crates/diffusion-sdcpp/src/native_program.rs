@@ -25,10 +25,11 @@ use logit_loom_diffusion::{
 use logit_loom_executor::{CancellationProbe, ExecutorState, InputBuffer};
 
 use crate::{
-    ADAPTER_CONTRACT_VERSION, DiffusionCheckpoint, Error, ImageRequest, MODEL_BLOCK_ABI_VERSION,
-    ModelBlockApplicationV1, PROGRAM_ABI_VERSION, ResidentImageProgramBackend,
-    ResidentProgramCompletedStage, ResidentProgramFinish, ResidentProgramStageTerminal, Result,
-    Sdcpp, StepProgram, UPSTREAM_COMMIT,
+    ADAPTER_CONTRACT_VERSION, CheckpointSuspensionProbe, DiffusionCheckpoint, Error, ImageRequest,
+    MODEL_BLOCK_ABI_VERSION, ModelBlockApplicationV1, PROGRAM_ABI_VERSION,
+    ResidentImageProgramBackend, ResidentProgramCompletedStage, ResidentProgramFinish,
+    ResidentProgramStageTerminal, ResidentProgramValueCheckpoint, Result, Sdcpp, StepProgram,
+    UPSTREAM_COMMIT,
     contract::component_map,
     execution::{
         InstalledChannelBias, InstalledModelBlockResidualScale, ObservationAccumulator,
@@ -209,6 +210,7 @@ pub struct SdcppResidentProgram<'a, R = RejectResidentArtifactPaths> {
     checkpoint_states: HashMap<u16, DiffusionCheckpoint>,
     captured_states: HashMap<u16, CapturedState>,
     text_values: HashMap<u16, String>,
+    host_values: HashMap<u16, Vec<u8>>,
     krea_activation_executions: Vec<crate::KreaActivationExecutionV1>,
 }
 
@@ -251,6 +253,7 @@ impl<'a, R> SdcppResidentProgram<'a, R> {
             checkpoint_states: HashMap::new(),
             captured_states: HashMap::new(),
             text_values: HashMap::new(),
+            host_values: HashMap::new(),
             krea_activation_executions: Vec::new(),
         }
     }
@@ -355,7 +358,10 @@ impl<'a, R> SdcppResidentProgram<'a, R> {
     }
 
     fn insert_handle(&mut self, value: u16, handle: ValueHandleV3) -> Result<()> {
-        if handle.is_empty() || self.handles.insert(value, handle).is_some() {
+        if handle.is_empty()
+            || self.host_values.contains_key(&value)
+            || self.handles.insert(value, handle).is_some()
+        {
             return Err(Error::Incompatible(format!(
                 "resident value {value} was absent or published twice"
             )));
@@ -575,10 +581,51 @@ impl<R> SdcppResidentProgram<'_, R> {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct CapturedState {
     plan: DiffusionPlan,
     step: u32,
+}
+
+/// Exact scheduler continuation for one interrupted resident diffusion stage.
+#[derive(Clone, Debug)]
+pub struct SdcppResidentStageCheckpoint {
+    scheduler: DiffusionCheckpoint,
+}
+
+impl SdcppResidentStageCheckpoint {
+    /// Returns the first transition that remains to be executed.
+    #[must_use]
+    pub const fn next_step(&self) -> u32 {
+        self.scheduler.receipt().next_step
+    }
+}
+
+/// Bounded host representation of one resident value across arena teardown.
+#[derive(Clone, Debug)]
+pub struct SdcppResidentValueCheckpoint {
+    bytes: Vec<u8>,
+    kind: SdcppResidentValueCheckpointKind,
+}
+
+#[derive(Clone, Debug)]
+enum SdcppResidentValueCheckpointKind {
+    Utf8(String),
+    Image {
+        width: u32,
+        height: u32,
+        channels: u32,
+    },
+    Png,
+    Tensor {
+        shape: Vec<i64>,
+    },
+    Checkpoint(Box<DiffusionCheckpoint>),
+    CheckpointState {
+        shape: Vec<i64>,
+        restored: Option<Box<DiffusionCheckpoint>>,
+        captured: Option<Box<CapturedState>>,
+    },
 }
 
 enum PreparedInput {
@@ -618,21 +665,27 @@ struct ResidentStageProgram<'a> {
     expected_seed: u64,
     operators: Vec<logit_loom_diffusion::OperatorInvocation>,
     observations: Vec<ResidentObservation>,
-    restore: Option<DiffusionCheckpoint>,
-    restored: bool,
+    declared_restore: Option<DiffusionCheckpoint>,
+    declared_restored: bool,
+    continuation_restore: Option<DiffusionCheckpoint>,
+    continuation_restored: bool,
+    suspended: Option<DiffusionCheckpoint>,
     pipeline: Option<Pipeline>,
     actual_plan: Option<DiffusionPlan>,
     checkpoint_backend: Digest,
     cancellation: &'a dyn CancellationProbe,
+    suspension: &'a dyn CheckpointSuspensionProbe,
 }
 
 impl<'a> ResidentStageProgram<'a> {
     fn new(
         stage: &ImageProgramNativeStageV1,
         operation: Digest,
-        restore: Option<DiffusionCheckpoint>,
+        declared_restore: Option<DiffusionCheckpoint>,
+        continuation_restore: Option<DiffusionCheckpoint>,
         checkpoint_backend: Digest,
         cancellation: &'a dyn CancellationProbe,
+        suspension: &'a dyn CheckpointSuspensionProbe,
     ) -> Result<Self> {
         let expected_schedule = stage.schedule.clone().ok_or_else(|| {
             Error::Invalid("resident diffusion stage is missing its schedule".to_owned())
@@ -659,13 +712,21 @@ impl<'a> ResidentStageProgram<'a> {
             expected_seed,
             operators: stage.operators.clone(),
             observations,
-            restore,
-            restored: false,
+            declared_restore,
+            declared_restored: false,
+            continuation_restore,
+            continuation_restored: false,
+            suspended: None,
             pipeline: None,
             actual_plan: None,
             checkpoint_backend,
             cancellation,
+            suspension,
         })
+    }
+
+    fn take_suspension(&mut self) -> Option<DiffusionCheckpoint> {
+        self.suspended.take()
     }
 
     fn observation_receipts(&self, snapshot_contents: &[Digest]) -> Result<Vec<Digest>> {
@@ -701,7 +762,13 @@ impl StepProgram for ResidentStageProgram<'_> {
         {
             return Err("resident native schedule, RNG, or seed differs".to_owned());
         }
-        if let Some(checkpoint) = &self.restore {
+        for checkpoint in [
+            self.declared_restore.as_ref(),
+            self.continuation_restore.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
             checkpoint
                 .receipt()
                 .validate_for(plan)
@@ -745,21 +812,32 @@ impl StepProgram for ResidentStageProgram<'_> {
             .actual_plan
             .as_ref()
             .ok_or_else(|| "resident step program was not initialized".to_owned())?;
-        if let Some(checkpoint) = &self.restore
+        if let Some(checkpoint) = &self.declared_restore
             && checkpoint.receipt().next_step == context.step_index.saturating_add(1)
         {
-            if self.restored {
+            if self.declared_restored {
                 return Err("resident checkpoint restore boundary repeated".to_owned());
             }
             checkpoint
                 .restore(plan, &self.checkpoint_backend, context, state)
                 .map_err(|error| error.to_string())?;
-            self.restored = true;
+            self.declared_restored = true;
         }
         if let Some(pipeline) = &mut self.pipeline {
             pipeline
                 .apply(context, state)
                 .map_err(|error| error.to_string())?;
+        }
+        if let Some(checkpoint) = &self.continuation_restore
+            && checkpoint.receipt().next_step == context.step_index.saturating_add(1)
+        {
+            if self.continuation_restored {
+                return Err("resident continuation restore boundary repeated".to_owned());
+            }
+            checkpoint
+                .restore(plan, &self.checkpoint_backend, context, state)
+                .map_err(|error| error.to_string())?;
+            self.continuation_restored = true;
         }
         Ok(())
     }
@@ -774,15 +852,28 @@ impl StepProgram for ResidentStageProgram<'_> {
                 accumulator.record(context, state)?;
             }
         }
-        Ok(if self.cancellation.is_cancelled() {
-            ControlFlow::Stop
-        } else {
-            ControlFlow::Continue
-        })
+        if self.cancellation.is_cancelled() {
+            return Ok(ControlFlow::Stop);
+        }
+        if self.suspension.is_suspension_requested() {
+            let plan = self
+                .actual_plan
+                .as_ref()
+                .ok_or_else(|| "resident step program was not initialized".to_owned())?;
+            self.suspended = Some(
+                DiffusionCheckpoint::capture(plan, &self.checkpoint_backend, context, state)
+                    .map_err(|error| error.to_string())?,
+            );
+            return Ok(ControlFlow::Stop);
+        }
+        Ok(ControlFlow::Continue)
     }
 }
 
 impl<R: ResidentArtifactPathResolver> ResidentImageProgramBackend for SdcppResidentProgram<'_, R> {
+    type StageCheckpoint = SdcppResidentStageCheckpoint;
+    type ValueCheckpoint = SdcppResidentValueCheckpoint;
+
     fn backend_identity(&self) -> Result<Digest> {
         resident_backend_identity(self.runtime)
     }
@@ -848,6 +939,7 @@ impl<R: ResidentArtifactPathResolver> ResidentImageProgramBackend for SdcppResid
         self.checkpoint_states.clear();
         self.captured_states.clear();
         self.text_values.clear();
+        self.host_values.clear();
 
         let mut measurements = Vec::with_capacity(prepared.len());
         for (value, input) in prepared {
@@ -863,12 +955,23 @@ impl<R: ResidentArtifactPathResolver> ResidentImageProgramBackend for SdcppResid
         plan: &ImageProgramPlanV1,
         stage: &ImageProgramStageV1,
         cancellation: &dyn CancellationProbe,
-    ) -> Result<ResidentProgramStageTerminal> {
+        suspension: &dyn CheckpointSuspensionProbe,
+        checkpoint: Option<Self::StageCheckpoint>,
+    ) -> Result<ResidentProgramStageTerminal<Self::StageCheckpoint>> {
         let started = Instant::now();
-        let execution = match self.execute_stage_operation(plan, stage, cancellation)? {
+        let execution = match self.execute_stage_operation(
+            plan,
+            stage,
+            cancellation,
+            suspension,
+            checkpoint,
+        )? {
             StageOperationOutcome::Completed(execution) => execution,
             StageOperationOutcome::Cancelled { step } => {
                 return Ok(ResidentProgramStageTerminal::CancelledAfterStep { step });
+            }
+            StageOperationOutcome::Suspended { step, checkpoint } => {
+                return Ok(ResidentProgramStageTerminal::SuspendedAfterStep { step, checkpoint });
             }
         };
         let (receipts, measurements) = self.receipts_for_values(plan, &execution.outputs)?;
@@ -892,16 +995,48 @@ impl<R: ResidentArtifactPathResolver> ResidentImageProgramBackend for SdcppResid
         ))
     }
 
+    fn checkpoint_value(
+        &mut self,
+        plan: &ImageProgramPlanV1,
+        value: u16,
+    ) -> Result<ResidentProgramValueCheckpoint<Self::ValueCheckpoint>> {
+        self.capture_value_checkpoint(plan, value)
+    }
+
+    fn restore_value(
+        &mut self,
+        plan: &ImageProgramPlanV1,
+        checkpoint: ResidentProgramValueCheckpoint<Self::ValueCheckpoint>,
+    ) -> Result<ImageProgramValueMeasurementV1> {
+        self.restore_value_checkpoint(plan, checkpoint)
+    }
+
     fn materialize_value(
         &mut self,
         _plan: &ImageProgramPlanV1,
         value: u16,
         output: &mut [u8],
     ) -> Result<usize> {
+        if let Some(bytes) = self.host_values.get(&value) {
+            if bytes.len() > output.len() {
+                return Err(Error::Output(
+                    "resident caller-owned output allocation is undersized".to_owned(),
+                ));
+            }
+            output[..bytes.len()].copy_from_slice(bytes);
+            return Ok(bytes.len());
+        }
         self.copy_handle_into(self.handle(value)?, output)
     }
 
     fn release_value(&mut self, value: u16) -> Result<()> {
+        if self.host_values.remove(&value).is_some() {
+            self.input_checkpoints.remove(&value);
+            self.checkpoint_states.remove(&value);
+            self.captured_states.remove(&value);
+            self.text_values.remove(&value);
+            return Ok(());
+        }
         let handle = self
             .handles
             .remove(&value)
@@ -944,6 +1079,7 @@ impl<R: ResidentArtifactPathResolver> ResidentImageProgramBackend for SdcppResid
         self.checkpoint_states.clear();
         self.captured_states.clear();
         self.text_values.clear();
+        self.host_values.clear();
         if status != ffi::STATUS_OK {
             self.runtime.state = ExecutorState::Poisoned;
             return Err(Error::Poisoned(format!(
@@ -988,6 +1124,7 @@ impl<R: ResidentArtifactPathResolver> ResidentImageProgramBackend for SdcppResid
         self.checkpoint_states.clear();
         self.captured_states.clear();
         self.text_values.clear();
+        self.host_values.clear();
         self.runtime.krea_activation.take();
         self.runtime.state = ExecutorState::Poisoned;
     }
@@ -999,12 +1136,21 @@ impl<R: ResidentArtifactPathResolver> SdcppResidentProgram<'_, R> {
         plan: &ImageProgramPlanV1,
         stage: &ImageProgramStageV1,
         cancellation: &dyn CancellationProbe,
+        suspension: &dyn CheckpointSuspensionProbe,
+        checkpoint: Option<SdcppResidentStageCheckpoint>,
     ) -> Result<StageOperationOutcome> {
         let execution = match &stage.operation {
             ImageProgramStageOperationV1::Native { plan: native }
                 if uses_diffusion(native.operation) =>
             {
-                return match self.execute_diffusion_stage(plan, stage, native, cancellation)? {
+                return match self.execute_diffusion_stage(
+                    plan,
+                    stage,
+                    native,
+                    cancellation,
+                    suspension,
+                    checkpoint,
+                )? {
                     NativeStageOutcome::Completed {
                         outputs,
                         observations,
@@ -1019,9 +1165,17 @@ impl<R: ResidentArtifactPathResolver> SdcppResidentProgram<'_, R> {
                     NativeStageOutcome::Cancelled { step } => {
                         Ok(StageOperationOutcome::Cancelled { step })
                     }
+                    NativeStageOutcome::Suspended { step, checkpoint } => {
+                        Ok(StageOperationOutcome::Suspended { step, checkpoint })
+                    }
                 };
             }
             ImageProgramStageOperationV1::Native { plan: native } => {
+                if checkpoint.is_some() {
+                    return Err(Error::Incompatible(
+                        "a diffusion continuation was supplied to a direct-VAE stage".to_owned(),
+                    ));
+                }
                 StageExecution::without_observations(self.execute_vae_stage(plan, native)?)
             }
             ImageProgramStageOperationV1::MaskBlend {
@@ -1029,9 +1183,14 @@ impl<R: ResidentArtifactPathResolver> SdcppResidentProgram<'_, R> {
                 overlay,
                 mask,
                 output,
-            } => StageExecution::without_observations(
-                self.execute_mask_blend(*base, *overlay, *mask, *output)?,
-            ),
+            } => StageExecution::without_observations({
+                if checkpoint.is_some() {
+                    return Err(Error::Incompatible(
+                        "a diffusion continuation was supplied to a mask-blend stage".to_owned(),
+                    ));
+                }
+                self.execute_mask_blend(*base, *overlay, *mask, *output)?
+            }),
             ImageProgramStageOperationV1::RestoreCheckpoint {
                 checkpoint, state, ..
             } => StageExecution::without_observations(
@@ -1114,7 +1273,268 @@ impl<R: ResidentArtifactPathResolver> SdcppResidentProgram<'_, R> {
         let envelope = checkpoint_value.to_envelope_bytes()?;
         let handle = self.import_bytes(&envelope)?;
         self.insert_handle(checkpoint, handle)?;
+        self.input_checkpoints.insert(checkpoint, checkpoint_value);
         Ok(vec![checkpoint])
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn capture_value_checkpoint(
+        &self,
+        plan: &ImageProgramPlanV1,
+        value: u16,
+    ) -> Result<ResidentProgramValueCheckpoint<SdcppResidentValueCheckpoint>> {
+        let specification = &plan
+            .values
+            .get(usize::from(value))
+            .ok_or_else(|| Error::Invalid(format!("resident value {value} is outside the plan")))?
+            .spec;
+        if let Some(bytes) = self.host_values.get(&value) {
+            if !matches!(specification, ImageProgramValueSpecV1::Png { .. }) {
+                return Err(Error::Incompatible(
+                    "only serialized PNG values may remain host-backed".to_owned(),
+                ));
+            }
+            return ResidentProgramValueCheckpoint::new(
+                value,
+                logit_loom_diffusion::image_program_value_content(bytes),
+                u64::try_from(bytes.len())
+                    .map_err(|_| Error::Invalid("resident value exceeds u64".to_owned()))?,
+                SdcppResidentValueCheckpoint {
+                    bytes: bytes.clone(),
+                    kind: SdcppResidentValueCheckpointKind::Png,
+                },
+            );
+        }
+
+        let handle = self.handle(value)?;
+        let descriptor = self.descriptor(handle)?;
+        validate_descriptor(specification, &descriptor)?;
+        let bytes = self.copy_handle(handle)?;
+        let content = logit_loom_diffusion::image_program_value_content(&bytes);
+        if self.content_digest(handle)? != content {
+            return Err(Error::Incompatible(
+                "resident checkpoint copy changed value identity".to_owned(),
+            ));
+        }
+        let rank = usize::try_from(descriptor.rank)
+            .map_err(|_| Error::Incompatible("resident value rank exceeds usize".to_owned()))?;
+        let shape = || {
+            descriptor
+                .shape
+                .get(..rank)
+                .ok_or_else(|| Error::Incompatible("resident value rank exceeds eight".to_owned()))
+                .map(<[i64]>::to_vec)
+        };
+        let kind = match specification {
+            ImageProgramValueSpecV1::Utf8 { .. } => {
+                let text = self.text_values.get(&value).cloned().ok_or_else(|| {
+                    Error::Incompatible("resident UTF-8 metadata is absent".to_owned())
+                })?;
+                if text.as_bytes() != bytes {
+                    return Err(Error::Incompatible(
+                        "resident UTF-8 metadata differs from its bytes".to_owned(),
+                    ));
+                }
+                SdcppResidentValueCheckpointKind::Utf8(text)
+            }
+            ImageProgramValueSpecV1::Rgb8 { width, height } => {
+                SdcppResidentValueCheckpointKind::Image {
+                    width: *width,
+                    height: *height,
+                    channels: 3,
+                }
+            }
+            ImageProgramValueSpecV1::Rgba8 { width, height } => {
+                SdcppResidentValueCheckpointKind::Image {
+                    width: *width,
+                    height: *height,
+                    channels: 4,
+                }
+            }
+            ImageProgramValueSpecV1::Gray8 { width, height } => {
+                SdcppResidentValueCheckpointKind::Image {
+                    width: *width,
+                    height: *height,
+                    channels: 1,
+                }
+            }
+            ImageProgramValueSpecV1::Png { .. } => SdcppResidentValueCheckpointKind::Png,
+            ImageProgramValueSpecV1::Tensor { .. } => {
+                SdcppResidentValueCheckpointKind::Tensor { shape: shape()? }
+            }
+            ImageProgramValueSpecV1::Checkpoint { .. } => {
+                let checkpoint = self.input_checkpoints.get(&value).cloned().ok_or_else(|| {
+                    Error::Incompatible("resident checkpoint metadata is absent".to_owned())
+                })?;
+                if checkpoint.to_envelope_bytes()? != bytes {
+                    return Err(Error::Incompatible(
+                        "resident checkpoint metadata differs from its envelope".to_owned(),
+                    ));
+                }
+                SdcppResidentValueCheckpointKind::Checkpoint(Box::new(checkpoint))
+            }
+            ImageProgramValueSpecV1::Opaque {
+                opaque_kind: ImageOpaqueValueKindV1::CheckpointState,
+                ..
+            } => {
+                let restored = self.checkpoint_states.get(&value).cloned().map(Box::new);
+                let captured = self.captured_states.get(&value).cloned().map(Box::new);
+                if restored.is_none() && captured.is_none() {
+                    return Err(Error::Incompatible(
+                        "resident checkpoint-state lineage is absent".to_owned(),
+                    ));
+                }
+                SdcppResidentValueCheckpointKind::CheckpointState {
+                    shape: shape()?,
+                    restored,
+                    captured,
+                }
+            }
+            ImageProgramValueSpecV1::Opaque {
+                opaque_kind:
+                    ImageOpaqueValueKindV1::LoraArtifact | ImageOpaqueValueKindV1::Conditioning,
+                ..
+            } => {
+                return Err(Error::Incompatible(
+                    "resident opaque artifact cannot be copied into a continuation".to_owned(),
+                ));
+            }
+        };
+        ResidentProgramValueCheckpoint::new(
+            value,
+            content,
+            descriptor.bytes,
+            SdcppResidentValueCheckpoint { bytes, kind },
+        )
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn restore_value_checkpoint(
+        &mut self,
+        plan: &ImageProgramPlanV1,
+        checkpoint: ResidentProgramValueCheckpoint<SdcppResidentValueCheckpoint>,
+    ) -> Result<ImageProgramValueMeasurementV1> {
+        let value = checkpoint.value();
+        let expected_content = checkpoint.content().clone();
+        let saved = checkpoint.into_checkpoint();
+        let specification = &plan
+            .values
+            .get(usize::from(value))
+            .ok_or_else(|| Error::Invalid(format!("resident value {value} is outside the plan")))?
+            .spec;
+        if saved.bytes.is_empty()
+            || u64::try_from(saved.bytes.len())
+                .map_err(|_| Error::Invalid("resident value exceeds u64".to_owned()))?
+                > specification
+                    .maximum_bytes()
+                    .map_err(logit_loom_diffusion::Error::from)?
+            || logit_loom_diffusion::image_program_value_content(&saved.bytes) != expected_content
+        {
+            return Err(Error::Incompatible(
+                "resident value continuation bytes differ from their identity or bound".to_owned(),
+            ));
+        }
+
+        let handle = match saved.kind {
+            SdcppResidentValueCheckpointKind::Utf8(text)
+                if matches!(specification, ImageProgramValueSpecV1::Utf8 { .. })
+                    && text.as_bytes() == saved.bytes =>
+            {
+                self.text_values.insert(value, text);
+                Some(self.import_bytes(&saved.bytes)?)
+            }
+            SdcppResidentValueCheckpointKind::Image {
+                width,
+                height,
+                channels,
+            } => {
+                let compatible = matches!(
+                    specification,
+                    ImageProgramValueSpecV1::Rgb8 { width: w, height: h }
+                        if (*w, *h, channels) == (width, height, 3)
+                ) || matches!(
+                    specification,
+                    ImageProgramValueSpecV1::Rgba8 { width: w, height: h }
+                        if (*w, *h, channels) == (width, height, 4)
+                ) || matches!(
+                    specification,
+                    ImageProgramValueSpecV1::Gray8 { width: w, height: h }
+                        if (*w, *h, channels) == (width, height, 1)
+                );
+                if !compatible {
+                    return Err(Error::Incompatible(
+                        "resident image continuation geometry differs".to_owned(),
+                    ));
+                }
+                Some(self.import_image(&saved.bytes, width, height, channels)?)
+            }
+            SdcppResidentValueCheckpointKind::Png
+                if matches!(specification, ImageProgramValueSpecV1::Png { .. }) =>
+            {
+                if self.handles.contains_key(&value)
+                    || self.host_values.insert(value, saved.bytes).is_some()
+                {
+                    return Err(Error::Incompatible(format!(
+                        "resident value {value} was restored twice"
+                    )));
+                }
+                return Ok(host_measurement(value));
+            }
+            SdcppResidentValueCheckpointKind::Tensor { shape }
+                if matches!(specification, ImageProgramValueSpecV1::Tensor { .. }) =>
+            {
+                let values = f32_from_native_bytes(&saved.bytes)?;
+                Some(self.import_tensor(&values, &shape, false)?)
+            }
+            SdcppResidentValueCheckpointKind::Checkpoint(saved_checkpoint)
+                if matches!(specification, ImageProgramValueSpecV1::Checkpoint { .. }) =>
+            {
+                if saved_checkpoint.to_envelope_bytes()? != saved.bytes {
+                    return Err(Error::Incompatible(
+                        "resident checkpoint continuation envelope differs".to_owned(),
+                    ));
+                }
+                self.input_checkpoints.insert(value, *saved_checkpoint);
+                Some(self.import_bytes(&saved.bytes)?)
+            }
+            SdcppResidentValueCheckpointKind::CheckpointState {
+                shape,
+                restored,
+                captured,
+            } if matches!(
+                specification,
+                ImageProgramValueSpecV1::Opaque {
+                    opaque_kind: ImageOpaqueValueKindV1::CheckpointState,
+                    ..
+                }
+            ) =>
+            {
+                if restored.is_none() && captured.is_none() {
+                    return Err(Error::Incompatible(
+                        "resident checkpoint-state continuation lost its lineage".to_owned(),
+                    ));
+                }
+                let values = f32_from_native_bytes(&saved.bytes)?;
+                if let Some(restored) = restored {
+                    self.checkpoint_states.insert(value, *restored);
+                }
+                if let Some(captured) = captured {
+                    self.captured_states.insert(value, *captured);
+                }
+                Some(self.import_tensor(&values, &shape, true)?)
+            }
+            _ => {
+                return Err(Error::Incompatible(
+                    "resident value continuation kind differs from its logical specification"
+                        .to_owned(),
+                ));
+            }
+        };
+        let handle = handle.ok_or_else(|| {
+            Error::Incompatible("resident continuation produced no native handle".to_owned())
+        })?;
+        self.insert_handle(value, handle)?;
+        self.measurement(plan, value, handle)
     }
 
     fn prepare_inputs(
@@ -1232,27 +1652,7 @@ impl<R: ResidentArtifactPathResolver> SdcppResidentProgram<'_, R> {
                 width,
                 height,
                 channels,
-            } => {
-                let view = ImageViewV2 {
-                    data: bytes.as_ptr(),
-                    bytes: bytes.len(),
-                    width,
-                    height,
-                    channels,
-                };
-                let mut handle = ValueHandleV3::EMPTY;
-                // SAFETY: `bytes` and `view` remain live for the synchronous
-                // copy into this exclusively owned arena.
-                let status = unsafe {
-                    self.runtime.api.program_import_image_v3(
-                        self.arena()?.as_ptr(),
-                        &view,
-                        &mut handle,
-                    )
-                };
-                Self::require_import_status(status, value)?;
-                Ok(handle)
-            }
+            } => self.import_image(&bytes, width, height, channels),
             PreparedInput::Tensor { values, shape } => self.import_tensor(&values, &shape, false),
             PreparedInput::Checkpoint {
                 envelope,
@@ -1291,6 +1691,37 @@ impl<R: ResidentArtifactPathResolver> SdcppResidentProgram<'_, R> {
         if status != ffi::STATUS_OK {
             return Err(Error::Native(format!(
                 "resident byte import failed: {}",
+                native_status_error(status)
+            )));
+        }
+        Ok(handle)
+    }
+
+    fn import_image(
+        &self,
+        bytes: &[u8],
+        width: u32,
+        height: u32,
+        channels: u32,
+    ) -> Result<ValueHandleV3> {
+        let view = ImageViewV2 {
+            data: bytes.as_ptr(),
+            bytes: bytes.len(),
+            width,
+            height,
+            channels,
+        };
+        let mut handle = ValueHandleV3::EMPTY;
+        // SAFETY: `bytes` and `view` remain live for the synchronous copy into
+        // this exclusively owned arena.
+        let status = unsafe {
+            self.runtime
+                .api
+                .program_import_image_v3(self.arena()?.as_ptr(), &view, &mut handle)
+        };
+        if status != ffi::STATUS_OK {
+            return Err(Error::Native(format!(
+                "resident image import failed: {}",
                 native_status_error(status)
             )));
         }
@@ -1391,10 +1822,22 @@ impl<R: ResidentArtifactPathResolver> SdcppResidentProgram<'_, R> {
         stage: &ImageProgramStageV1,
         native: &ImageProgramNativeStageV1,
         cancellation: &dyn CancellationProbe,
+        suspension: &dyn CheckpointSuspensionProbe,
+        checkpoint: Option<SdcppResidentStageCheckpoint>,
     ) -> Result<NativeStageOutcome> {
         let prepared = self.prepare_diffusion_call(program, native)?;
-        match self.run_diffusion_call(stage, native, cancellation, &prepared)? {
+        match self.run_diffusion_call(
+            stage,
+            native,
+            cancellation,
+            suspension,
+            checkpoint,
+            &prepared,
+        )? {
             DiffusionCallOutcome::Cancelled { step } => Ok(NativeStageOutcome::Cancelled { step }),
+            DiffusionCallOutcome::Suspended { step, checkpoint } => {
+                Ok(NativeStageOutcome::Suspended { step, checkpoint })
+            }
             DiffusionCallOutcome::Completed(completed) => {
                 self.publish_diffusion_outputs(native, *completed)
             }
@@ -1514,6 +1957,8 @@ impl<R: ResidentArtifactPathResolver> SdcppResidentProgram<'_, R> {
         stage: &ImageProgramStageV1,
         native: &ImageProgramNativeStageV1,
         cancellation: &'c dyn CancellationProbe,
+        suspension: &'c dyn CheckpointSuspensionProbe,
+        checkpoint: Option<SdcppResidentStageCheckpoint>,
         prepared: &PreparedDiffusionCall,
     ) -> Result<DiffusionCallOutcome<'c>> {
         let request = ImageRequest::new(
@@ -1533,8 +1978,10 @@ impl<R: ResidentArtifactPathResolver> SdcppResidentProgram<'_, R> {
                 .digest()
                 .map_err(logit_loom_diffusion::Error::from)?,
             prepared.restore.clone(),
+            checkpoint.map(|checkpoint| checkpoint.scheduler),
             checkpoint_backend.clone(),
             cancellation,
+            suspension,
         )?;
         let profile = self.runtime.profile;
         let profile_receipt = self.runtime.profile_receipt.clone();
@@ -1602,12 +2049,33 @@ impl<R: ResidentArtifactPathResolver> SdcppResidentProgram<'_, R> {
                     "native cancellation returned without a completed boundary".to_owned(),
                 )
             })?;
+            if let Some(scheduler) = stage_program.take_suspension() {
+                if scheduler.receipt().next_step != step.saturating_add(1) {
+                    return Err(Error::Incompatible(
+                        "resident suspension checkpoint boundary differs from native progress"
+                            .to_owned(),
+                    ));
+                }
+                self.finish_krea_invocation(
+                    invocation.krea_activation.take(),
+                    krea_call,
+                    KreaActivationTerminalV1::Cancelled {
+                        after_transition: Some(step),
+                    },
+                    false,
+                )?;
+                return Ok(DiffusionCallOutcome::Suspended {
+                    step,
+                    checkpoint: SdcppResidentStageCheckpoint { scheduler },
+                });
+            }
             self.finish_krea_invocation(
                 invocation.krea_activation.take(),
                 krea_call,
                 KreaActivationTerminalV1::Cancelled {
                     after_transition: Some(step),
                 },
+                true,
             )?;
             return Ok(DiffusionCallOutcome::Cancelled { step });
         }
@@ -1619,7 +2087,8 @@ impl<R: ResidentArtifactPathResolver> SdcppResidentProgram<'_, R> {
             || result.primary.is_empty()
             || result.snapshot_count != snapshot_handles.len()
             || result.checkpoint_state.is_empty() != native.checkpoint_after_step.is_none()
-            || stage_program.restored != native.checkpoint_restore_at_step.is_some()
+            || stage_program.declared_restored != native.checkpoint_restore_at_step.is_some()
+            || stage_program.continuation_restore.is_some() != stage_program.continuation_restored
         {
             return Err(Error::Incompatible(
                 "resident diffusion result or checkpoint accounting differs".to_owned(),
@@ -1632,6 +2101,7 @@ impl<R: ResidentArtifactPathResolver> SdcppResidentProgram<'_, R> {
             invocation.krea_activation.take(),
             krea_call,
             KreaActivationTerminalV1::Completed,
+            true,
         )?;
         Ok(DiffusionCallOutcome::Completed(Box::new(
             CompletedDiffusionCall {
@@ -1650,6 +2120,7 @@ impl<R: ResidentArtifactPathResolver> SdcppResidentProgram<'_, R> {
         native: Option<NativeKreaInvocation>,
         callback: Option<(LoweredKreaActivation, KreaCallbackState)>,
         terminal: KreaActivationTerminalV1,
+        record: bool,
     ) -> Result<()> {
         let runtime_epoch = self.runtime.session_epoch;
         match (native, callback, self.runtime.krea_activation.as_mut()) {
@@ -1664,7 +2135,9 @@ impl<R: ResidentArtifactPathResolver> SdcppResidentProgram<'_, R> {
                     native.peak_device_bytes,
                     callback,
                 )?;
-                self.krea_activation_executions.push(execution);
+                if record {
+                    self.krea_activation_executions.push(execution);
+                }
                 Ok(())
             }
             _ => {
@@ -2175,7 +2648,13 @@ impl StageExecution {
 
 enum StageOperationOutcome {
     Completed(StageExecution),
-    Cancelled { step: u32 },
+    Cancelled {
+        step: u32,
+    },
+    Suspended {
+        step: u32,
+        checkpoint: SdcppResidentStageCheckpoint,
+    },
 }
 
 struct PreparedDiffusionCall {
@@ -2347,7 +2826,13 @@ struct CompletedDiffusionCall<'a> {
 
 enum DiffusionCallOutcome<'a> {
     Completed(Box<CompletedDiffusionCall<'a>>),
-    Cancelled { step: u32 },
+    Cancelled {
+        step: u32,
+    },
+    Suspended {
+        step: u32,
+        checkpoint: SdcppResidentStageCheckpoint,
+    },
 }
 
 enum NativeStageOutcome {
@@ -2359,6 +2844,10 @@ enum NativeStageOutcome {
     },
     Cancelled {
         step: u32,
+    },
+    Suspended {
+        step: u32,
+        checkpoint: SdcppResidentStageCheckpoint,
     },
 }
 
@@ -2775,6 +3264,17 @@ fn measurement_from_descriptor(
     })
 }
 
+fn host_measurement(value: u16) -> ImageProgramValueMeasurementV1 {
+    ImageProgramValueMeasurementV1 {
+        value,
+        placement: ImageProgramValuePlacementV1::Host,
+        host_to_device_transfers: 0,
+        host_to_device_bytes: 0,
+        device_to_host_transfers: 0,
+        device_to_host_bytes: 0,
+    }
+}
+
 struct NativeHashState {
     hasher: blake3::Hasher,
     expected: u64,
@@ -2837,9 +3337,66 @@ unsafe extern "C" fn hash_native_value(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use super::*;
     use crate::{ModelBlockResidualScaleControlV1, model_block_residual_scale_schema_v1};
-    use logit_loom_diffusion::OperatorInvocation;
+    use logit_loom_diffusion::{OperatorInvocation, TensorSpec};
+    use logit_loom_executor::NeverCancel;
+
+    struct AlwaysSuspend;
+
+    impl CheckpointSuspensionProbe for AlwaysSuspend {
+        fn is_suspension_requested(&self) -> bool {
+            true
+        }
+    }
+
+    fn checkpoint_test_plan() -> (ImageProgramNativeStageV1, DiffusionPlan) {
+        let schedule = logit_loom_diffusion::DiffusionSchedule::new(
+            Digest::of_bytes("test-schedule", b"one"),
+            vec![1.0, 0.0],
+        )
+        .unwrap();
+        let rng = Digest::of_bytes("test-rng", b"one");
+        let stage = ImageProgramNativeStageV1 {
+            profile: Digest::of_bytes("test-profile", b"one"),
+            load: Digest::of_bytes("test-load", b"one"),
+            operation: ImageOperation::TextToImage,
+            width: 1,
+            height: 1,
+            output_format: ImageOutputFormat::Rgb8,
+            seed: SeedSelection::Fixed { seed: 7 },
+            rng: rng.clone(),
+            placement: Digest::of_bytes("test-placement", b"one"),
+            schedule: Some(schedule.clone()),
+            guidance_scale_bits: 1.0_f32.to_bits(),
+            strength_bits: 1.0_f32.to_bits(),
+            inputs: Vec::new(),
+            loras: Vec::new(),
+            operators: Vec::new(),
+            observations: Vec::new(),
+            checkpoint_restore_at_step: None,
+            checkpoint_after_step: None,
+            outputs: Vec::new(),
+        };
+        let plan = DiffusionPlan::new(
+            BTreeMap::from([("model".to_owned(), Digest::of_bytes("test-model", b"one"))]),
+            Digest::of_bytes("test-conditioning", b"one"),
+            rng,
+            7,
+            TensorSpec::new(
+                vec![2],
+                TensorDType::F32,
+                TensorLayout::DimensionZeroFastest,
+                "vulkan:test",
+            )
+            .unwrap(),
+            schedule,
+        )
+        .unwrap();
+        (stage, plan)
+    }
 
     #[test]
     fn incremental_value_hash_matches_public_content_domain() {
@@ -2859,6 +3416,51 @@ mod tests {
             actual,
             logit_loom_diffusion::image_program_value_content(bytes)
         );
+    }
+
+    #[test]
+    fn resident_stage_suspension_captures_and_restores_exact_post_step_state() {
+        let (stage, plan) = checkpoint_test_plan();
+        let backend = Digest::of_bytes("checkpoint-backend", b"one");
+        let operation = Digest::of_bytes("stage-operation", b"one");
+        let context = StepContext::for_plan(&plan, 0).unwrap();
+        let mut suspended = ResidentStageProgram::new(
+            &stage,
+            operation.clone(),
+            None,
+            None,
+            backend.clone(),
+            &NeverCancel,
+            &AlwaysSuspend,
+        )
+        .unwrap();
+        suspended.begin(&plan).unwrap();
+        let post_step_values = [1.25_f32, -0.5];
+        assert_eq!(
+            suspended.observe(&context, &post_step_values).unwrap(),
+            ControlFlow::Stop
+        );
+        let checkpoint = suspended.take_suspension().unwrap();
+        assert_eq!(checkpoint.receipt().next_step, 1);
+
+        let mut resumed = ResidentStageProgram::new(
+            &stage,
+            operation,
+            None,
+            Some(checkpoint),
+            backend,
+            &NeverCancel,
+            &AlwaysSuspend,
+        )
+        .unwrap();
+        resumed.begin(&plan).unwrap();
+        let mut reconstructed = [99.0_f32, 100.0];
+        resumed.intervene(&context, &mut reconstructed).unwrap();
+        assert_eq!(
+            reconstructed.map(f32::to_bits),
+            post_step_values.map(f32::to_bits)
+        );
+        assert!(resumed.continuation_restored);
     }
 
     #[test]

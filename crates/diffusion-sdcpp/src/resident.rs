@@ -14,7 +14,10 @@ use logit_loom_executor::{
     CancellationProbe, ClassifiedExecutionError, FailureDisposition, InputBuffer, OutputBuffer,
 };
 
-use crate::{Error, ModelBlockApplicationReceiptV1, ModelBlockApplicationV1, Result};
+use crate::{
+    CheckpointSuspensionProbe, Error, ModelBlockApplicationReceiptV1, ModelBlockApplicationV1,
+    Result,
+};
 
 /// One completed native or deterministic program stage.
 #[derive(Clone, Debug)]
@@ -32,8 +35,8 @@ pub struct ResidentProgramCompletedStage {
 }
 
 /// Exact result of attempting one resident program stage.
-#[derive(Clone, Debug)]
-pub enum ResidentProgramStageTerminal {
+#[derive(Debug)]
+pub enum ResidentProgramStageTerminal<C> {
     /// The stage published every declared output.
     Completed(ResidentProgramCompletedStage),
     /// Cooperative cancellation stopped a native stage after one exact Euler
@@ -41,6 +44,14 @@ pub enum ResidentProgramStageTerminal {
     CancelledAfterStep {
         /// Zero-based completed Euler transition.
         step: u32,
+    },
+    /// Checkpoint suspension stopped a native stage after one exact safe
+    /// boundary and published no stage outputs.
+    SuspendedAfterStep {
+        /// Zero-based completed backend transition.
+        step: u32,
+        /// Backend-private exact continuation for this stage.
+        checkpoint: C,
     },
 }
 
@@ -59,6 +70,11 @@ pub struct ResidentProgramFinish {
 /// only by the bounded identifiers already validated in
 /// [`ImageProgramPlanV1`].
 pub trait ResidentImageProgramBackend {
+    /// Backend-private continuation captured at a safe in-stage boundary.
+    type StageCheckpoint: std::fmt::Debug;
+    /// Backend-private bounded host representation of one live logical value.
+    type ValueCheckpoint: std::fmt::Debug;
+
     /// Returns the exact backend build/runtime identity.
     ///
     /// # Errors
@@ -101,7 +117,34 @@ pub trait ResidentImageProgramBackend {
         plan: &ImageProgramPlanV1,
         stage: &ImageProgramStageV1,
         cancellation: &dyn CancellationProbe,
-    ) -> Result<ResidentProgramStageTerminal>;
+        suspension: &dyn CheckpointSuspensionProbe,
+        checkpoint: Option<Self::StageCheckpoint>,
+    ) -> Result<ResidentProgramStageTerminal<Self::StageCheckpoint>>;
+
+    /// Reconstructs one bounded intermediate value captured from an earlier
+    /// arena of the same exact program.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error unless the value bytes match its declared logical
+    /// representation and can be imported into the active arena.
+    fn checkpoint_value(
+        &mut self,
+        plan: &ImageProgramPlanV1,
+        value: u16,
+    ) -> Result<ResidentProgramValueCheckpoint<Self::ValueCheckpoint>>;
+
+    /// Reconstructs one value captured by [`Self::checkpoint_value`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error unless the checkpoint is compatible with the active
+    /// arena and exact program value.
+    fn restore_value(
+        &mut self,
+        plan: &ImageProgramPlanV1,
+        checkpoint: ResidentProgramValueCheckpoint<Self::ValueCheckpoint>,
+    ) -> Result<ImageProgramValueMeasurementV1>;
 
     /// Copies one explicitly routed serializable value directly into the
     /// caller-owned output allocation and returns its initialized length.
@@ -149,6 +192,99 @@ pub struct ResidentImageProgramExecution {
     pub model_block_applications: ModelBlockApplicationReceiptV1,
     /// Non-deterministic placement, transfer, and timing measurements.
     pub measurements: ImageProgramMeasurementsV1,
+}
+
+/// One bounded logical value retained across request-arena reconstruction.
+#[derive(Debug)]
+pub struct ResidentProgramValueCheckpoint<V> {
+    value: u16,
+    content: Digest,
+    resident_bytes: u64,
+    checkpoint: V,
+}
+
+impl<V> ResidentProgramValueCheckpoint<V> {
+    /// Binds one backend-private bounded host value to its exact logical value
+    /// and canonical content identity.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the retained host representation is empty.
+    pub fn new(value: u16, content: Digest, resident_bytes: u64, checkpoint: V) -> Result<Self> {
+        if resident_bytes == 0 {
+            return Err(Error::Invalid(
+                "resident value checkpoint is empty".to_owned(),
+            ));
+        }
+        Ok(Self {
+            value,
+            content,
+            resident_bytes,
+            checkpoint,
+        })
+    }
+
+    /// Returns the logical program value.
+    #[must_use]
+    pub const fn value(&self) -> u16 {
+        self.value
+    }
+
+    /// Returns the canonical content identity of the captured native bytes.
+    #[must_use]
+    pub const fn content(&self) -> &Digest {
+        &self.content
+    }
+
+    /// Returns the bounded host bytes retained by the backend representation.
+    #[must_use]
+    pub const fn resident_bytes(&self) -> u64 {
+        self.resident_bytes
+    }
+
+    /// Removes the backend-private representation.
+    pub fn into_checkpoint(self) -> V {
+        self.checkpoint
+    }
+}
+
+/// Exact in-memory continuation for one resident image program.
+///
+/// Native handles never enter this value. Intermediate values are copied into
+/// bounded host bytes and the old request arena is confirmed closed before the
+/// continuation is returned.
+#[derive(Debug)]
+pub struct ResidentImageProgramContinuation<C, V> {
+    state: DriverState,
+    next_stage: u16,
+    stage_checkpoint: Option<C>,
+    values: Vec<ResidentProgramValueCheckpoint<V>>,
+}
+
+impl<C, V> ResidentImageProgramContinuation<C, V> {
+    /// Returns the next stage cursor. A checkpoint within a stage names that
+    /// same stage; a checkpoint between stages names the following stage.
+    #[must_use]
+    pub const fn next_stage(&self) -> u16 {
+        self.next_stage
+    }
+}
+
+/// Result of checkpoint-aware resident program execution.
+#[derive(Debug)]
+pub enum CheckpointedResidentImageProgramExecution<C, V> {
+    /// The request reached one terminal result.
+    Terminal(Box<ResidentImageProgramExecution>),
+    /// The request yielded at an exact safe boundary with no visible outputs.
+    Suspended(Box<ResidentImageProgramContinuation<C, V>>),
+}
+
+struct NeverSuspend;
+
+impl CheckpointSuspensionProbe for NeverSuspend {
+    fn is_suspension_requested(&self) -> bool {
+        false
+    }
 }
 
 /// Single-owner execution driver over one resident image-program backend.
@@ -199,13 +335,48 @@ impl<B: ResidentImageProgramBackend> ResidentImageProgramDriver<B> {
         outputs: &mut [OutputBuffer<'_>],
         cancellation: &dyn CancellationProbe,
     ) -> Result<ResidentImageProgramExecution> {
+        match self.execute_checkpointed(plan, inputs, outputs, cancellation, &NeverSuspend, None)? {
+            CheckpointedResidentImageProgramExecution::Terminal(execution) => Ok(*execution),
+            CheckpointedResidentImageProgramExecution::Suspended(_) => Err(Error::Poisoned(
+                "resident execution suspended without a suspension request".to_owned(),
+            )),
+        }
+    }
+
+    /// Executes or resumes one program with bounded checkpoint suspension.
+    ///
+    /// A suspended result has no externally initialized output. The backend's
+    /// old request arena has been confirmed closed, and the returned
+    /// continuation owns only bounded host values plus one backend-private
+    /// in-stage checkpoint.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for a foreign continuation, uncertain cleanup,
+    /// reconstruction failure, invalid backend evidence, or an output that
+    /// cannot be atomically published.
+    #[allow(clippy::too_many_lines)]
+    pub fn execute_checkpointed(
+        &mut self,
+        plan: &ImageProgramPlanV1,
+        inputs: &[InputBuffer<'_>],
+        outputs: &mut [OutputBuffer<'_>],
+        cancellation: &dyn CancellationProbe,
+        suspension: &dyn CheckpointSuspensionProbe,
+        continuation: Option<
+            ResidentImageProgramContinuation<B::StageCheckpoint, B::ValueCheckpoint>,
+        >,
+    ) -> Result<CheckpointedResidentImageProgramExecution<B::StageCheckpoint, B::ValueCheckpoint>>
+    {
         plan.validate().map_err(logit_loom_diffusion::Error::from)?;
         validate_buffers(plan, inputs, outputs)?;
         self.backend.validate_program(plan)?;
         let backend = self.backend.backend_identity()?;
         let runtime_epoch = self.backend.runtime_epoch();
         if cancellation.is_cancelled() {
-            return cancelled_before_start(plan, backend, runtime_epoch);
+            return cancelled_before_start(plan, backend, runtime_epoch)
+                .map(Box::new)
+                .map(CheckpointedResidentImageProgramExecution::Terminal);
         }
 
         let imported = match self.backend.begin_program(plan, inputs) {
@@ -221,11 +392,72 @@ impl<B: ResidentImageProgramBackend> ResidentImageProgramDriver<B> {
                 )));
             }
         };
-        let mut state = DriverState::new(plan, backend, runtime_epoch, imported)?;
         let liveness = plan.liveness().map_err(logit_loom_diffusion::Error::from)?;
-        for stage in &plan.stages {
+        let (mut state, next_stage, mut stage_checkpoint) = match continuation {
+            Some(continuation) => {
+                let expected_plan = plan.digest().map_err(logit_loom_diffusion::Error::from)?;
+                if continuation.state.plan != expected_plan
+                    || continuation.state.backend != backend
+                    || usize::from(continuation.next_stage) > plan.stages.len()
+                    || continuation.state.stages.len() != usize::from(continuation.next_stage)
+                    || (continuation.stage_checkpoint.is_some()
+                        && usize::from(continuation.next_stage) == plan.stages.len())
+                {
+                    self.backend.poison();
+                    return Err(Error::Poisoned(
+                        "resident program continuation identity or cursor differs".to_owned(),
+                    ));
+                }
+                let mut state = continuation.state;
+                state.runtime_epoch = runtime_epoch;
+                if let Err(error) = self.restore_continuation(
+                    plan,
+                    &liveness.releases,
+                    continuation.next_stage,
+                    &state,
+                    continuation.values,
+                    imported,
+                ) {
+                    self.backend.poison();
+                    return Err(Error::Poisoned(format!(
+                        "resident program continuation reconstruction was uncertain: {}",
+                        failure_identity(&error)
+                    )));
+                }
+                (
+                    state,
+                    continuation.next_stage,
+                    continuation.stage_checkpoint,
+                )
+            }
+            None => (
+                DriverState::new(plan, backend, runtime_epoch, imported)?,
+                0,
+                None,
+            ),
+        };
+
+        if suspension.is_suspension_requested() {
+            return self.suspend_program(
+                plan,
+                &liveness.releases,
+                state,
+                next_stage,
+                stage_checkpoint,
+            );
+        }
+
+        for stage in plan.stages.iter().skip(usize::from(next_stage)) {
             let stage_index = stage.stage;
-            match self.backend.execute_stage(plan, stage, cancellation) {
+            let resume = if stage_index == next_stage {
+                stage_checkpoint.take()
+            } else {
+                None
+            };
+            match self
+                .backend
+                .execute_stage(plan, stage, cancellation, suspension, resume)
+            {
                 Ok(ResidentProgramStageTerminal::Completed(completed)) => {
                     state.push_completed(plan, completed)?;
                     if let Err(error) =
@@ -235,21 +467,50 @@ impl<B: ResidentImageProgramBackend> ResidentImageProgramDriver<B> {
                         return Err(error);
                     }
                     if cancellation.is_cancelled() {
-                        return self.finish_terminal(
+                        return self
+                            .finish_terminal(
+                                plan,
+                                state,
+                                ImageProgramTerminalV1::CancelledAfterStage { stage: stage_index },
+                            )
+                            .map(Box::new)
+                            .map(CheckpointedResidentImageProgramExecution::Terminal);
+                    }
+                    let following = stage_index.checked_add(1).ok_or_else(|| {
+                        Error::Poisoned("resident program stage cursor overflowed".to_owned())
+                    })?;
+                    if suspension.is_suspension_requested()
+                        && usize::from(following) < plan.stages.len()
+                    {
+                        return self.suspend_program(
                             plan,
+                            &liveness.releases,
                             state,
-                            ImageProgramTerminalV1::CancelledAfterStage { stage: stage_index },
+                            following,
+                            None,
                         );
                     }
                 }
                 Ok(ResidentProgramStageTerminal::CancelledAfterStep { step }) => {
-                    return self.finish_terminal(
+                    return self
+                        .finish_terminal(
+                            plan,
+                            state,
+                            ImageProgramTerminalV1::CancelledAfterStep {
+                                stage: stage_index,
+                                step,
+                            },
+                        )
+                        .map(Box::new)
+                        .map(CheckpointedResidentImageProgramExecution::Terminal);
+                }
+                Ok(ResidentProgramStageTerminal::SuspendedAfterStep { checkpoint, .. }) => {
+                    return self.suspend_program(
                         plan,
+                        &liveness.releases,
                         state,
-                        ImageProgramTerminalV1::CancelledAfterStep {
-                            stage: stage_index,
-                            step,
-                        },
+                        stage_index,
+                        Some(checkpoint),
                     );
                 }
                 Err(error) if error.disposition() == FailureDisposition::Rejected => {
@@ -257,7 +518,10 @@ impl<B: ResidentImageProgramBackend> ResidentImageProgramDriver<B> {
                         stage: stage_index,
                         failure: failure_identity(&error),
                     };
-                    return self.finish_terminal(plan, state, terminal);
+                    return self
+                        .finish_terminal(plan, state, terminal)
+                        .map(Box::new)
+                        .map(CheckpointedResidentImageProgramExecution::Terminal);
                 }
                 Err(error) => {
                     self.backend.poison();
@@ -298,6 +562,150 @@ impl<B: ResidentImageProgramBackend> ResidentImageProgramDriver<B> {
         };
         state.finish(finish);
         complete_outputs(plan, outputs, initialized, state)
+            .map(Box::new)
+            .map(CheckpointedResidentImageProgramExecution::Terminal)
+    }
+
+    fn restore_continuation(
+        &mut self,
+        plan: &ImageProgramPlanV1,
+        releases: &[logit_loom_diffusion::ImageProgramReleaseV1],
+        next_stage: u16,
+        state: &DriverState,
+        values: Vec<ResidentProgramValueCheckpoint<B::ValueCheckpoint>>,
+        imported: Vec<ImageProgramValueMeasurementV1>,
+    ) -> Result<()> {
+        let input_values = plan
+            .inputs
+            .iter()
+            .map(|input| input.value)
+            .collect::<Vec<_>>();
+        validate_measurement_prefix(plan, &input_values, imported)?;
+
+        let expected_values = live_intermediate_values(plan, releases, next_stage, state)?;
+        if values.len() != expected_values.len() {
+            return Err(Error::Incompatible(
+                "resident continuation intermediate-value count differs".to_owned(),
+            ));
+        }
+        for (checkpoint, expected) in values.into_iter().zip(expected_values) {
+            if checkpoint.value() != expected
+                || state.contents.get(&expected) != Some(checkpoint.content())
+            {
+                return Err(Error::Incompatible(format!(
+                    "resident continuation value {expected} identity differs"
+                )));
+            }
+            let measurement = self.backend.restore_value(plan, checkpoint)?;
+            validate_measurement_prefix(plan, &[expected], vec![measurement])?;
+        }
+
+        for release in releases {
+            if plan.inputs.iter().any(|input| input.value == release.value)
+                && release.after_stage.is_some_and(|stage| stage < next_stage)
+            {
+                self.backend.release_value(release.value)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn suspend_program(
+        &mut self,
+        plan: &ImageProgramPlanV1,
+        releases: &[logit_loom_diffusion::ImageProgramReleaseV1],
+        mut state: DriverState,
+        next_stage: u16,
+        stage_checkpoint: Option<B::StageCheckpoint>,
+    ) -> Result<CheckpointedResidentImageProgramExecution<B::StageCheckpoint, B::ValueCheckpoint>>
+    {
+        let values = match self.capture_live_values(plan, releases, next_stage, &state) {
+            Ok(values) => values,
+            Err(error) => {
+                let _ = self
+                    .backend
+                    .finish_program(ImageCleanupPolicy::RetainSession);
+                self.backend.poison();
+                return Err(Error::Poisoned(format!(
+                    "resident checkpoint capture was uncertain: {}",
+                    failure_identity(&error)
+                )));
+            }
+        };
+        let finish = match self
+            .backend
+            .finish_program(ImageCleanupPolicy::RetainSession)
+        {
+            Ok(finish) => finish,
+            Err(error) => {
+                self.backend.poison();
+                return Err(Error::Poisoned(format!(
+                    "resident checkpoint arena cleanup was uncertain: {}",
+                    failure_identity(&error)
+                )));
+            }
+        };
+        if finish.cleanup != ImageProgramCleanupDispositionV1::Retained {
+            self.backend.poison();
+            return Err(Error::Poisoned(
+                "resident checkpoint cleanup advanced the runtime epoch".to_owned(),
+            ));
+        }
+        state.observe_peak(finish.peak_arena_bytes);
+        Ok(CheckpointedResidentImageProgramExecution::Suspended(
+            Box::new(ResidentImageProgramContinuation {
+                state,
+                next_stage,
+                stage_checkpoint,
+                values,
+            }),
+        ))
+    }
+
+    fn capture_live_values(
+        &mut self,
+        plan: &ImageProgramPlanV1,
+        releases: &[logit_loom_diffusion::ImageProgramReleaseV1],
+        next_stage: u16,
+        state: &DriverState,
+    ) -> Result<Vec<ResidentProgramValueCheckpoint<B::ValueCheckpoint>>> {
+        let values = live_intermediate_values(plan, releases, next_stage, state)?;
+        let captured = values
+            .into_iter()
+            .map(|value| {
+                let maximum = plan.values[usize::from(value)]
+                    .spec
+                    .maximum_bytes()
+                    .map_err(logit_loom_diffusion::Error::from)?;
+                let checkpoint = self.backend.checkpoint_value(plan, value)?;
+                if checkpoint.value() != value
+                    || checkpoint.resident_bytes() > maximum
+                    || state.contents.get(&value) != Some(checkpoint.content())
+                {
+                    return Err(Error::Output(format!(
+                        "resident checkpoint value {value} metadata differs"
+                    )));
+                }
+                Ok(checkpoint)
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let total = captured.iter().try_fold(0_u64, |total, checkpoint| {
+            total
+                .checked_add(checkpoint.resident_bytes())
+                .ok_or_else(|| {
+                    Error::Output("resident checkpoint byte bound overflowed".to_owned())
+                })
+        })?;
+        let arena_bound = plan
+            .liveness()
+            .map_err(logit_loom_diffusion::Error::from)?
+            .peak_bytes;
+        if total > arena_bound {
+            return Err(Error::Output(
+                "resident checkpoint exceeds the program arena bound".to_owned(),
+            ));
+        }
+        Ok(captured)
     }
 
     fn materialize_outputs(
@@ -375,6 +783,7 @@ impl<B: ResidentImageProgramBackend> ResidentImageProgramDriver<B> {
     }
 }
 
+#[derive(Debug)]
 struct DriverState {
     plan: Digest,
     backend: Digest,
@@ -475,7 +884,14 @@ impl DriverState {
 
     fn finish(&mut self, finish: ResidentProgramFinish) {
         self.cleanup = Some(finish.cleanup);
-        self.peak_arena_bytes = Some(finish.peak_arena_bytes);
+        self.observe_peak(finish.peak_arena_bytes);
+    }
+
+    fn observe_peak(&mut self, peak_arena_bytes: u64) {
+        self.peak_arena_bytes = Some(
+            self.peak_arena_bytes
+                .map_or(peak_arena_bytes, |prior| prior.max(peak_arena_bytes)),
+        );
     }
 
     fn outcome(
@@ -650,6 +1066,34 @@ fn validate_measurement_prefix(
     Ok(measurements)
 }
 
+fn live_intermediate_values(
+    plan: &ImageProgramPlanV1,
+    releases: &[logit_loom_diffusion::ImageProgramReleaseV1],
+    next_stage: u16,
+    state: &DriverState,
+) -> Result<Vec<u16>> {
+    let mut values = releases
+        .iter()
+        .filter(|release| {
+            !plan.inputs.iter().any(|input| input.value == release.value)
+                && state.contents.contains_key(&release.value)
+                && release.after_stage.is_none_or(|stage| stage >= next_stage)
+        })
+        .map(|release| release.value)
+        .collect::<Vec<_>>();
+    values.sort_unstable();
+    values.dedup();
+    if values
+        .iter()
+        .any(|value| usize::from(*value) >= plan.values.len())
+    {
+        return Err(Error::Incompatible(
+            "resident continuation names a value outside the program".to_owned(),
+        ));
+    }
+    Ok(values)
+}
+
 fn release_after<B: ResidentImageProgramBackend>(
     backend: &mut B,
     releases: &[logit_loom_diffusion::ImageProgramReleaseV1],
@@ -797,6 +1241,15 @@ mod tests {
 
     const RECEIPT_BYTES: usize = 16 * 1024;
 
+    type FakeCheckpointExecution = CheckpointedResidentImageProgramExecution<Vec<u8>, Vec<u8>>;
+    type FakeCheckpointRun = (
+        Result<FakeCheckpointExecution>,
+        Vec<u8>,
+        Vec<u8>,
+        usize,
+        usize,
+    );
+
     #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
     enum FakeLifecycle {
         #[default]
@@ -825,6 +1278,9 @@ mod tests {
         released: Vec<u16>,
         cancel_during_stage: Option<u16>,
         cancel_after_stage: Option<(u16, Arc<AtomicBool>)>,
+        suspend_during_stage: Option<(u16, Arc<AtomicBool>)>,
+        suspend_after_stage: Option<(u16, Arc<AtomicBool>)>,
+        resumed_stages: Vec<u16>,
         reject_stage: Option<u16>,
         fault: FakeFault,
     }
@@ -899,6 +1355,9 @@ mod tests {
     }
 
     impl ResidentImageProgramBackend for FakeBackend {
+        type StageCheckpoint = Vec<u8>;
+        type ValueCheckpoint = Vec<u8>;
+
         fn backend_identity(&self) -> Result<Digest> {
             Ok(Digest::of_bytes("fake-resident-backend", b"v1"))
         }
@@ -944,12 +1403,32 @@ mod tests {
             plan: &ImageProgramPlanV1,
             stage: &ImageProgramStageV1,
             _cancellation: &dyn CancellationProbe,
-        ) -> Result<ResidentProgramStageTerminal> {
+            _suspension: &dyn CheckpointSuspensionProbe,
+            checkpoint: Option<Self::StageCheckpoint>,
+        ) -> Result<ResidentProgramStageTerminal<Self::StageCheckpoint>> {
             if self.lifecycle != FakeLifecycle::Active {
                 return Err(Error::Native("fake arena is not active".to_owned()));
             }
             if self.cancel_during_stage == Some(stage.stage) {
                 return Ok(ResidentProgramStageTerminal::CancelledAfterStep { step: 0 });
+            }
+            if let Some((suspend_stage, suspended)) = &self.suspend_during_stage
+                && *suspend_stage == stage.stage
+                && checkpoint.is_none()
+            {
+                suspended.store(true, Ordering::Release);
+                return Ok(ResidentProgramStageTerminal::SuspendedAfterStep {
+                    step: 0,
+                    checkpoint: stage.stage.to_le_bytes().to_vec(),
+                });
+            }
+            if let Some(checkpoint) = checkpoint {
+                if checkpoint != stage.stage.to_le_bytes() {
+                    return Err(Error::Incompatible(
+                        "fake stage checkpoint identity differs".to_owned(),
+                    ));
+                }
+                self.resumed_stages.push(stage.stage);
             }
             if self.reject_stage == Some(stage.stage) {
                 return Err(Error::Invalid("synthetic rejected stage".to_owned()));
@@ -971,6 +1450,11 @@ mod tests {
                 && *cancel_stage == stage.stage
             {
                 cancelled.store(true, Ordering::Release);
+            }
+            if let Some((suspend_stage, suspended)) = &self.suspend_after_stage
+                && *suspend_stage == stage.stage
+            {
+                suspended.store(true, Ordering::Release);
             }
             let observations = match &stage.operation {
                 ImageProgramStageOperationV1::Native { plan } => plan
@@ -1006,6 +1490,43 @@ mod tests {
                     values: measurements,
                 },
             ))
+        }
+
+        fn checkpoint_value(
+            &mut self,
+            plan: &ImageProgramPlanV1,
+            value: u16,
+        ) -> Result<ResidentProgramValueCheckpoint<Self::ValueCheckpoint>> {
+            let bytes = self.value(value)?.to_vec();
+            let resident_bytes = u64::try_from(bytes.len())
+                .map_err(|_| Error::Output("fake checkpoint exceeds u64".to_owned()))?;
+            if resident_bytes
+                > plan.values[usize::from(value)]
+                    .spec
+                    .maximum_bytes()
+                    .map_err(logit_loom_diffusion::Error::from)?
+            {
+                return Err(Error::Output(
+                    "fake checkpoint exceeds its value bound".to_owned(),
+                ));
+            }
+            ResidentProgramValueCheckpoint::new(
+                value,
+                image_program_value_content(&bytes),
+                resident_bytes,
+                bytes,
+            )
+        }
+
+        fn restore_value(
+            &mut self,
+            _plan: &ImageProgramPlanV1,
+            checkpoint: ResidentProgramValueCheckpoint<Self::ValueCheckpoint>,
+        ) -> Result<ImageProgramValueMeasurementV1> {
+            let value = checkpoint.value();
+            let bytes = checkpoint.into_checkpoint();
+            self.insert_value(value, bytes)?;
+            Ok(Self::measurement(value))
         }
 
         fn materialize_value(
@@ -1089,6 +1610,14 @@ mod tests {
     impl CancellationProbe for AlwaysCancel {
         fn is_cancelled(&self) -> bool {
             true
+        }
+    }
+
+    struct ToggleSuspension(Arc<AtomicBool>);
+
+    impl CheckpointSuspensionProbe for ToggleSuspension {
+        fn is_suspension_requested(&self) -> bool {
+            self.0.load(Ordering::Acquire)
         }
     }
 
@@ -1345,6 +1874,39 @@ mod tests {
         (result, image, receipt, image_written, receipt_written)
     }
 
+    fn execute_checkpointed_with(
+        driver: &mut ResidentImageProgramDriver<FakeBackend>,
+        plan: &ImageProgramPlanV1,
+        input_bytes: &[Vec<u8>],
+        suspension: &dyn CheckpointSuspensionProbe,
+        continuation: Option<ResidentImageProgramContinuation<Vec<u8>, Vec<u8>>>,
+    ) -> FakeCheckpointRun {
+        let inputs = plan
+            .inputs
+            .iter()
+            .zip(input_bytes)
+            .map(|(input, bytes)| InputBuffer::new(&input.buffer, bytes).unwrap())
+            .collect::<Vec<_>>();
+        let mut image = vec![0_u8; 3];
+        let mut receipt = vec![0_u8; RECEIPT_BYTES];
+        let mut outputs = vec![
+            OutputBuffer::new(&plan.outputs[0].buffer, &mut image).unwrap(),
+            OutputBuffer::new(&plan.outputs[1].buffer, &mut receipt).unwrap(),
+        ];
+        let result = driver.execute_checkpointed(
+            plan,
+            &inputs,
+            &mut outputs,
+            &NeverCancel,
+            suspension,
+            continuation,
+        );
+        let image_written = outputs[0].written();
+        let receipt_written = outputs[1].written();
+        drop(outputs);
+        (result, image, receipt, image_written, receipt_written)
+    }
+
     #[test]
     fn completed_program_publishes_outputs_atomically_and_releases_liveness() {
         let plan = blend_plan(false);
@@ -1423,6 +1985,108 @@ mod tests {
             ImageProgramTerminalV1::CancelledAfterStep { stage: 0, step: 0 }
         );
         assert_eq!(execution.receipt.completed_stages, 0);
+    }
+
+    #[test]
+    fn between_stage_suspension_reconstructs_live_values_and_publishes_once() {
+        let plan = blend_plan(true);
+        let bytes = input_bytes(&plan);
+        let suspended = Arc::new(AtomicBool::new(false));
+        let backend = FakeBackend {
+            suspend_after_stage: Some((0, Arc::clone(&suspended))),
+            ..FakeBackend::default()
+        };
+        let mut driver = ResidentImageProgramDriver::new(backend);
+        let (first, _, _, image_written, receipt_written) = execute_checkpointed_with(
+            &mut driver,
+            &plan,
+            &bytes,
+            &ToggleSuspension(Arc::clone(&suspended)),
+            None,
+        );
+        let CheckpointedResidentImageProgramExecution::Suspended(continuation) = first.unwrap()
+        else {
+            panic!("expected a suspended continuation");
+        };
+        assert_eq!(continuation.next_stage(), 1);
+        assert_eq!(image_written, 0);
+        assert_eq!(receipt_written, 0);
+        assert_eq!(driver.backend().finish_count, 1);
+        assert_eq!(driver.backend().lifecycle, FakeLifecycle::Idle);
+
+        suspended.store(false, Ordering::Release);
+        let (second, image, _, image_written, receipt_written) = execute_checkpointed_with(
+            &mut driver,
+            &plan,
+            &bytes,
+            &ToggleSuspension(suspended),
+            Some(*continuation),
+        );
+        let CheckpointedResidentImageProgramExecution::Terminal(execution) = second.unwrap() else {
+            panic!("expected a completed execution");
+        };
+        assert_eq!(
+            execution.receipt.terminal,
+            ImageProgramTerminalV1::Completed
+        );
+        assert_eq!(execution.receipt.completed_stages, 2);
+        assert_eq!(image_written, 3);
+        assert!(receipt_written > 0);
+        let mut expected = [0_u8; 3];
+        let mut stage_zero = [0_u8; 3];
+        mask_blend_rgb8(&bytes[0], &bytes[1], &bytes[2], &mut stage_zero).unwrap();
+        mask_blend_rgb8(&stage_zero, &bytes[1], &bytes[2], &mut expected).unwrap();
+        assert_eq!(image, expected);
+        assert_eq!(driver.backend().begin_count, 2);
+        assert_eq!(driver.backend().finish_count, 2);
+        assert_eq!(driver.backend().epoch, 1);
+    }
+
+    #[test]
+    fn in_stage_suspension_restores_the_backend_checkpoint() {
+        let plan = native_plan();
+        let bytes = vec![vec![b'x']];
+        let suspended = Arc::new(AtomicBool::new(false));
+        let backend = FakeBackend {
+            suspend_during_stage: Some((0, Arc::clone(&suspended))),
+            ..FakeBackend::default()
+        };
+        let mut driver = ResidentImageProgramDriver::new(backend);
+        let (first, _, _, image_written, receipt_written) = execute_checkpointed_with(
+            &mut driver,
+            &plan,
+            &bytes,
+            &ToggleSuspension(Arc::clone(&suspended)),
+            None,
+        );
+        let CheckpointedResidentImageProgramExecution::Suspended(continuation) = first.unwrap()
+        else {
+            panic!("expected a suspended continuation");
+        };
+        assert_eq!(continuation.next_stage(), 0);
+        assert_eq!(image_written, 0);
+        assert_eq!(receipt_written, 0);
+
+        suspended.store(false, Ordering::Release);
+        let (second, _, _, image_written, receipt_written) = execute_checkpointed_with(
+            &mut driver,
+            &plan,
+            &bytes,
+            &ToggleSuspension(suspended),
+            Some(*continuation),
+        );
+        let CheckpointedResidentImageProgramExecution::Terminal(execution) = second.unwrap() else {
+            panic!("expected a completed execution");
+        };
+        assert_eq!(
+            execution.receipt.terminal,
+            ImageProgramTerminalV1::Completed
+        );
+        assert_eq!(image_written, 3);
+        assert!(receipt_written > 0);
+        assert_eq!(driver.backend().resumed_stages, [0]);
+        assert_eq!(driver.backend().begin_count, 2);
+        assert_eq!(driver.backend().finish_count, 2);
     }
 
     #[test]

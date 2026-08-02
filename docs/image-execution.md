@@ -110,7 +110,7 @@ contained by the existing transactional full-state path.
 ## Resident-program support matrix
 
 Program ABI v3, model-block ABI v4, application ABI v5, Krea activation ABI
-v6, and safe adapter contract v8 provide this exact resident surface:
+v6, and safe adapter contract v9 provide this exact resident surface:
 
 | Mechanic | Resident adapter behavior |
 | --- | --- |
@@ -124,6 +124,7 @@ v6, and safe adapter contract v8 provide this exact resident surface:
 | Compositing | Ordered deterministic tight-RGB8 mask blends |
 | Output | Individually typed RGB8, RGBA8, bounded PNG (RGB or RGBA plus encoder identity), tensor, checkpoint, snapshot, and final program-receipt routes |
 | Cancellation | Before start, between stages, or after one exact completed post-Euler boundary |
+| Suspension | Output-free bounded continuation between stages or after one exact post-Euler boundary; live values and the in-stage scheduler state are authenticated before a fresh arena is reconstructed on resume |
 | Cleanup | Generation-checked value release, retained or confirmed-clear disposition, epoch advancement, and poisoning on uncertainty |
 | Measurements | Per-stage wall/native time, arena peak, placement, and transfers outside deterministic identity |
 

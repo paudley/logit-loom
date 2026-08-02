@@ -1,0 +1,156 @@
+diff --git src/ggml-vulkan/ggml-vulkan.cpp src/ggml-vulkan/ggml-vulkan.cpp
+index 5fbebc6..a0f6163 100644
+--- src/ggml-vulkan/ggml-vulkan.cpp
++++ src/ggml-vulkan/ggml-vulkan.cpp
+@@ -49,7 +49,10 @@ typedef struct VkPhysicalDeviceCooperativeMatrixDecodeVectorFeaturesNV {
+ #endif
+ 
+ #include <algorithm>
++#include <atomic>
++#include <cerrno>
+ #include <cmath>
++#include <cstdlib>
+ #include <iomanip>
+ #include <iostream>
+ #include <tuple>
+@@ -95,6 +98,60 @@ typedef struct VkPhysicalDeviceCooperativeMatrixDecodeVectorFeaturesNV {
+ 
+ #include "ggml-vulkan-shaders.hpp"
+ 
++struct ggml_vk_logit_loom_budget_config {
++    bool enabled;
++    uint64_t ceiling;
++};
++
++static ggml_vk_logit_loom_budget_config ggml_vk_logit_loom_budget() {
++    static const ggml_vk_logit_loom_budget_config budget = []() {
++        const char * raw = std::getenv("LOGIT_LOOM_VULKAN_MAX_BYTES");
++        if (raw == nullptr) {
++            return ggml_vk_logit_loom_budget_config{false, 0};
++        }
++        errno = 0;
++        char * end = nullptr;
++        const unsigned long long parsed = std::strtoull(raw, &end, 10);
++        if (errno != 0 || end == raw || *end != '\0' || parsed == 0) {
++            return ggml_vk_logit_loom_budget_config{true, 0};
++        }
++        return ggml_vk_logit_loom_budget_config{
++            true,
++            static_cast<uint64_t>(parsed),
++        };
++    }();
++    return budget;
++}
++
++static std::atomic<uint64_t> ggml_vk_logit_loom_memory_used{0};
++
++static bool ggml_vk_logit_loom_reserve(uint64_t bytes) {
++    const ggml_vk_logit_loom_budget_config budget = ggml_vk_logit_loom_budget();
++    if (!budget.enabled) {
++        return true;
++    }
++    if (budget.ceiling == 0 || bytes == 0 || bytes > budget.ceiling) {
++        return false;
++    }
++    uint64_t current = ggml_vk_logit_loom_memory_used.load(std::memory_order_relaxed);
++    while (current <= budget.ceiling - bytes) {
++        if (ggml_vk_logit_loom_memory_used.compare_exchange_weak(
++                current,
++                current + bytes,
++                std::memory_order_acq_rel,
++                std::memory_order_relaxed)) {
++            return true;
++        }
++    }
++    return false;
++}
++
++static void ggml_vk_logit_loom_release(uint64_t bytes) {
++    if (bytes != 0 && ggml_vk_logit_loom_budget().enabled) {
++        ggml_vk_logit_loom_memory_used.fetch_sub(bytes, std::memory_order_acq_rel);
++    }
++}
++
+ // remove this once it's more widely available in the SDK
+ #if !defined(VK_KHR_shader_bfloat16)
+ 
+@@ -1019,6 +1076,7 @@ struct vk_buffer_struct {
+     vk::MemoryPropertyFlags memory_property_flags;
+     void * ptr;
+     size_t size = 0;
++    uint64_t guarded_allocation_bytes = 0;
+     vk::DeviceAddress bda_addr {};
+ 
+     vk_device device;
+@@ -1030,6 +1088,7 @@ struct vk_buffer_struct {
+         VK_LOG_DEBUG("~vk_buffer_struct(" << buffer << ", " << size << ")");
+ 
+         device->device.freeMemory(device_memory);
++        ggml_vk_logit_loom_release(guarded_allocation_bytes);
+         device->device.destroyBuffer(buffer);
+     }
+ };
+@@ -3044,6 +3103,10 @@ static vk_buffer ggml_vk_create_buffer(vk_device& device, size_t size, const std
+         }
+ 
+         buf->memory_property_flags = mem_props.memoryTypes[memory_type_idx].propertyFlags;
++        if (!ggml_vk_logit_loom_reserve(size)) {
++            device->device.destroyBuffer(buf->buffer);
++            throw vk::OutOfDeviceMemoryError("Logit Loom Vulkan hard ceiling rejected allocation");
++        }
+         try {
+             vk::ImportMemoryHostPointerInfoEXT import_info;
+             import_info.handleType = vk::ExternalMemoryHandleTypeFlagBits::eHostAllocationEXT;
+@@ -3051,8 +3114,16 @@ static vk_buffer ggml_vk_create_buffer(vk_device& device, size_t size, const std
+             import_info.setPNext(&mem_flags_info);
+             buf->device_memory = device->device.allocateMemory({ size, memory_type_idx, &import_info });
+         } catch (const vk::SystemError& e) {
++            ggml_vk_logit_loom_release(size);
++        }
++        if (buf->device_memory) {
++            buf->guarded_allocation_bytes = size;
+         }
+     } else {
++        if (!ggml_vk_logit_loom_reserve(mem_req.size)) {
++            device->device.destroyBuffer(buf->buffer);
++            throw vk::OutOfDeviceMemoryError("Logit Loom Vulkan hard ceiling rejected allocation");
++        }
+         for (auto it = req_flags_list.begin(); it != req_flags_list.end(); it++) {
+             const auto & req_flags = *it;
+ 
+@@ -3068,6 +3139,7 @@ static vk_buffer ggml_vk_create_buffer(vk_device& device, size_t size, const std
+                 try {
+                     buf->device_memory = device->device.allocateMemory({ mem_req.size, *mtype_it, &mem_flags_info });
+                     buf->memory_property_flags = mem_props.memoryTypes[*mtype_it].propertyFlags;
++                    buf->guarded_allocation_bytes = mem_req.size;
+                     done = true;
+                     break;
+                 } catch (const vk::SystemError& e) {
+@@ -3075,6 +3147,7 @@ static vk_buffer ggml_vk_create_buffer(vk_device& device, size_t size, const std
+                     // during last attempt throw the exception
+                     if (it + 1 == req_flags_list.end() && mtype_it + 1 == memory_type_indices.end()) {
+                         device->device.destroyBuffer(buf->buffer);
++                        ggml_vk_logit_loom_release(mem_req.size);
+                         throw e;
+                     }
+                 }
+@@ -3087,6 +3160,9 @@ static vk_buffer ggml_vk_create_buffer(vk_device& device, size_t size, const std
+     }
+ 
+     if (!buf->device_memory) {
++        if (!import_ptr) {
++            ggml_vk_logit_loom_release(mem_req.size);
++        }
+         device->device.destroyBuffer(buf->buffer);
+         throw vk::OutOfDeviceMemoryError("No suitable memory type found");
+     }
+@@ -7367,6 +7443,8 @@ static void * ggml_vk_host_malloc(vk_device& device, size_t size) {
+         fprintf(stderr, "WARNING: failed to allocate %.2f MB of pinned memory\n",
+             size/1024.0/1024.0);
+         device->device.freeMemory(buf->device_memory);
++        ggml_vk_logit_loom_release(buf->guarded_allocation_bytes);
++        buf->guarded_allocation_bytes = 0;
+         device->device.destroyBuffer(buf->buffer);
+         return nullptr;
+     }
+

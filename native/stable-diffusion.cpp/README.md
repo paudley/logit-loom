@@ -10,6 +10,8 @@ Loom's `MIT OR Apache-2.0` terms and does not vendor upstream source.
 The companion ABI exposes:
 
 - exact ABI and upstream revision queries;
+- an optional process-wide Vulkan allocation ceiling enforced atomically
+  before the embedded ggml allocator calls Vulkan;
 - explicit MiniT2I-B/16 and Krea 2 Turbo context construction;
 - deterministic CPU random-state selection with explicit accelerator model
   and parameter backends;
@@ -72,8 +74,10 @@ then
 [`logit-loom-model-block-application-v5.patch`](logit-loom-model-block-application-v5.patch),
 then
 [`logit-loom-krea-activation-v6.patch`](logit-loom-krea-activation-v6.patch),
-and finally
+then
 [`logit-loom-resume-v7.patch`](logit-loom-resume-v7.patch),
+and finally the exact ggml-submodule
+[`logit-loom-vulkan-budget-v8.patch`](logit-loom-vulkan-budget-v8.patch),
 initializes only the required `ggml` submodule, and builds a shared library.
 Existing incompatible source changes are rejected. The script never runs from
 tests, CI, documentation, package builds, or `make check`.
@@ -94,6 +98,12 @@ cargo run --quiet -p logit-loom-diffusion-sdcpp \
 The probe may honestly report only a CPU device when the selected accelerator
 is unavailable to that process. That proves the library contract loaded; it
 does not satisfy either image profile's accelerator acceptance gate.
+
+When `LOGIT_LOOM_VULKAN_MAX_BYTES` is absent, the companion preserves upstream
+allocation behavior. When it is present, it must be one positive decimal byte
+count; invalid or zero values fail allocations closed. The counter covers each
+embedded ggml Vulkan memory allocation and is decremented exactly once on
+release. This is a hard process ceiling, not a quality or performance claim.
 
 The reviewed decision and boundary are in
 [`docs/adr/0001-stable-diffusion-runtime.md`](../../docs/adr/0001-stable-diffusion-runtime.md).

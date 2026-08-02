@@ -50,6 +50,8 @@ patch_files=(
     "${repo_root}/native/stable-diffusion.cpp/logit-loom-krea-activation-v6.patch"
     "${repo_root}/native/stable-diffusion.cpp/logit-loom-resume-v7.patch"
 )
+ggml_patch="${repo_root}/native/stable-diffusion.cpp/logit-loom-vulkan-budget-v8.patch"
+ggml_commit="eced84c86f8b012c752c016f7fe789adea168e1e"
 source_dir="$(realpath -m -- "${source_dir}")"
 build_dir="$(realpath -m -- "${build_dir}")"
 
@@ -133,6 +135,19 @@ for ((index=0; index<${#patch_files[@]}; index++)); do
 done
 
 git -C "${source_dir}" submodule update --init --depth 1 ggml
+actual_ggml_commit="$(git -C "${source_dir}/ggml" rev-parse HEAD)"
+if [[ "${actual_ggml_commit}" != "${ggml_commit}" ]]; then
+    echo "stable-diffusion.cpp selected unexpected ggml revision: ${actual_ggml_commit}" >&2
+    exit 1
+fi
+if git -C "${source_dir}/ggml" apply -p0 --whitespace=nowarn --reverse --check "${ggml_patch}"; then
+    echo "Logit Loom ggml patch is already applied: $(basename -- "${ggml_patch}")"
+elif git -C "${source_dir}/ggml" apply -p0 --whitespace=nowarn --check "${ggml_patch}"; then
+    git -C "${source_dir}/ggml" apply -p0 --whitespace=nowarn "${ggml_patch}"
+else
+    echo "native ggml checkout has changes incompatible with $(basename -- "${ggml_patch}")" >&2
+    exit 1
+fi
 mkdir -p -- "${build_dir}"
 
 cmake \
