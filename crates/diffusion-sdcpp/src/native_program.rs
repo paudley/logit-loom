@@ -45,7 +45,8 @@ use crate::{
         InstalledKreaActivation, KreaCallbackState, LoweredKreaActivation, krea_event_callback,
     },
     runtime::{
-        CallbackState, condition_callback, native_status_error, path_c_string, step_callback,
+        CallbackState, condition_callback, native_status_error, native_step_offset, path_c_string,
+        step_callback,
     },
 };
 
@@ -1987,7 +1988,12 @@ impl<R: ResidentArtifactPathResolver> SdcppResidentProgram<'_, R> {
         let profile_receipt = self.runtime.profile_receipt.clone();
         let native_receipt = self.runtime.native_receipt.clone();
         let components = component_map(&profile_receipt, &native_receipt)?;
-        let mut callbacks = CallbackState::new_full(
+        let initial_step = native_step_offset(
+            native.operation,
+            native.strength(),
+            request.schedule().steps(),
+        )?;
+        let mut callbacks = CallbackState::new_full_at(
             profile,
             &profile_receipt,
             &native_receipt,
@@ -1995,6 +2001,7 @@ impl<R: ResidentArtifactPathResolver> SdcppResidentProgram<'_, R> {
             components,
             &mut stage_program,
             None,
+            initial_step,
         )?;
         let callback_pointer = (&raw mut callbacks).cast::<c_void>();
         let params = Self::diffusion_params(native, prepared)?;

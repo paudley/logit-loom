@@ -16,7 +16,8 @@ use std::{
 };
 
 use logit_loom_diffusion::{
-    ControlFlow, DiffusionPlan, Digest, StepContext, TensorDType, TensorLayout, TensorSpec,
+    ControlFlow, DiffusionPlan, Digest, ImageOperation, StepContext, TensorDType, TensorLayout,
+    TensorSpec,
 };
 use logit_loom_executor::{
     CancellationProbe, ClassifiedExecutionError, CleanupReceipt, ExecutorState, FailureDisposition,
@@ -216,6 +217,53 @@ fn native_image_params(
     })
 }
 
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+pub(crate) fn native_step_offset(
+    operation: ImageOperation,
+    strength: f32,
+    step_count: usize,
+) -> Result<u32> {
+    if step_count == 0 {
+        return Err(Error::Invalid(
+            "native image schedule has no transition".to_owned(),
+        ));
+    }
+    if !strength.is_finite() || strength <= 0.0 || strength > 1.0 {
+        return Err(Error::Invalid(
+            "native image strength is invalid".to_owned(),
+        ));
+    }
+    if operation == ImageOperation::TextToImage {
+        return (strength.to_bits() == 1.0_f32.to_bits())
+            .then_some(0)
+            .ok_or_else(|| {
+                Error::Invalid("native text-to-image strength must equal one".to_owned())
+            });
+    }
+    if !matches!(
+        operation,
+        ImageOperation::ImageToImage | ImageOperation::Inpaint | ImageOperation::Outpaint
+    ) {
+        return Err(Error::Invalid(
+            "native image operation or strength is invalid".to_owned(),
+        ));
+    }
+    if strength.to_bits() == 1.0_f32.to_bits() {
+        return Ok(0);
+    }
+    let step_count_f32 = f32::from(
+        u16::try_from(step_count)
+            .map_err(|_| Error::Invalid("native image schedule exceeds u16".to_owned()))?,
+    );
+    let encoded_steps = (step_count_f32 * strength) as usize;
+    let offset = step_count
+        .checked_sub(encoded_steps)
+        .and_then(|value| value.checked_sub(1))
+        .ok_or_else(|| Error::Invalid("native image strength window underflowed".to_owned()))?;
+    u32::try_from(offset)
+        .map_err(|_| Error::Invalid("native image strength offset exceeds u32".to_owned()))
+}
+
 impl AdvancedNativeInputs {
     fn new(request: &AdvancedImageRequest<'_>) -> Result<Self> {
         let base = request.base();
@@ -235,10 +283,10 @@ impl AdvancedNativeInputs {
             })
             .collect();
         let operation = match request.operation() {
-            logit_loom_diffusion::ImageOperation::TextToImage => ffi::OPERATION_TEXT_TO_IMAGE,
-            logit_loom_diffusion::ImageOperation::ImageToImage => ffi::OPERATION_IMAGE_TO_IMAGE,
-            logit_loom_diffusion::ImageOperation::Inpaint => ffi::OPERATION_INPAINT,
-            logit_loom_diffusion::ImageOperation::Outpaint => ffi::OPERATION_OUTPAINT,
+            ImageOperation::TextToImage => ffi::OPERATION_TEXT_TO_IMAGE,
+            ImageOperation::ImageToImage => ffi::OPERATION_IMAGE_TO_IMAGE,
+            ImageOperation::Inpaint => ffi::OPERATION_INPAINT,
+            ImageOperation::Outpaint => ffi::OPERATION_OUTPAINT,
             _ => {
                 return Err(Error::Invalid(
                     "image ABI v2 generation requires a diffusion operation".to_owned(),
@@ -811,6 +859,7 @@ impl Sdcpp {
         })
     }
 
+    #[allow(clippy::too_many_lines)]
     fn generate_advanced_program_to_inner(
         &mut self,
         request: &AdvancedImageRequest<'_>,
@@ -843,7 +892,12 @@ impl Sdcpp {
         }
         let program_identity = program.implementation().clone();
         let callback_resume = self.callback_resume(checkpoint)?;
-        let mut callbacks = CallbackState::new_full(
+        let initial_step = native_step_offset(
+            request.operation(),
+            request.strength(),
+            base.schedule().steps(),
+        )?;
+        let mut callbacks = CallbackState::new_full_at(
             self.profile,
             &self.profile_receipt,
             &self.native_receipt,
@@ -851,6 +905,7 @@ impl Sdcpp {
             components,
             program,
             callback_resume,
+            initial_step,
         )?;
         let callback_pointer = (&raw mut callbacks).cast::<c_void>();
         let mut image = std::ptr::null_mut();
@@ -950,6 +1005,7 @@ impl Sdcpp {
         })
     }
 
+    #[allow(clippy::too_many_lines)]
     fn generate_advanced_controlled_to_inner(
         &mut self,
         request: &AdvancedImageRequest<'_>,
@@ -980,13 +1036,19 @@ impl Sdcpp {
             ));
         }
         let control_identity = control.implementation().clone();
-        let mut callbacks = CallbackState::new_control(
+        let initial_step = native_step_offset(
+            request.operation(),
+            request.strength(),
+            base.schedule().steps(),
+        )?;
+        let mut callbacks = CallbackState::new_control_at(
             self.profile,
             &self.profile_receipt,
             &self.native_receipt,
             base,
             components,
             control,
+            initial_step,
         )?;
         let callback_pointer = (&raw mut callbacks).cast::<c_void>();
         let mut image = std::ptr::null_mut();
@@ -1484,6 +1546,29 @@ impl<'a> CallbackState<'a> {
         program: &'a mut dyn StepProgram,
         resume: Option<CallbackResume<'a>>,
     ) -> Result<Self> {
+        Self::new_full_at(
+            profile,
+            profile_receipt,
+            native_receipt,
+            request,
+            components,
+            program,
+            resume,
+            0,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new_full_at(
+        profile: Profile,
+        profile_receipt: &'a ProfileReceipt,
+        native_receipt: &'a NativeRuntimeReceipt,
+        request: &'a ImageRequest,
+        components: BTreeMap<String, Digest>,
+        program: &'a mut dyn StepProgram,
+        resume: Option<CallbackResume<'a>>,
+        initial_step: u32,
+    ) -> Result<Self> {
         let mut condition_hasher = blake3::Hasher::new();
         condition_hasher.update(b"logit-loom\0sdcpp-conditioning-tensors-v1\0");
         hash_length_prefixed(&mut condition_hasher, request.prompt().as_bytes())?;
@@ -1496,6 +1581,15 @@ impl<'a> CallbackState<'a> {
         let (resume_checkpoint, resume_backend) = resume.map_or((None, None), |value| {
             (Some(value.checkpoint), Some(value.backend))
         });
+        let schedule_steps = u32::try_from(request.schedule().steps())
+            .map_err(|_| Error::Invalid("native image schedule exceeds u32".to_owned()))?;
+        if initial_step >= schedule_steps
+            || (resume_checkpoint.is_some() && resume_next_step < initial_step)
+        {
+            return Err(Error::Invalid(format!(
+                "native image initial step {initial_step} is incompatible with schedule steps {schedule_steps} and resume step {resume_next_step}"
+            )));
+        }
         Ok(Self {
             profile,
             profile_receipt,
@@ -1513,7 +1607,11 @@ impl<'a> CallbackState<'a> {
             steps: Vec::with_capacity(request.schedule().steps()),
             boundaries: Vec::new(),
             step_latency_milliseconds: Vec::with_capacity(request.schedule().steps()),
-            next_step: resume_next_step,
+            next_step: if resume_checkpoint.is_some() {
+                resume_next_step
+            } else {
+                initial_step
+            },
             error: None,
         })
     }
@@ -1548,6 +1646,26 @@ impl<'a> CallbackState<'a> {
         components: BTreeMap<String, Digest>,
         control: &'a mut dyn BoundaryControl,
     ) -> Result<Self> {
+        Self::new_control_at(
+            profile,
+            profile_receipt,
+            native_receipt,
+            request,
+            components,
+            control,
+            0,
+        )
+    }
+
+    fn new_control_at(
+        profile: Profile,
+        profile_receipt: &'a ProfileReceipt,
+        native_receipt: &'a NativeRuntimeReceipt,
+        request: &'a ImageRequest,
+        components: BTreeMap<String, Digest>,
+        control: &'a mut dyn BoundaryControl,
+        initial_step: u32,
+    ) -> Result<Self> {
         let mut value = Self::new_common(
             profile,
             profile_receipt,
@@ -1556,6 +1674,14 @@ impl<'a> CallbackState<'a> {
             components,
             CallbackProgram::Control(control),
         )?;
+        let schedule_steps = u32::try_from(request.schedule().steps())
+            .map_err(|_| Error::Invalid("native image schedule exceeds u32".to_owned()))?;
+        if initial_step >= schedule_steps {
+            return Err(Error::Invalid(format!(
+                "native image initial step {initial_step} exceeds schedule steps {schedule_steps}"
+            )));
+        }
+        value.next_step = initial_step;
         value.boundaries = Vec::with_capacity(request.schedule().steps());
         Ok(value)
     }
@@ -1763,9 +1889,10 @@ impl<'a> CallbackState<'a> {
         let expected_steps = u32::try_from(plan.schedule.steps())
             .map_err(|_| Error::Incompatible("schedule steps exceed u32".to_owned()))?;
         if raw.index != self.next_step || raw.count != expected_steps {
-            return Err(Error::Incompatible(
-                "native step index or total is out of sequence".to_owned(),
-            ));
+            return Err(Error::Incompatible(format!(
+                "native step sequence differs: observed index={} count={}; expected index={} count={expected_steps}",
+                raw.index, raw.count, self.next_step
+            )));
         }
         let context = StepContext::for_plan(
             plan,
@@ -2494,6 +2621,33 @@ mod tests {
         assert_ne!(INITIAL_SESSION_EPOCH, 0);
     }
 
+    #[test]
+    fn image_strength_maps_to_the_exact_native_schedule_offset() {
+        assert_eq!(
+            native_step_offset(ImageOperation::TextToImage, 1.0, 4).expect("text schedule"),
+            0
+        );
+        assert_eq!(
+            native_step_offset(ImageOperation::ImageToImage, 1.0, 4)
+                .expect("full img2img schedule"),
+            0
+        );
+        assert_eq!(
+            native_step_offset(ImageOperation::ImageToImage, 0.75, 4)
+                .expect("three-quarter img2img schedule"),
+            0
+        );
+        assert_eq!(
+            native_step_offset(ImageOperation::ImageToImage, 0.5, 4)
+                .expect("half img2img schedule"),
+            1
+        );
+        assert_eq!(
+            native_step_offset(ImageOperation::Inpaint, 0.25, 4).expect("quarter inpaint schedule"),
+            2
+        );
+    }
+
     struct MutateProgram {
         implementation: Digest,
         panic: bool,
@@ -2657,6 +2811,49 @@ mod tests {
         assert!(unsafe { validated_shape(shape.as_ptr(), 2, 20, 4) }.is_err());
         // SAFETY: Nullness is handled before dereference.
         assert!(unsafe { validated_shape(std::ptr::null(), 2, 24, 4) }.is_err());
+    }
+
+    #[test]
+    fn strength_window_starts_at_its_global_transition_and_reports_exact_mismatch() {
+        let (profile, native) = callback_receipts();
+        let request = ImageRequest::linear_euler("test", 16, 16, 7, 1.0, 4).expect("valid request");
+        let mut components = BTreeMap::new();
+        components.insert("model".to_owned(), Digest::of_bytes("model", b"test"));
+        let mut program = MutateProgram {
+            implementation: Digest::of_bytes("program", b"test"),
+            panic: false,
+            fail: false,
+        };
+        let mut callbacks = CallbackState::new_full_at(
+            Profile::MiniT2iB16,
+            &profile,
+            &native,
+            &request,
+            components,
+            &mut program,
+            None,
+            1,
+        )
+        .expect("offset callback state");
+        assert_eq!(call_condition(&mut callbacks), ffi::CALLBACK_CONTINUE);
+        let mut state = vec![0.0; 16 * 16 * 3];
+        assert_eq!(
+            call_step_at(&mut callbacks, &mut state, 1, 3, 0.75, 0.5, 0.0),
+            ffi::CALLBACK_ERROR
+        );
+        assert_eq!(
+            callbacks.error.as_deref(),
+            Some(
+                "incompatible stable-diffusion.cpp companion: native step sequence differs: observed index=1 count=3; expected index=1 count=4"
+            )
+        );
+
+        callbacks.error = None;
+        assert_eq!(
+            call_step_at(&mut callbacks, &mut state, 1, 4, 0.75, 0.5, 0.0),
+            ffi::CALLBACK_CONTINUE
+        );
+        assert_eq!(callbacks.steps[0].step_index, 1);
     }
 
     #[test]

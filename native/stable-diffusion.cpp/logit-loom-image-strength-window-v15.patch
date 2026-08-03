@@ -1,0 +1,179 @@
+diff --git src/runtime/denoiser.hpp src/runtime/denoiser.hpp
+--- src/runtime/denoiser.hpp
++++ src/runtime/denoiser.hpp
+@@ -1564,11 +1564,22 @@ static sd::Tensor<float> sample_euler(denoise_cb_t model,
+                                       int32_t* step_callback_status,
+                                       const float* resume_state,
+                                       size_t resume_state_len,
+-                                      uint32_t resume_next_step) {
++                                      uint32_t resume_next_step,
++                                      uint32_t step_index_offset,
++                                      uint32_t step_count) {
+     int steps = static_cast<int>(sigmas.size()) - 1;
++    if (step_callback != nullptr &&
++        (step_count == 0 ||
++         step_index_offset > step_count ||
++         static_cast<uint32_t>(steps) > step_count - step_index_offset)) {
++        *step_callback_status = SD_LOOM_STATUS_CALLBACK_ERROR;
++        return {};
++    }
++    uint32_t local_resume_next_step = 0;
+     if (resume_next_step > 0) {
+         if (resume_state == nullptr ||
+-            resume_next_step >= static_cast<uint32_t>(steps) ||
++            resume_next_step < step_index_offset ||
++            resume_next_step >= step_index_offset + static_cast<uint32_t>(steps) ||
+             resume_state_len != static_cast<size_t>(x.numel()) ||
+             std::any_of(resume_state,
+                         resume_state + resume_state_len,
+@@ -1576,12 +1587,13 @@ static sd::Tensor<float> sample_euler(denoise_cb_t model,
+             *step_callback_status = SD_LOOM_STATUS_CALLBACK_ERROR;
+             return {};
+         }
++        local_resume_next_step = resume_next_step - step_index_offset;
+         std::copy(resume_state, resume_state + resume_state_len, x.data());
+     } else if (resume_state != nullptr || resume_state_len != 0) {
+         *step_callback_status = SD_LOOM_STATUS_CALLBACK_ERROR;
+         return {};
+     }
+-    for (int i = static_cast<int>(resume_next_step); i < steps; i++) {
++    for (int i = static_cast<int>(local_resume_next_step); i < steps; i++) {
+         auto step_started = std::chrono::steady_clock::now();
+         float sigma       = sigmas[i];
+         auto denoised_opt = model(x, sigma, i + 1);
+@@ -1598,8 +1610,8 @@ static sd::Tensor<float> sample_euler(denoise_cb_t model,
+                     .count();
+             sd_loom_step_v1_t step = {
+                 SD_LOOM_ABI_VERSION,
+-                static_cast<uint32_t>(i),
+-                static_cast<uint32_t>(steps),
++                step_index_offset + static_cast<uint32_t>(i),
++                step_count,
+                 sigma,
+                 sigmas[i + 1],
+                 x.data(),
+@@ -2728,7 +2740,9 @@ static sd::Tensor<float> sample_k_diffusion(sample_method_t method,
+                                             int32_t* step_callback_status,
+                                             const float* resume_state,
+                                             size_t resume_state_len,
+-                                            uint32_t resume_next_step) {
++                                            uint32_t resume_next_step,
++                                            uint32_t step_index_offset,
++                                            uint32_t step_count) {
+     if (step_callback != nullptr && method != EULER_SAMPLE_METHOD) {
+         *step_callback_status = SD_LOOM_STATUS_UNSUPPORTED;
+         return {};
+@@ -2751,7 +2765,9 @@ static sd::Tensor<float> sample_k_diffusion(sample_method_t method,
+                                 step_callback_status,
+                                 resume_state,
+                                 resume_state_len,
+-                                resume_next_step);
++                                resume_next_step,
++                                step_index_offset,
++                                step_count);
+         case HEUN_SAMPLE_METHOD:
+             return sample_heun(model, std::move(x), sigmas);
+         case DPM2_SAMPLE_METHOD:
+diff --git src/stable-diffusion.cpp src/stable-diffusion.cpp
+--- src/stable-diffusion.cpp
++++ src/stable-diffusion.cpp
+@@ -239,6 +239,8 @@ public:
+     const float* loom_resume_state            = nullptr;
+     size_t loom_resume_state_len              = 0;
+     uint32_t loom_resume_next_step            = 0;
++    uint32_t loom_step_index_offset           = 0;
++    uint32_t loom_step_count                  = 0;
+     uint64_t loom_program_generation          = 0;
+     bool loom_program_active                  = false;
+     std::vector<sd_loom_scheduled_model_block_v4_t> loom_model_block_controls;
+@@ -2550,7 +2552,7 @@ public:
+             bool is_skiplayer_step            = skip_layer_guidance.is_enabled_for_step(step_guidance_input);
+             std::vector<ModelBlockControl> active_model_block_controls;
+             if (step > 0 && !loom_model_block_controls.empty()) {
+-                uint32_t model_step = static_cast<uint32_t>(step - 1);
++                uint32_t model_step = loom_step_index_offset + static_cast<uint32_t>(step - 1);
+                 for (auto& control : loom_model_block_controls) {
+                     if (control.selects(model_step)) {
+                         if (control.application_index !=
+@@ -2612,7 +2614,9 @@ public:
+                             ? nullptr
+                             : &active_model_block_controls,
+                         loom_krea_activation,
+-                        step > 0 ? static_cast<uint32_t>(step - 1) : 0,
++                        step > 0
++                            ? loom_step_index_offset + static_cast<uint32_t>(step - 1)
++                            : loom_step_index_offset,
+                         activation_branch};
+                 } else if (sd_version_is_anima(version)) {
+                     diffusion_params.extra = AnimaDiffusionExtra{condition.c_t5_ids.empty() ? nullptr : &condition.c_t5_ids,
+@@ -2782,7 +2786,9 @@ public:
+                                          &loom_step_status,
+                                          loom_resume_state,
+                                          loom_resume_state_len,
+-                                         loom_resume_next_step);
++                                         loom_resume_next_step,
++                                         loom_step_index_offset,
++                                         loom_step_count);
+         if (x0_opt.empty()) {
+             LOG_ERROR("Diffusion model sampling failed");
+             if (control_net) {
+@@ -5862,6 +5868,9 @@ int32_t sd_loom_generate_image_v1(sd_ctx_t* sd_ctx,
+     sd_ctx->sd->loom_resume_state       = params->resume_state;
+     sd_ctx->sd->loom_resume_state_len   = params->resume_state_len;
+     sd_ctx->sd->loom_resume_next_step   = params->resume_next_step;
++    sd_ctx->sd->loom_step_index_offset  = 0;
++    sd_ctx->sd->loom_step_count =
++        static_cast<uint32_t>(params->sigma_count - 1);
+ 
+     sd_image_t* images = nullptr;
+     int image_count    = 0;
+@@ -5876,6 +5885,8 @@ int32_t sd_loom_generate_image_v1(sd_ctx_t* sd_ctx,
+     sd_ctx->sd->loom_resume_state       = nullptr;
+     sd_ctx->sd->loom_resume_state_len   = 0;
+     sd_ctx->sd->loom_resume_next_step   = 0;
++    sd_ctx->sd->loom_step_index_offset  = 0;
++    sd_ctx->sd->loom_step_count         = 0;
+ 
+     if (status == SD_LOOM_STATUS_CALLBACK_ERROR ||
+         status == SD_LOOM_STATUS_UNSUPPORTED) {
+@@ -5989,6 +6000,18 @@ static bool sd_loom_loras_applied_v2(sd_ctx_t* sd_ctx,
+     return true;
+ }
+ 
++static uint32_t sd_loom_strength_step_offset_v2(int32_t operation,
++                                                 float strength,
++                                                 size_t sigma_count) {
++    if (operation == SD_LOOM_TEXT_TO_IMAGE_V2 || strength == 1.f) {
++        return 0;
++    }
++    size_t steps = sigma_count - 1;
++    size_t encoded_steps = static_cast<size_t>(
++        static_cast<float>(steps) * strength);
++    return static_cast<uint32_t>(steps - encoded_steps - 1);
++}
++
+ static void sd_loom_reset_callbacks(sd_ctx_t* sd_ctx) {
+     sd_ctx->sd->loom_condition_callback      = nullptr;
+     sd_ctx->sd->loom_condition_callback_data = nullptr;
+@@ -5998,6 +6021,8 @@ static void sd_loom_reset_callbacks(sd_ctx_t* sd_ctx) {
+     sd_ctx->sd->loom_resume_state            = nullptr;
+     sd_ctx->sd->loom_resume_state_len        = 0;
+     sd_ctx->sd->loom_resume_next_step        = 0;
++    sd_ctx->sd->loom_step_index_offset       = 0;
++    sd_ctx->sd->loom_step_count              = 0;
+ }
+ 
+ int32_t sd_loom_generate_image_v2(sd_ctx_t* sd_ctx,
+@@ -6128,6 +6153,12 @@ int32_t sd_loom_generate_image_v2(sd_ctx_t* sd_ctx,
+     sd_ctx->sd->loom_resume_state            = params->resume_state;
+     sd_ctx->sd->loom_resume_state_len        = params->resume_state_len;
+     sd_ctx->sd->loom_resume_next_step        = params->resume_next_step;
++    sd_ctx->sd->loom_step_index_offset       = sd_loom_strength_step_offset_v2(
++        params->operation,
++        params->strength,
++        params->sigma_count);
++    sd_ctx->sd->loom_step_count =
++        static_cast<uint32_t>(params->sigma_count - 1);
+ 
+     sd_image_t* images = nullptr;
+     int image_count    = 0;

@@ -80,6 +80,8 @@ then
 [`logit-loom-resume-v7.patch`](logit-loom-resume-v7.patch),
 then
 [`logit-loom-native-errors-v9.patch`](logit-loom-native-errors-v9.patch),
+then
+[`logit-loom-image-strength-window-v15.patch`](logit-loom-image-strength-window-v15.patch),
 and finally the exact ggml-submodule
 [`logit-loom-vulkan-budget-v8.patch`](logit-loom-vulkan-budget-v8.patch),
 [`logit-loom-vulkan-errors-v10.patch`](logit-loom-vulkan-errors-v10.patch), and
@@ -127,6 +129,13 @@ submission cannot leave the native session or device state uncertain. Each
 logical node or fusion is a separate synchronized submission there, bounding
 individual compute-ring jobs and reporting the exact node, operation, type,
 and shape if submission fails.
+
+Image-to-image, inpaint, and outpaint strength may select a suffix of the
+declared Euler schedule. The companion reports those executed transitions at
+their original global indices and preserves the original total, including for
+checkpoint continuation, scheduled LoRA boundaries, model-block operators,
+and Krea activation mechanics. Rust validates the exact initial index and
+reports observed and expected indices and totals on any mismatch.
 
 The reviewed decision and boundary are in
 [`docs/adr/0001-stable-diffusion-runtime.md`](../../docs/adr/0001-stable-diffusion-runtime.md).

@@ -50,6 +50,7 @@ patch_files=(
     "${repo_root}/native/stable-diffusion.cpp/logit-loom-krea-activation-v6.patch"
     "${repo_root}/native/stable-diffusion.cpp/logit-loom-resume-v7.patch"
     "${repo_root}/native/stable-diffusion.cpp/logit-loom-native-errors-v9.patch"
+    "${repo_root}/native/stable-diffusion.cpp/logit-loom-image-strength-window-v15.patch"
 )
 ggml_patches=(
     "${repo_root}/native/stable-diffusion.cpp/logit-loom-vulkan-budget-v8.patch"
