@@ -1,0 +1,45 @@
+diff --git src/ggml-vulkan/ggml-vulkan.cpp src/ggml-vulkan/ggml-vulkan.cpp
+--- src/ggml-vulkan/ggml-vulkan.cpp
++++ src/ggml-vulkan/ggml-vulkan.cpp
+@@ -15028,10 +15028,24 @@ static void ggml_vk_compute_forward(ggml_backend_vk_context * ctx, ggml_cgraph *
+-        if (almost_ready && !ctx->almost_ready_fence_pending) {
+-            ggml_vk_submit(subctx, ctx->almost_ready_fence);
+-            ctx->almost_ready_fence_pending = true;
+-        } else {
+-            ggml_vk_submit(subctx, {});
++        try {
++            if (almost_ready && !ctx->almost_ready_fence_pending) {
++                ggml_vk_submit(subctx, ctx->almost_ready_fence);
++                ctx->almost_ready_fence_pending = true;
++            } else {
++                ggml_vk_submit(subctx, {});
++            }
++            ctx->submit_pending = true;
++            if (ctx->device->vendor_id == VK_VENDOR_ID_AMD && ctx->device->properties.deviceID == 0x1586) {
++                ggml_vk_synchronize(ctx);
++            }
++        } catch (const std::exception& error) {
++            std::ostringstream message;
++            message << "Vulkan submission failed: node_index=" << tensor_idx
++                    << "; tensor_name=" << tensor->name
++                    << "; op=" << ggml_op_name(tensor->op)
++                    << "; type=" << ggml_type_name(tensor->type)
++                    << "; shape=[" << tensor->ne[0] << ',' << tensor->ne[1] << ',' << tensor->ne[2] << ',' << tensor->ne[3] << ']'
++                    << "; native_error=" << error.what();
++            throw std::runtime_error(message.str());
+         }
+-        ctx->submit_pending = true;
+ 
+ #ifdef GGML_VULKAN_CHECK_RESULTS
+         ggml_vk_synchronize(ctx);
+@@ -16531,7 +16545,9 @@ static ggml_status ggml_backend_vk_graph_compute(ggml_backend_t backend, ggml_cg
+ 
+         // Signal the almost_ready fence when the graph is mostly complete (< 20% remaining)
+         bool almost_ready = (cgraph->n_nodes - i) < cgraph->n_nodes / 5;
+-        bool submit = ((uint32_t)submitted_nodes >= ctx->device->max_nodes_per_submit) ||
++        const bool strix_halo = ctx->device->vendor_id == VK_VENDOR_ID_AMD &&
++                                ctx->device->properties.deviceID == 0x1586;
++        bool submit = strix_halo || ((uint32_t)submitted_nodes >= ctx->device->max_nodes_per_submit) ||
+                       (mul_mat_bytes_per_submit != 0 && mul_mat_bytes >= mul_mat_bytes_per_submit) ||
+                       (i + ctx->num_additional_fused_ops >= last_node) ||
+                       (almost_ready && !ctx->almost_ready_fence_pending);
