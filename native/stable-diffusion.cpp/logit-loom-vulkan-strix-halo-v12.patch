@@ -1,0 +1,20 @@
+diff --git src/ggml-vulkan/ggml-vulkan.cpp src/ggml-vulkan/ggml-vulkan.cpp
+--- src/ggml-vulkan/ggml-vulkan.cpp
++++ src/ggml-vulkan/ggml-vulkan.cpp
+@@ -5793,6 +5793,16 @@ static vk_device ggml_vk_get_device(size_t idx) {
+         device->vendor_id = device->properties.vendorID;
+         device->driver_id = driver_props.driverID;
+ 
++        // RADV advertises cooperative matrices on AMD Strix Halo 1002:1586,
++        // but cooperative-matrix workloads can lose the device. Disable both
++        // cooperative-matrix implementations on this exact device before
++        // selecting device features or creating cooperative pipelines.
++        if (device->vendor_id == VK_VENDOR_ID_AMD && device->properties.deviceID == 0x1586) {
++            device->coopmat_support = false;
++            coopmat2_support = false;
++            coopmat2_decode_vector_support = false;
++        }
++
+         if (device->driver_id == vk::DriverId::eMoltenvk) {
+             // Disable external_memory_host until https://github.com/KhronosGroup/MoltenVK/pull/2622
+             // is available in the Vulkan SDK.
