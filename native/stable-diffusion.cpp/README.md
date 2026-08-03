@@ -108,6 +108,10 @@ allocation behavior. When it is present, it must be one positive decimal byte
 count; invalid or zero values fail allocations closed. The counter covers each
 embedded ggml Vulkan memory allocation and is decremented exactly once on
 release. This is a hard process ceiling, not a quality or performance claim.
+Every failed Vulkan memory attempt reports its complete requested size, memory
+type, required flags, Vulkan error code/category/message, and C++ exception to
+the installed native log callback; allocation failures are never collapsed to
+an anonymous null buffer.
 
 The reviewed decision and boundary are in
 [`docs/adr/0001-stable-diffusion-runtime.md`](../../docs/adr/0001-stable-diffusion-runtime.md).

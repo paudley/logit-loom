@@ -1,0 +1,45 @@
+diff --git src/ggml-vulkan/ggml-vulkan.cpp src/ggml-vulkan/ggml-vulkan.cpp
+index a0f6163..38794de 100644
+--- src/ggml-vulkan/ggml-vulkan.cpp
++++ src/ggml-vulkan/ggml-vulkan.cpp
+@@ -3112,6 +3112,13 @@ static vk_buffer ggml_vk_create_buffer(vk_device& device, size_t size, const std
+             import_info.setPNext(&mem_flags_info);
+             buf->device_memory = device->device.allocateMemory({ size, memory_type_idx, &import_info });
+         } catch (const vk::SystemError& e) {
++            GGML_LOG_ERROR("ggml_vulkan: imported device-memory allocation failed: requested_bytes=%zu; memory_type=%u; error_code=%d; error_category=%s; error_message=%s; exception=%s\n",
++                           size,
++                           memory_type_idx,
++                           e.code().value(),
++                           e.code().category().name(),
++                           e.code().message().c_str(),
++                           e.what());
+             ggml_vk_logit_loom_release(size);
+         }
+         if (buf->device_memory) {
+@@ -3142,6 +3149,14 @@ static vk_buffer ggml_vk_create_buffer(vk_device& device, size_t size, const std
+                     done = true;
+                     break;
+                 } catch (const vk::SystemError& e) {
++                    GGML_LOG_ERROR("ggml_vulkan: device-memory allocation attempt failed: requested_bytes=%zu; memory_type=%u; required_flags=%s; error_code=%d; error_category=%s; error_message=%s; exception=%s\n",
++                                   static_cast<size_t>(mem_req.size),
++                                   *mtype_it,
++                                   vk::to_string(req_flags).c_str(),
++                                   e.code().value(),
++                                   e.code().category().name(),
++                                   e.code().message().c_str(),
++                                   e.what());
+                     // loop and retry
+                     // during last attempt throw the exception
+                     if (it + 1 == req_flags_list.end() && mtype_it + 1 == memory_type_indices.end()) {
+@@ -15268,5 +15283,11 @@ static ggml_backend_buffer_t ggml_backend_vk_buffer_type_alloc_buffer(ggml_backe
+     try {
+         dev_buffer = ggml_vk_create_buffer_device(ctx->device, size);
+     } catch (const vk::SystemError& e) {
++        GGML_LOG_ERROR("ggml_vulkan: device buffer allocation failed: requested_bytes=%zu; error_code=%d; error_category=%s; error_message=%s; exception=%s\n",
++                       size,
++                       e.code().value(),
++                       e.code().category().name(),
++                       e.code().message().c_str(),
++                       e.what());
+         return nullptr;
+     }
