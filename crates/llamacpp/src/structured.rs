@@ -29,8 +29,6 @@ pub const MAX_STRUCTURED_TOKENIZER_TABLE_BYTES: usize = 64 * 1024 * 1024;
 /// Maximum canonical artifact or validation-report bytes hashed per attempt.
 pub const MAX_STRUCTURED_VALIDATION_EVIDENCE_BYTES: usize = 1024 * 1024;
 
-const RETAINED_ERROR_BYTES: usize = 512;
-
 /// One exact model-tokenizer candidate presented to byte feedback.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ByteFeedbackCandidate<'a> {
@@ -947,14 +945,12 @@ fn validate_output(
     }));
     let outcome = match result {
         Ok(Ok(outcome)) => outcome,
-        Ok(Err(error)) => {
-            return Err(Error::StructuredValidator(bound_message(error.to_string())));
-        }
+        Ok(Err(error)) => return Err(Error::StructuredValidator(error.to_string())),
         Err(payload) => {
-            return Err(Error::StructuredValidator(bound_message(format!(
+            return Err(Error::StructuredValidator(format!(
                 "validator panicked: {}",
                 panic_message(payload.as_ref())
-            ))));
+            )));
         }
     };
     for (field, bytes) in [
@@ -1020,29 +1016,16 @@ fn feedback_callback<T>(
 ) -> Result<T, Error> {
     match catch_unwind(AssertUnwindSafe(callback)) {
         Ok(Ok(value)) => Ok(value),
-        Ok(Err(error)) => Err(Error::StructuredFeedback(bound_message(format!(
-            "{phase}: {error}"
-        )))),
-        Err(payload) => Err(Error::StructuredFeedback(bound_message(format!(
+        Ok(Err(error)) => Err(Error::StructuredFeedback(format!("{phase}: {error}"))),
+        Err(payload) => Err(Error::StructuredFeedback(format!(
             "{phase} panicked: {}",
             panic_message(payload.as_ref())
-        )))),
+        ))),
     }
 }
 
 fn matching_stop(stops: &[Vec<u8>], output: &[u8]) -> Option<usize> {
     stops.iter().position(|stop| output.ends_with(stop))
-}
-
-fn bound_message(mut message: String) -> String {
-    if message.len() > RETAINED_ERROR_BYTES {
-        let mut end = RETAINED_ERROR_BYTES;
-        while !message.is_char_boundary(end) {
-            end -= 1;
-        }
-        message.truncate(end);
-    }
-    message
 }
 
 fn panic_message(payload: &(dyn Any + Send)) -> String {
@@ -1071,11 +1054,15 @@ mod tests {
     }
 
     #[test]
-    fn callback_messages_are_bounded_without_splitting_utf8() {
-        let message = "é".repeat(RETAINED_ERROR_BYTES);
-        let bounded = bound_message(message);
-        assert!(bounded.len() <= RETAINED_ERROR_BYTES);
-        assert!(std::str::from_utf8(bounded.as_bytes()).is_ok());
+    fn callback_panic_messages_are_retained_complete() {
+        let message = "complete callback failure detail 🧶".repeat(1_024);
+        let result = feedback_callback("test", || -> Result<(), ByteFeedbackError> {
+            std::panic::panic_any(message.clone());
+        });
+        let Err(Error::StructuredFeedback(observed)) = result else {
+            panic!("expected structured feedback failure");
+        };
+        assert_eq!(observed, format!("test panicked: {message}"));
     }
 
     #[test]
