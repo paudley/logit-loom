@@ -139,7 +139,7 @@ impl RankedBpe {
             &(
                 GIGATOKEN_REVISION,
                 "gigatoken-ranked-short-merge",
-                "wide-0.7.33",
+                "wide-1.6.0",
                 "safe-packed-u32x8-min-v1",
                 &merges_identity,
             ),

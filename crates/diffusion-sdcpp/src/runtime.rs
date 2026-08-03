@@ -2346,7 +2346,19 @@ fn sha256_file(path: &Path) -> Result<String> {
         }
         hasher.update(&buffer[..count]);
     }
-    Ok(format!("{:x}", hasher.finalize()))
+    let digest = hasher.finalize();
+    Ok(encode_lower_hex(digest.as_ref()))
+}
+
+fn encode_lower_hex(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+
+    let mut encoded = String::with_capacity(bytes.len().saturating_mul(2));
+    for byte in bytes {
+        encoded.push(char::from(HEX[usize::from(*byte >> 4)]));
+        encoded.push(char::from(HEX[usize::from(*byte & 0x0f)]));
+    }
+    encoded
 }
 
 unsafe fn bounded_native_label(pointer: *const i8) -> Result<String> {
@@ -2638,6 +2650,11 @@ mod tests {
     #[test]
     fn new_runtime_epoch_is_a_valid_receipt_identity() {
         assert_ne!(INITIAL_SESSION_EPOCH, 0);
+    }
+
+    #[test]
+    fn digest_bytes_encode_as_exact_lowercase_hex() {
+        assert_eq!(encode_lower_hex(&[0x00, 0xab, 0xff]), "00abff");
     }
 
     #[test]

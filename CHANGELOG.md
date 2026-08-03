@@ -131,6 +131,10 @@ include breaking API changes.
 
 ### Changed
 
+- Updated direct `sha2`, `libloading`, and `wide` dependencies to their current
+  compatible major releases, refreshed compatible transitive crates, retained
+  exact lowercase SHA-256 identities, and advanced the ranked-BPE
+  implementation identity to bind `wide` 1.6.0.
 - Newly loaded stable-diffusion.cpp sessions now begin at nonzero runtime epoch
   `1`, so first-operation Krea activation receipts have a valid stale-handle
   identity before any explicit session clear.

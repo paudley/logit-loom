@@ -151,7 +151,19 @@ fn sha256_file(path: &Path) -> Result<String, AcquireError> {
         }
         hasher.update(&buffer[..count]);
     }
-    Ok(format!("{:x}", hasher.finalize()))
+    let digest = hasher.finalize();
+    Ok(encode_lower_hex(digest.as_ref()))
+}
+
+fn encode_lower_hex(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+
+    let mut encoded = String::with_capacity(bytes.len().saturating_mul(2));
+    for byte in bytes {
+        encoded.push(char::from(HEX[usize::from(*byte >> 4)]));
+        encoded.push(char::from(HEX[usize::from(*byte & 0x0f)]));
+    }
+    encoded
 }
 
 fn display_command(args: &[OsString]) -> String {
@@ -180,7 +192,12 @@ mod tests {
 
     use logit_loom_models::Catalog;
 
-    use super::hf_download_args;
+    use super::{encode_lower_hex, hf_download_args};
+
+    #[test]
+    fn digest_bytes_encode_as_exact_lowercase_hex() {
+        assert_eq!(encode_lower_hex(&[0x00, 0xab, 0xff]), "00abff");
+    }
 
     #[test]
     fn download_command_uses_exact_files_and_revision_without_a_token() {

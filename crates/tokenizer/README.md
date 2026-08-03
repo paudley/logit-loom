@@ -90,7 +90,7 @@ open in `NEXT_STEPS.md`.
 The ranked merge mechanics and flat-batch direction are a safe Rust
 reimplementation derived from Gigatoken 0.9.0 at commit
 `0d9765fa7312af7534535e6315a5c49d74807b2a`. The implementation uses the
-safe, exactly pinned `wide` 0.7.33 abstraction; it does not import upstream
+safe, exactly pinned `wide` 1.6.0 abstraction; it does not import upstream
 unsafe intrinsics, unchecked indexing, prefetching, huge-page hints, `PyO3`,
 `NumPy`, `Arrow`, `Rayon`, Hub, or runtime networking. See
 `upstream/gigatoken.toml` and `upstream/GIGATOKEN-MIT.txt`.

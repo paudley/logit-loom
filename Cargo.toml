@@ -27,7 +27,7 @@ homepage = "https://github.com/paudley/logit-loom"
 [workspace.dependencies]
 blake3 = "1.8.5"
 llama-cpp-4 = { version = "=0.4.2", git = "https://github.com/paudley/llama-cpp-rs.git", rev = "d76356b9725a3736212b3bfd16c66fc80c995c29", default-features = false }
-libloading = "0.8.9"
+libloading = "0.9.0"
 logit-loom = { version = "=0.2.0", path = "crates/loom" }
 logit-loom-core = { version = "=0.2.0", path = "crates/core" }
 logit-loom-diffusion = { version = "=0.2.0", path = "crates/diffusion" }
@@ -38,10 +38,10 @@ logit-loom-models = { version = "=0.2.0", path = "models" }
 logit-loom-tokenizer = { version = "=0.2.0", path = "crates/tokenizer" }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.150"
-sha2 = "0.10.9"
+sha2 = "0.11.0"
 thiserror = "2.0.19"
 tokenizers = { version = "=0.23.1", default-features = false, features = ["onig"] }
-wide = "=0.7.33"
+wide = "=1.6.0"
 
 [workspace.lints.rust]
 missing_docs = "deny"

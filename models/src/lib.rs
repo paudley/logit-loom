@@ -818,11 +818,24 @@ fn sha256_file(path: &Path) -> Result<String, ArtifactError> {
         }
         hasher.update(&buffer[..count]);
     }
-    Ok(format!("{:x}", hasher.finalize()))
+    let digest = hasher.finalize();
+    Ok(encode_lower_hex(digest.as_ref()))
 }
 
 fn sha256_bytes(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+    let digest = Sha256::digest(bytes);
+    encode_lower_hex(digest.as_ref())
+}
+
+fn encode_lower_hex(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+
+    let mut encoded = String::with_capacity(bytes.len().saturating_mul(2));
+    for byte in bytes {
+        encoded.push(char::from(HEX[usize::from(*byte >> 4)]));
+        encoded.push(char::from(HEX[usize::from(*byte & 0x0f)]));
+    }
+    encoded
 }
 
 fn invalid<T>(message: String) -> Result<T, CatalogError> {
@@ -833,8 +846,16 @@ fn invalid<T>(message: String) -> Result<T, CatalogError> {
 mod tests {
     use super::{
         Catalog, CatalogError, QWEN3_SMALL_ARTIFACT_PATH, QWEN3_SMALL_PROFILE_ID,
-        QWEN3_SMALL_SOURCE_ID,
+        QWEN3_SMALL_SOURCE_ID, sha256_bytes,
     };
+
+    #[test]
+    fn sha256_encoding_is_exact_lowercase_hex() {
+        assert_eq!(
+            sha256_bytes(b"abc"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+    }
 
     #[test]
     fn packaged_catalog_is_valid() {
