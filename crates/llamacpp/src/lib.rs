@@ -47,8 +47,8 @@ pub use structured::{
 };
 
 /// Exact native Rust binding version used by this adapter release.
-pub const LLAMA_CPP_BINDING_VERSION: &str = "llama-cpp-4:0.4.2+logit-loom-adr0002";
+pub const LLAMA_CPP_BINDING_VERSION: &str = "llama-cpp-4:0.5.0+logit-loom-adr0002";
 /// Exact source revision of the reviewed native Rust binding successor.
-pub const LLAMA_CPP_BINDING_SOURCE_REVISION: &str = "d76356b9725a3736212b3bfd16c66fc80c995c29";
+pub const LLAMA_CPP_BINDING_SOURCE_REVISION: &str = "f1c5dd05906a11aee5c2eaf1265851bf29752d67";
 /// Exact llama.cpp revision carried by the ADR 0002 binding successor.
-pub const LLAMA_CPP_REVISION: &str = "f87067841bac583bc089a225382248d857791ca8";
+pub const LLAMA_CPP_REVISION: &str = "221f0f6356efe2260023208365705ec5d5a7c8f5";

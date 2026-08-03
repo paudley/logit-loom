@@ -4,10 +4,11 @@
 
 - Status: accepted; source implementation complete; live acceptance pending
 - Decision date: 2026-07-27
-- Reviewed binding: public `llama-cpp-4` 0.4.2 successor at
-  `paudley/llama-cpp-rs@d76356b9725a3736212b3bfd16c66fc80c995c29`
-- Reviewed llama.cpp revision: `f87067841bac583bc089a225382248d857791ca8`
-- Upstream review:
+- Reviewed binding: registry `llama-cpp-4` 0.5.0 at
+  `eugenehp/llama-cpp-rs@f1c5dd05906a11aee5c2eaf1265851bf29752d67`
+- Reviewed llama.cpp revision: `221f0f6356efe2260023208365705ec5d5a7c8f5`
+  (`b10235`)
+- Merged upstream review:
   [`eugenehp/llama-cpp-rs#301`](https://github.com/eugenehp/llama-cpp-rs/pull/301)
 - Delivery order: before ADR 0003
 
@@ -297,10 +298,10 @@ fails before allocation for unsupported topology, policy, capacity,
 implementation identity, pinned vocabulary-compatibility rules, MTP row
 width, or EAGLE-3 draft metadata and never falls back to ordinary generation.
 
-The binding successor is forward-ported to the literal revision recorded
-above. It owns bounded tensor transactions, native begin/end decode hooks,
-exclusive-lifetime speculative wrappers, contained C++ lifecycle failures,
-and versioned MTP/EAGLE-3 implementation-state capture and restore.
+The registry release is pinned to the literal source and llama.cpp revisions
+recorded above. It owns bounded tensor transactions, native begin/end decode
+hooks, exclusive-lifetime speculative wrappers, contained C++ lifecycle
+failures, and versioned MTP/EAGLE-3 implementation-state capture and restore.
 
 `generate_speculative_checkpointed` now captures the complete quiescent
 process-local envelope. It retains target and draft context state, versioned
@@ -344,8 +345,9 @@ accelerator-backed fixtures using caller-supplied compatible artifacts.
 Model-free tests and adapter compilation are not live-model evidence.
 
 The binding is pinned to an exact public source revision for reproducible
-source builds. It must also be available as a registry package before the
-crates.io adapter can be published.
+source builds and is available as an exact registry package. This satisfies
+the crates.io adapter's packaging gate without changing the pending live-model
+acceptance status above.
 
 ## Coordinator and availability boundary
 
@@ -368,8 +370,8 @@ fails the operation; it does not make the compiled capability optional.
 - Logit Loom gains exact contracts and native execution for capture, runtime
   activation programs, MTP, EAGLE-3, and reusable process-local speculative
   checkpoint branches.
-- The safe binding is landed and pinned for source builds; it must be
-  registry-published before the crates.io adapter releases the new capability.
+- The safe binding is landed upstream, registry-published, and pinned for
+  reproducible source builds and adapter packaging.
 - Exact graph-site profiles are renewed when llama.cpp or a model architecture
   changes.
 - Full speculative checkpoints are larger and more conservative than target

@@ -142,14 +142,13 @@ include breaking API changes.
   at their own serialized dimensions while source images and masks remain
   canvas-bound. Lowering preserves the exact reference bytes and geometry; no
   serialized shape, native ABI, or digest domain changed.
-- The text adapter now pins public `llama-cpp-4` 0.4.2 successor revision
-  `d76356b9725a3736212b3bfd16c66fc80c995c29`, forward-ported to llama.cpp
-  `f87067841bac583bc089a225382248d857791ca8`; source builds no longer require
-  an adjacent checkout, while crates.io packaging remains blocked until the
-  successor is registry-published.
-- The binding successor is submitted upstream as
+- The text adapter now pins registry-published public `llama-cpp-4` 0.5.0 at
+  source revision `f1c5dd05906a11aee5c2eaf1265851bf29752d67`, carrying llama.cpp
+  `221f0f6356efe2260023208365705ec5d5a7c8f5` (`b10235`); source builds no
+  longer require an adjacent checkout or Git dependency.
+- The binding successor was merged upstream as
   [`eugenehp/llama-cpp-rs#301`](https://github.com/eugenehp/llama-cpp-rs/pull/301);
-  the open pull request does not relax the registry publication gate.
+  its 0.5.0 registry publication satisfies the adapter packaging gate.
 - The successor binding validates speculative context shape and lifecycle,
   bounds copied prompt/state data, admits the `gpt-oss` EAGLE-3 v3 terminal
   extraction site, and converts missing EAGLE extraction output and C++

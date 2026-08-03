@@ -26,7 +26,7 @@ homepage = "https://github.com/paudley/logit-loom"
 
 [workspace.dependencies]
 blake3 = "1.8.5"
-llama-cpp-4 = { version = "=0.4.2", git = "https://github.com/paudley/llama-cpp-rs.git", rev = "d76356b9725a3736212b3bfd16c66fc80c995c29", default-features = false }
+llama-cpp-4 = { version = "=0.5.0", default-features = false }
 libloading = "0.9.0"
 logit-loom = { version = "=0.2.0", path = "crates/loom" }
 logit-loom-core = { version = "=0.2.0", path = "crates/core" }

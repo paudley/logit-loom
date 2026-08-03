@@ -96,15 +96,15 @@ measurements remain separate. Create-new component transforms use
 `projected-component-manifest-v1`. Derived output bytes never inherit the
 source artifact identity.
 
-`logit-loom-llamacpp` pins public `llama-cpp-4` 0.4.2 successor revision
-`d76356b9725a3736212b3bfd16c66fc80c995c29` from
-`https://github.com/paudley/llama-cpp-rs`, carrying literal llama.cpp revision
-`f87067841bac583bc089a225382248d857791ca8`. The successor adds bounded tensor
-transactions, native decode-lifecycle hooks, lifetime-bound MTP and EAGLE-3
-sessions, versioned exact implementation state, allocation-reusing
-tokenization and raw-piece sinks, and a count-only tokenizer query. During
-review, the workspace resolves that exact Git revision rather than a mutable
-branch or adjacent checkout.
+`logit-loom-llamacpp` pins the registry-published public `llama-cpp-4` 0.5.0
+release. Its crates.io package records upstream source revision
+`f1c5dd05906a11aee5c2eaf1265851bf29752d67` and carries literal llama.cpp
+revision `221f0f6356efe2260023208365705ec5d5a7c8f5` (`b10235`). The binding adds
+bounded tensor transactions, native decode-lifecycle hooks, lifetime-bound MTP
+and EAGLE-3 sessions, versioned exact implementation state,
+allocation-reusing tokenization and raw-piece sinks, and a count-only tokenizer
+query. The workspace resolves the exact registry version and checksum rather
+than a mutable branch or adjacent checkout.
 
 At this revision an EAGLE-3 v3 draft for `gpt-oss` may name the terminal
 target `NextN` extraction site as layer index `n_layer`. The adapter admits
@@ -112,16 +112,15 @@ that otherwise-out-of-range index only for the exact `gpt-oss` architecture
 profile. Missing target or draft extraction output returns a native process
 failure instead of aborting the host process.
 
-This arrangement supports reproducible source builds but is not publishable to
-crates.io. A crates.io Logit Loom release requires the successor as a registry
-package, and the release check rejects both path and Git sources. Upstream
-review is tracked in
-[`eugenehp/llama-cpp-rs#301`](https://github.com/eugenehp/llama-cpp-rs/pull/301);
-an open pull request or fork revision does not satisfy the registry gate.
-Changing the binding source, llama.cpp revision, graph-selector profile,
-decode hooks, or speculative-state envelope is a reviewed compatibility event:
-compile the complete workspace, inspect changed native semantics, rerun the
-opt-in model fixtures, and update this document and `CHANGELOG.md`.
+The successor was merged upstream in
+[`eugenehp/llama-cpp-rs#301`](https://github.com/eugenehp/llama-cpp-rs/pull/301)
+and released to crates.io, satisfying the adapter's registry-publication gate.
+The release check continues to reject path and Git sources. Changing the
+binding source, llama.cpp revision, graph-selector profile, decode hooks, or
+speculative-state envelope is a reviewed compatibility event: compile the
+complete workspace, inspect changed native semantics, and update this document
+and `CHANGELOG.md`. Renew the opt-in model fixtures before claiming live-model
+compatibility for a changed native revision.
 
 The readable runtime compatibility label includes the exact binding version,
 binding source revision, literal llama.cpp revision, Rust target, and selected
@@ -151,11 +150,11 @@ default. `logit-loom-runtime` forwards the same feature names to the adapter:
 | `prebuilt` | Binding-provided prebuilt artifacts |
 | `native-cpu` | Host-native CPU tuning |
 
-At the reviewed successor revision, the binding cannot authenticate existing
-0.4.2 prebuilt archives against its native patch set. Selecting `prebuilt`
-therefore uses the verified source build with a warning, and an explicit
-unverifiable `LLAMA_PREBUILT_DIR` is rejected. This feature must not skip the
-source build until successor assets carry an exact patch identity.
+At the reviewed 0.5.0 release, the binding still cannot authenticate prebuilt
+archives against its active native patch set. Selecting `prebuilt` therefore
+uses the verified source build with a warning, and an explicit unverifiable
+`LLAMA_PREBUILT_DIR` is rejected. This feature must not skip the source build
+until successor assets carry an exact patch identity.
 
 Features are additive at Cargo's resolver. Applications should select a
 supported deployment combination explicitly instead of enabling every feature.
