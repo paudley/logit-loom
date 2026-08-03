@@ -36,7 +36,9 @@ The companion ABI exposes:
   request-local captures and operations, reports callback/resource/placement
   evidence, and clears inputs and hooks idempotently; and
 - explicit continue, cooperative-stop, callback-error, unsupported-mechanic,
-  invalid-argument, and native-error results.
+  invalid-argument, and native-error results; and
+- complete native exception and failed-invariant diagnostics returned through
+  the safe adapter without digest substitution or message truncation.
 
 Image ABI v3 checks that every requested `LoRA` participates in at least one
 model tensor before reporting success. It clears the request-local adapter
@@ -76,6 +78,8 @@ then
 [`logit-loom-krea-activation-v6.patch`](logit-loom-krea-activation-v6.patch),
 then
 [`logit-loom-resume-v7.patch`](logit-loom-resume-v7.patch),
+then
+[`logit-loom-native-errors-v9.patch`](logit-loom-native-errors-v9.patch),
 and finally the exact ggml-submodule
 [`logit-loom-vulkan-budget-v8.patch`](logit-loom-vulkan-budget-v8.patch),
 initializes only the required `ggml` submodule, and builds a shared library.

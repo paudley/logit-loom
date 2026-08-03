@@ -387,8 +387,7 @@ impl<B: ResidentImageProgramBackend> ResidentImageProgramDriver<B> {
             Err(error) => {
                 self.backend.poison();
                 return Err(Error::Poisoned(format!(
-                    "resident program arena initialization was uncertain: {}",
-                    failure_identity(&error)
+                    "resident program arena initialization was uncertain: {error}"
                 )));
             }
         };
@@ -420,8 +419,7 @@ impl<B: ResidentImageProgramBackend> ResidentImageProgramDriver<B> {
                 ) {
                     self.backend.poison();
                     return Err(Error::Poisoned(format!(
-                        "resident program continuation reconstruction was uncertain: {}",
-                        failure_identity(&error)
+                        "resident program continuation reconstruction was uncertain: {error}"
                     )));
                 }
                 (
@@ -516,7 +514,7 @@ impl<B: ResidentImageProgramBackend> ResidentImageProgramDriver<B> {
                 Err(error) if error.disposition() == FailureDisposition::Rejected => {
                     let terminal = ImageProgramTerminalV1::FailedAtStage {
                         stage: stage_index,
-                        failure: failure_identity(&error),
+                        failure: error.to_string(),
                     };
                     return self
                         .finish_terminal(plan, state, terminal)
@@ -526,8 +524,7 @@ impl<B: ResidentImageProgramBackend> ResidentImageProgramDriver<B> {
                 Err(error) => {
                     self.backend.poison();
                     return Err(Error::Poisoned(format!(
-                        "resident program stage {stage_index} left native state uncertain: {}",
-                        failure_identity(&error)
+                        "resident program stage {stage_index} left native state uncertain: {error}"
                     )));
                 }
             }
@@ -539,8 +536,7 @@ impl<B: ResidentImageProgramBackend> ResidentImageProgramDriver<B> {
                 if let Err(cleanup) = self.backend.finish_program(plan.cleanup) {
                     self.backend.poison();
                     return Err(Error::Poisoned(format!(
-                        "resident program output failure was followed by uncertain cleanup: {}",
-                        failure_identity(&cleanup)
+                        "resident program output failure was followed by uncertain cleanup: {cleanup}"
                     )));
                 }
                 return Err(error);
@@ -555,8 +551,7 @@ impl<B: ResidentImageProgramBackend> ResidentImageProgramDriver<B> {
             Err(error) => {
                 self.backend.poison();
                 return Err(Error::Poisoned(format!(
-                    "resident program final cleanup was uncertain: {}",
-                    failure_identity(&error)
+                    "resident program final cleanup was uncertain: {error}"
                 )));
             }
         };
@@ -627,8 +622,7 @@ impl<B: ResidentImageProgramBackend> ResidentImageProgramDriver<B> {
                     .finish_program(ImageCleanupPolicy::RetainSession);
                 self.backend.poison();
                 return Err(Error::Poisoned(format!(
-                    "resident checkpoint capture was uncertain: {}",
-                    failure_identity(&error)
+                    "resident checkpoint capture was uncertain: {error}"
                 )));
             }
         };
@@ -640,8 +634,7 @@ impl<B: ResidentImageProgramBackend> ResidentImageProgramDriver<B> {
             Err(error) => {
                 self.backend.poison();
                 return Err(Error::Poisoned(format!(
-                    "resident checkpoint arena cleanup was uncertain: {}",
-                    failure_identity(&error)
+                    "resident checkpoint arena cleanup was uncertain: {error}"
                 )));
             }
         };
@@ -774,8 +767,7 @@ impl<B: ResidentImageProgramBackend> ResidentImageProgramDriver<B> {
             Err(error) => {
                 self.backend.poison();
                 return Err(Error::Poisoned(format!(
-                    "resident program cleanup was uncertain: {}",
-                    failure_identity(&error)
+                    "resident program cleanup was uncertain: {error}"
                 )));
             }
         }
@@ -1209,13 +1201,6 @@ fn converge_receipt_bytes(
     Err(Error::Output(
         "program receipt length did not reach a fixed point".to_owned(),
     ))
-}
-
-fn failure_identity(error: &Error) -> Digest {
-    Digest::of_bytes(
-        "sdcpp-resident-program-failure-v1",
-        error.to_string().as_bytes(),
-    )
 }
 
 #[cfg(test)]

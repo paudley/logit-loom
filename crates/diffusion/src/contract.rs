@@ -4,7 +4,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 
-use logit_loom_core::{CoreError, Digest, MAX_RETAINED_FAILURE_BYTES};
+use logit_loom_core::{CoreError, Digest};
 use serde::{Deserialize, Serialize};
 
 /// Maximum tensor rank accepted at the public boundary.
@@ -447,28 +447,23 @@ impl PipelineSpec {
     }
 }
 
-/// Bounded callback error or contained panic.
+/// Complete callback error or contained panic.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct InterventionFailure {
     /// Whether the callback unwound.
     pub panicked: bool,
-    /// Bounded human-readable detail.
+    /// Complete human-readable detail.
     pub message: String,
 }
 
 impl InterventionFailure {
-    /// Constructs a UTF-8-safe bounded failure.
+    /// Constructs a failure without discarding any detail.
     pub fn new(panicked: bool, message: impl Into<String>) -> Self {
-        let mut message = message.into();
-        if message.len() > MAX_RETAINED_FAILURE_BYTES {
-            let mut end = MAX_RETAINED_FAILURE_BYTES;
-            while !message.is_char_boundary(end) {
-                end -= 1;
-            }
-            message.truncate(end);
+        Self {
+            panicked,
+            message: message.into(),
         }
-        Self { panicked, message }
     }
 }
 

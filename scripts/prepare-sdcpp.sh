@@ -49,6 +49,7 @@ patch_files=(
     "${repo_root}/native/stable-diffusion.cpp/logit-loom-model-block-application-v5.patch"
     "${repo_root}/native/stable-diffusion.cpp/logit-loom-krea-activation-v6.patch"
     "${repo_root}/native/stable-diffusion.cpp/logit-loom-resume-v7.patch"
+    "${repo_root}/native/stable-diffusion.cpp/logit-loom-native-errors-v9.patch"
 )
 ggml_patch="${repo_root}/native/stable-diffusion.cpp/logit-loom-vulkan-budget-v8.patch"
 ggml_commit="eced84c86f8b012c752c016f7fe789adea168e1e"

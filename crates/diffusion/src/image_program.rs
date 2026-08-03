@@ -1202,15 +1202,15 @@ pub enum ImageProgramTerminalV1 {
     FailedAtStage {
         /// Stage that did not complete.
         stage: u16,
-        /// Exact bounded failure-evidence identity.
-        failure: Digest,
+        /// Complete stage failure detail.
+        failure: String,
     },
     /// Cleanup or resident-state certainty was lost.
     CleanupUncertain {
         /// Last completed stage, or `None` when no stage completed.
         after_stage: Option<u16>,
-        /// Exact bounded failure-evidence identity.
-        failure: Digest,
+        /// Complete cleanup failure detail.
+        failure: String,
     },
 }
 
@@ -1229,8 +1229,8 @@ pub enum ImageProgramCleanupDispositionV1 {
     NotRequired,
     /// Cleanup or state release could not be verified.
     Uncertain {
-        /// Exact bounded failure-evidence identity.
-        failure: Digest,
+        /// Complete cleanup failure detail.
+        failure: String,
     },
 }
 
@@ -1368,6 +1368,18 @@ impl ImageProgramReceiptV1 {
                 "image program terminal",
                 "does not match the completed-stage prefix",
             ));
+        }
+        match &self.terminal {
+            ImageProgramTerminalV1::FailedAtStage { failure, .. }
+            | ImageProgramTerminalV1::CleanupUncertain { failure, .. }
+                if failure.is_empty() =>
+            {
+                return Err(CoreError::invalid(
+                    "image program terminal",
+                    "failure detail is empty",
+                ));
+            }
+            _ => {}
         }
         if self.terminal == ImageProgramTerminalV1::Completed {
             if self.outputs.len() != plan.outputs.len() {
@@ -2546,7 +2558,7 @@ mod tests {
     #[test]
     fn cleanup_uncertainty_must_poison_the_terminal_contract() {
         let plan = graph();
-        let failure = digest("cleanup-failure");
+        let failure = "cleanup failed because the native arena remained live".to_owned();
         let receipt = ImageProgramReceiptV1 {
             plan: plan.digest().unwrap(),
             backend: digest("backend"),

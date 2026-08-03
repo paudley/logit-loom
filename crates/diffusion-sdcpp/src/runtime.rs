@@ -404,9 +404,15 @@ impl Sdcpp {
         // and the exact ABI/commit has already been checked.
         let context = unsafe { api.new_context(&native_params) };
         let context = NonNull::new(context).ok_or_else(|| {
+            let native_detail = ffi::take_native_error_logs().join("\n");
             Error::Native(format!(
-                "{} context construction rejected the requested artifacts or placement",
-                profile.id()
+                "{} context construction rejected the requested artifacts or placement{}",
+                profile.id(),
+                if native_detail.is_empty() {
+                    String::new()
+                } else {
+                    format!(": {native_detail}")
+                }
             ))
         })?;
 
@@ -2451,18 +2457,29 @@ fn panic_message(payload: &Box<dyn Any + Send>) -> String {
 }
 
 pub(crate) fn native_status_error(status: i32) -> Error {
+    let native_logs = ffi::take_native_error_logs();
+    let detail = (!native_logs.is_empty()).then(|| native_logs.join("\n"));
     match status {
-        ffi::STATUS_INVALID_ARGUMENT => {
-            Error::Invalid("companion rejected the bounded native arguments".to_owned())
-        }
-        ffi::STATUS_UNSUPPORTED => Error::Incompatible(
-            "companion cannot implement the requested mechanic exactly".to_owned(),
-        ),
-        ffi::STATUS_CALLBACK_ERROR => {
-            Error::Callback("companion reported a callback failure without Rust detail".to_owned())
-        }
-        ffi::STATUS_NATIVE_ERROR => Error::Native("image generation failed".to_owned()),
-        other => Error::Native(format!("unknown native generation status {other}")),
+        ffi::STATUS_INVALID_ARGUMENT => Error::Invalid(detail.map_or_else(
+            || "companion rejected the bounded native arguments".to_owned(),
+            |detail| format!("companion rejected the bounded native arguments: {detail}"),
+        )),
+        ffi::STATUS_UNSUPPORTED => Error::Incompatible(detail.map_or_else(
+            || "companion cannot implement the requested mechanic exactly".to_owned(),
+            |detail| format!("companion cannot implement the requested mechanic exactly: {detail}"),
+        )),
+        ffi::STATUS_CALLBACK_ERROR => Error::Callback(detail.map_or_else(
+            || "companion reported a callback failure without Rust detail".to_owned(),
+            |detail| format!("companion callback failed: {detail}"),
+        )),
+        ffi::STATUS_NATIVE_ERROR => Error::Native(detail.map_or_else(
+            || "companion returned native status 5 without emitting error detail".to_owned(),
+            |detail| format!("companion returned native status 5: {detail}"),
+        )),
+        other => Error::Native(detail.map_or_else(
+            || format!("unknown native generation status {other}"),
+            |detail| format!("unknown native generation status {other}: {detail}"),
+        )),
     }
 }
 

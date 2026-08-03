@@ -4,8 +4,10 @@
 
 use std::{
     ffi::{CStr, c_char, c_void},
+    fmt::Write as _,
     path::Path,
     ptr,
+    sync::Mutex,
 };
 
 use libloading::Library;
@@ -590,6 +592,49 @@ pub(crate) type StepCallback = unsafe extern "C" fn(*const Step, *mut c_void) ->
 pub(crate) type ValueReadCallback = unsafe extern "C" fn(*const u8, usize, *mut c_void) -> i32;
 pub(crate) type KreaEventCallback =
     unsafe extern "C" fn(i32, u32, u64, *const f32, usize, *mut c_void) -> i32;
+type NativeLogCallback = unsafe extern "C" fn(i32, *const c_char, *mut c_void);
+type SetLogCallback = unsafe extern "C" fn(Option<NativeLogCallback>, *mut c_void);
+
+const NATIVE_LOG_ERROR: i32 = 3;
+
+static NATIVE_ERROR_LOGS: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+fn native_error_logs() -> std::sync::MutexGuard<'static, Vec<String>> {
+    NATIVE_ERROR_LOGS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+unsafe extern "C" fn native_log_callback(level: i32, text: *const c_char, _data: *mut c_void) {
+    if level != NATIVE_LOG_ERROR {
+        return;
+    }
+    let message = if text.is_null() {
+        "native logger emitted a null error message".to_owned()
+    } else {
+        // SAFETY: stable-diffusion.cpp promises a live NUL-terminated string
+        // for the duration of this synchronous callback.
+        let bytes = unsafe { CStr::from_ptr(text) }.to_bytes();
+        if let Ok(message) = std::str::from_utf8(bytes) {
+            message.to_owned()
+        } else {
+            let mut encoded = String::with_capacity(bytes.len().saturating_mul(2));
+            for byte in bytes {
+                let _ = write!(encoded, "{byte:02x}");
+            }
+            format!("native logger emitted non-UTF-8 error bytes: {encoded}")
+        }
+    };
+    native_error_logs().push(message);
+}
+
+pub(crate) fn take_native_error_logs() -> Vec<String> {
+    std::mem::take(&mut *native_error_logs())
+}
+
+fn clear_native_error_logs() {
+    native_error_logs().clear();
+}
 
 type AbiVersion = unsafe extern "C" fn() -> u32;
 type UpstreamCommit = unsafe extern "C" fn() -> *const c_char;
@@ -710,6 +755,7 @@ type ListDevices = unsafe extern "C" fn(*mut c_char, usize) -> usize;
 
 #[derive(Clone, Copy)]
 struct Functions {
+    set_log_callback: SetLogCallback,
     new_context: NewContext,
     free_context: FreeContext,
     generate_image: GenerateImage,
@@ -782,6 +828,7 @@ impl NativeApi {
         // valid because `library` is retained in this value.
         let functions = unsafe {
             Functions {
+                set_log_callback: load_symbol(&library, b"sd_set_log_callback\0")?,
                 new_context: load_symbol(&library, b"sd_loom_new_ctx_v1\0")?,
                 free_context: load_symbol(&library, b"free_sd_ctx\0")?,
                 generate_image: load_symbol(&library, b"sd_loom_generate_image_v1\0")?,
@@ -833,6 +880,12 @@ impl NativeApi {
                 list_devices: load_symbol(&library, b"sd_list_devices\0")?,
             }
         };
+        // SAFETY: The callback has the exact upstream signature, retains no
+        // borrowed native data. The process-wide synchronized collector also
+        // retains errors emitted by native backend threads.
+        unsafe {
+            (functions.set_log_callback)(Some(native_log_callback), ptr::null_mut());
+        }
         Ok(Self {
             functions,
             _library: library,
@@ -874,6 +927,7 @@ impl NativeApi {
     /// Every pointer in `params` must refer to a live NUL-terminated string
     /// for the duration of this synchronous call.
     pub(crate) unsafe fn new_context(&self, params: &ContextParams) -> *mut c_void {
+        clear_native_error_logs();
         // SAFETY: Forwarded from this method's caller contract.
         unsafe { (self.functions.new_context)(params) }
     }
@@ -903,6 +957,7 @@ impl NativeApi {
         step_callback: StepCallback,
         image_out: &mut *mut Image,
     ) -> i32 {
+        clear_native_error_logs();
         // SAFETY: Forwarded from this method's caller contract.
         unsafe {
             (self.functions.generate_image)(
@@ -933,6 +988,7 @@ impl NativeApi {
         step_callback: StepCallback,
         image_out: &mut *mut Image,
     ) -> i32 {
+        clear_native_error_logs();
         debug_assert_eq!(params.abi_version, IMAGE_ABI_VERSION);
         // SAFETY: Forwarded from this method's caller contract.
         unsafe {
@@ -960,6 +1016,7 @@ impl NativeApi {
         image: &ImageViewV2,
         tensor_out: &mut *mut OwnedTensorV2,
     ) -> i32 {
+        clear_native_error_logs();
         // SAFETY: Forwarded from this method's caller contract.
         unsafe { (self.functions.vae_encode_v2)(context, image, tensor_out) }
     }
@@ -976,6 +1033,7 @@ impl NativeApi {
         tensor: &TensorViewV2,
         image_out: &mut *mut Image,
     ) -> i32 {
+        clear_native_error_logs();
         debug_assert_eq!(tensor.abi_version, IMAGE_ABI_VERSION);
         // SAFETY: Forwarded from this method's caller contract.
         unsafe { (self.functions.vae_decode_v2)(context, tensor, image_out) }
@@ -998,6 +1056,7 @@ impl NativeApi {
     /// `context` must be the exclusively owned live context associated with
     /// this exact function table.
     pub(crate) unsafe fn clear_session_v2(&self, context: *mut c_void) -> i32 {
+        clear_native_error_logs();
         // SAFETY: Forwarded from this method's caller contract.
         unsafe { (self.functions.clear_session_v2)(context) }
     }
@@ -1016,6 +1075,7 @@ impl NativeApi {
         maximum_bytes: u64,
         program_out: &mut *mut c_void,
     ) -> i32 {
+        clear_native_error_logs();
         // SAFETY: Forwarded from this method's caller contract.
         unsafe {
             (self.functions.program_begin_v3)(context, maximum_values, maximum_bytes, program_out)
@@ -1034,6 +1094,7 @@ impl NativeApi {
         bytes: &[u8],
         value_out: &mut ValueHandleV3,
     ) -> i32 {
+        clear_native_error_logs();
         // SAFETY: Forwarded from this method's caller contract.
         unsafe {
             (self.functions.program_import_bytes_v3)(
@@ -1056,6 +1117,7 @@ impl NativeApi {
         image: &ImageViewV2,
         value_out: &mut ValueHandleV3,
     ) -> i32 {
+        clear_native_error_logs();
         // SAFETY: Forwarded from this method's caller contract.
         unsafe { (self.functions.program_import_image_v3)(program, image, value_out) }
     }
@@ -1072,6 +1134,7 @@ impl NativeApi {
         checkpoint_state: bool,
         value_out: &mut ValueHandleV3,
     ) -> i32 {
+        clear_native_error_logs();
         // SAFETY: Forwarded from this method's caller contract.
         unsafe {
             (self.functions.program_import_tensor_v3)(program, tensor, checkpoint_state, value_out)
@@ -1090,6 +1153,7 @@ impl NativeApi {
         high_noise: bool,
         value_out: &mut ValueHandleV3,
     ) -> i32 {
+        clear_native_error_logs();
         // SAFETY: Forwarded from this method's caller contract.
         unsafe { (self.functions.program_import_lora_v3)(program, path, high_noise, value_out) }
     }
@@ -1107,6 +1171,7 @@ impl NativeApi {
         mask: ValueHandleV3,
         value_out: &mut ValueHandleV3,
     ) -> i32 {
+        clear_native_error_logs();
         // SAFETY: Forwarded from this method's caller contract.
         unsafe { (self.functions.program_mask_blend_v3)(program, base, overlay, mask, value_out) }
     }
@@ -1122,6 +1187,7 @@ impl NativeApi {
         image: ValueHandleV3,
         value_out: &mut ValueHandleV3,
     ) -> i32 {
+        clear_native_error_logs();
         // SAFETY: Forwarded from this method's caller contract.
         unsafe { (self.functions.program_vae_encode_v3)(program, image, value_out) }
     }
@@ -1138,6 +1204,7 @@ impl NativeApi {
         output: &ProgramOutputV3,
         value_out: &mut ValueHandleV3,
     ) -> i32 {
+        clear_native_error_logs();
         // SAFETY: Forwarded from this method's caller contract.
         unsafe {
             (self.functions.program_vae_decode_v3)(
@@ -1171,6 +1238,7 @@ impl NativeApi {
         snapshots: &mut [ValueHandleV3],
         result_out: &mut ProgramImageResultV3,
     ) -> i32 {
+        clear_native_error_logs();
         debug_assert_eq!(params.abi_version, PROGRAM_ABI_VERSION);
         // SAFETY: Forwarded from this method's caller contract.
         unsafe {
@@ -1210,6 +1278,7 @@ impl NativeApi {
         transition_masks: &mut [u64],
         result_out: &mut ProgramImageResultV5,
     ) -> i32 {
+        clear_native_error_logs();
         debug_assert_eq!(params.abi_version, MODEL_BLOCK_ABI_VERSION);
         debug_assert_eq!(params.image.abi_version, PROGRAM_ABI_VERSION);
         // SAFETY: Forwarded from this method's caller contract.
@@ -1244,6 +1313,7 @@ impl NativeApi {
         topology: &mut KreaTopologyV6,
         sites: &mut [KreaSiteV6],
     ) -> i32 {
+        clear_native_error_logs();
         // SAFETY: Forwarded from this method's caller contract.
         unsafe {
             (self.functions.krea_topology_v6)(
@@ -1270,6 +1340,7 @@ impl NativeApi {
         input: &KreaInputV6,
         description: &mut KreaInputDescriptionV6,
     ) -> i32 {
+        clear_native_error_logs();
         // SAFETY: Forwarded from this method's caller contract.
         unsafe { (self.functions.krea_import_input_v6)(context, input, description) }
     }
@@ -1285,6 +1356,7 @@ impl NativeApi {
         input: KreaInputHandleV6,
         description: &mut KreaInputDescriptionV6,
     ) -> i32 {
+        clear_native_error_logs();
         // SAFETY: Forwarded from this method's caller contract.
         unsafe { (self.functions.krea_describe_input_v6)(context, input, description) }
     }
@@ -1299,6 +1371,7 @@ impl NativeApi {
         context: *mut c_void,
         input: KreaInputHandleV6,
     ) -> i32 {
+        clear_native_error_logs();
         // SAFETY: Forwarded from this method's caller contract.
         unsafe { (self.functions.krea_release_input_v6)(context, input) }
     }
@@ -1309,6 +1382,7 @@ impl NativeApi {
     ///
     /// `context` must identify the live context that owns this API table.
     pub(crate) unsafe fn krea_clear_inputs_v6(&self, context: *mut c_void) -> i32 {
+        clear_native_error_logs();
         // SAFETY: Forwarded from this method's caller contract.
         unsafe { (self.functions.krea_clear_inputs_v6)(context) }
     }
@@ -1338,6 +1412,7 @@ impl NativeApi {
         applications: &mut [KreaApplicationResultV6],
         result: &mut ProgramImageResultV6,
     ) -> i32 {
+        clear_native_error_logs();
         debug_assert_eq!(params.abi_version, KREA_ACTIVATION_ABI_VERSION);
         // SAFETY: Forwarded from this method's caller contract.
         unsafe {
@@ -1376,6 +1451,7 @@ impl NativeApi {
         value: ValueHandleV3,
         descriptor_out: &mut ValueDescriptorV3,
     ) -> i32 {
+        clear_native_error_logs();
         // SAFETY: Forwarded from this method's caller contract.
         unsafe { (self.functions.program_describe_v3)(program, value, descriptor_out) }
     }
@@ -1392,6 +1468,7 @@ impl NativeApi {
         callback: ValueReadCallback,
         callback_data: *mut c_void,
     ) -> i32 {
+        clear_native_error_logs();
         // SAFETY: Forwarded from this method's caller contract.
         unsafe { (self.functions.program_read_v3)(program, value, Some(callback), callback_data) }
     }
@@ -1408,6 +1485,7 @@ impl NativeApi {
         output: &mut [u8],
         bytes_written: &mut usize,
     ) -> i32 {
+        clear_native_error_logs();
         // SAFETY: Forwarded from this method's caller contract.
         unsafe {
             (self.functions.program_copy_v3)(
@@ -1430,6 +1508,7 @@ impl NativeApi {
         program: *mut c_void,
         value: ValueHandleV3,
     ) -> i32 {
+        clear_native_error_logs();
         // SAFETY: Forwarded from this method's caller contract.
         unsafe { (self.functions.program_release_v3)(program, value) }
     }
@@ -1446,6 +1525,7 @@ impl NativeApi {
         clear_model_session: bool,
         peak_arena_bytes: &mut u64,
     ) -> i32 {
+        clear_native_error_logs();
         // SAFETY: Forwarded from this method's caller contract.
         unsafe {
             (self.functions.program_finish_v3)(program, clear_model_session, peak_arena_bytes)
@@ -1461,6 +1541,16 @@ impl NativeApi {
     pub(crate) unsafe fn free_images(&self, images: *mut Image, count: i32) {
         // SAFETY: Forwarded from this method's caller contract.
         unsafe { (self.functions.free_images)(images, count) };
+    }
+}
+
+impl Drop for NativeApi {
+    fn drop(&mut self) {
+        // SAFETY: This removes the process-global callback before unloading
+        // the library that owns the callback registration.
+        unsafe {
+            (self.functions.set_log_callback)(None, ptr::null_mut());
+        }
     }
 }
 
@@ -1533,6 +1623,8 @@ unsafe fn bounded_c_string(pointer: *const c_char, maximum: usize) -> Result<Str
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::CString;
+
     use super::*;
 
     #[test]
@@ -1544,5 +1636,18 @@ mod tests {
         assert!(parse_devices("").is_err());
         assert!(parse_devices("missing separator").is_err());
         assert!(parse_devices("Vulkan0\t").is_err());
+    }
+
+    #[test]
+    fn native_error_logs_are_retained_complete() {
+        clear_native_error_logs();
+        let message = "native failure detail ".repeat(8_192);
+        let native = CString::new(message.clone()).expect("message contains no NUL");
+        // SAFETY: `native` is a live NUL-terminated string for the synchronous
+        // callback, and the callback retains an owned copy only.
+        unsafe {
+            native_log_callback(NATIVE_LOG_ERROR, native.as_ptr(), ptr::null_mut());
+        }
+        assert_eq!(take_native_error_logs(), [message]);
     }
 }

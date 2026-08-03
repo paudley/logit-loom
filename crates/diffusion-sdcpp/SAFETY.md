@@ -19,7 +19,9 @@ The safe public adapter relies on all of the following conditions:
    plus the Krea activation extension in
    `native/stable-diffusion.cpp/logit-loom-krea-activation-v6.patch`, and the
    continuation extension in
-   `native/stable-diffusion.cpp/logit-loom-resume-v7.patch`, for the lifetime
+   `native/stable-diffusion.cpp/logit-loom-resume-v7.patch`, followed by the
+   complete native diagnostic bridge in
+   `native/stable-diffusion.cpp/logit-loom-native-errors-v9.patch`, for the lifetime
    of the loaded library. Resume state is a finite, exact-length `f32` slice
    borrowed only for the synchronous call and paired with a validated
    nonterminal next-step index. The companion copies it into the matching

@@ -47,6 +47,6 @@ pub use text_mechanics::{
 };
 pub use token::{CandidateMode, MAX_SPARSE_CANDIDATES, TokenId};
 pub use transform::{
-    CallbackFailure, CallbackPhase, MAX_PIPELINE_STAGES, MAX_RETAINED_FAILURE_BYTES,
-    PipelineReceipt, PipelineSpec, StageReceipt, TransformSpec,
+    CallbackFailure, CallbackPhase, MAX_PIPELINE_STAGES, PipelineReceipt, PipelineSpec,
+    StageReceipt, TransformSpec,
 };

@@ -8,8 +8,6 @@ use crate::{CandidateMode, CoreError, Digest};
 
 /// Maximum stages in one ordered transform pipeline.
 pub const MAX_PIPELINE_STAGES: usize = 32;
-/// Maximum UTF-8 bytes retained from a callback error or panic.
-pub const MAX_RETAINED_FAILURE_BYTES: usize = 512;
 
 /// One content-identified transform contract.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -141,32 +139,24 @@ pub enum CallbackPhase {
     Prefill,
 }
 
-/// Bounded error or panic isolated at a callback boundary.
+/// Complete error or panic isolated at a callback boundary.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CallbackFailure {
     /// Callback phase.
     pub phase: CallbackPhase,
     /// Whether the callback unwound and was contained.
     pub panicked: bool,
-    /// Bounded human-readable detail.
+    /// Complete human-readable detail.
     pub message: String,
 }
 
 impl CallbackFailure {
-    /// Creates a bounded failure description.
+    /// Creates a failure description without discarding any detail.
     pub fn new(phase: CallbackPhase, panicked: bool, message: impl Into<String>) -> Self {
-        let mut message = message.into();
-        if message.len() > MAX_RETAINED_FAILURE_BYTES {
-            let mut end = MAX_RETAINED_FAILURE_BYTES;
-            while !message.is_char_boundary(end) {
-                end -= 1;
-            }
-            message.truncate(end);
-        }
         Self {
             phase,
             panicked,
-            message,
+            message: message.into(),
         }
     }
 }
@@ -309,14 +299,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn callback_messages_are_utf8_safely_bounded() {
-        let failure = CallbackFailure::new(
-            CallbackPhase::Apply,
-            false,
-            "🧶".repeat(MAX_RETAINED_FAILURE_BYTES),
-        );
-        assert!(failure.message.len() <= MAX_RETAINED_FAILURE_BYTES);
-        assert!(failure.message.is_char_boundary(failure.message.len()));
+    fn callback_messages_are_retained_complete() {
+        let message = "🧶".repeat(1_024);
+        let failure = CallbackFailure::new(CallbackPhase::Apply, false, message.clone());
+        assert_eq!(failure.message, message);
     }
 
     #[test]
