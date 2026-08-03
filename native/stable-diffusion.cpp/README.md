@@ -82,6 +82,8 @@ then
 [`logit-loom-native-errors-v9.patch`](logit-loom-native-errors-v9.patch),
 and finally the exact ggml-submodule
 [`logit-loom-vulkan-budget-v8.patch`](logit-loom-vulkan-budget-v8.patch),
+[`logit-loom-vulkan-errors-v10.patch`](logit-loom-vulkan-errors-v10.patch), and
+[`logit-loom-vulkan-strix-halo-v11.patch`](logit-loom-vulkan-strix-halo-v11.patch),
 initializes only the required `ggml` submodule, and builds a shared library.
 Existing incompatible source changes are rejected. The script never runs from
 tests, CI, documentation, package builds, or `make check`.
@@ -111,7 +113,10 @@ release. This is a hard process ceiling, not a quality or performance claim.
 Every failed Vulkan memory attempt reports its complete requested size, memory
 type, required flags, Vulkan error code/category/message, and C++ exception to
 the installed native log callback; allocation failures are never collapsed to
-an anonymous null buffer.
+an anonymous null buffer. On AMD Strix Halo device `1002:1586`, flash attention
+uses the scalar Vulkan implementation because the cooperative-matrix flash path
+can lose that device. Cooperative matrices remain available to other Vulkan
+operations.
 
 The reviewed decision and boundary are in
 [`docs/adr/0001-stable-diffusion-runtime.md`](../../docs/adr/0001-stable-diffusion-runtime.md).
