@@ -544,7 +544,7 @@ impl<R> SdcppResidentProgram<'_, R> {
                 | ImageProgramStageOperationV1::CaptureCheckpoint { .. } => {}
             }
         }
-        Ok(())
+        validate_internal_checkpoint_lineage(plan)
     }
 
     fn validate_krea_activation_program(&self, plan: &ImageProgramPlanV1) -> Result<()> {
@@ -579,6 +579,127 @@ impl<R> SdcppResidentProgram<'_, R> {
             ));
         }
         Ok(())
+    }
+}
+
+fn validate_internal_checkpoint_lineage(plan: &ImageProgramPlanV1) -> Result<()> {
+    let mut state_origins = HashMap::new();
+    let mut checkpoint_origins = HashMap::new();
+
+    for stage in &plan.stages {
+        match &stage.operation {
+            ImageProgramStageOperationV1::Native { plan: native } => {
+                if let Some(input) = native
+                    .inputs
+                    .iter()
+                    .find(|input| input.role == ImageBufferRole::Checkpoint)
+                    && let Some((origin_stage, origin)) = state_origins.get(&input.value).copied()
+                {
+                    validate_reconstructed_checkpoint_plan(
+                        origin_stage,
+                        origin,
+                        stage.stage,
+                        native,
+                    )?;
+                }
+                for output in &native.outputs {
+                    if output.role == ImageProgramNativeOutputRoleV1::CheckpointState {
+                        state_origins.insert(output.value, (stage.stage, native.as_ref()));
+                    }
+                }
+            }
+            ImageProgramStageOperationV1::CaptureCheckpoint {
+                state, checkpoint, ..
+            } => {
+                if let Some(origin) = state_origins.get(state).copied() {
+                    checkpoint_origins.insert(*checkpoint, origin);
+                }
+            }
+            ImageProgramStageOperationV1::RestoreCheckpoint {
+                checkpoint, state, ..
+            } => {
+                if let Some(origin) = checkpoint_origins.get(checkpoint).copied() {
+                    state_origins.insert(*state, origin);
+                }
+            }
+            ImageProgramStageOperationV1::MaskBlend { .. } => {}
+        }
+    }
+    Ok(())
+}
+
+fn validate_reconstructed_checkpoint_plan(
+    origin_stage: u16,
+    origin: &ImageProgramNativeStageV1,
+    target_stage: u16,
+    target: &ImageProgramNativeStageV1,
+) -> Result<()> {
+    let mut differences = Vec::new();
+    if origin.profile != target.profile {
+        differences.push("profile");
+    }
+    if origin.load != target.load {
+        differences.push("load");
+    }
+    if origin.width != target.width || origin.height != target.height {
+        differences.push("dimensions");
+    }
+    if origin.seed != target.seed {
+        differences.push("seed");
+    }
+    if origin.rng != target.rng {
+        differences.push("RNG");
+    }
+    if origin.placement != target.placement {
+        differences.push("placement");
+    }
+    if origin.schedule != target.schedule {
+        differences.push("schedule");
+    }
+    if origin.guidance_scale_bits != target.guidance_scale_bits {
+        differences.push("guidance scale");
+    }
+    for (role, label) in [
+        (
+            ImageBufferRole::PositiveConditioning,
+            "positive-conditioning value lineage",
+        ),
+        (
+            ImageBufferRole::NegativeConditioning,
+            "negative-conditioning value lineage",
+        ),
+        (
+            ImageBufferRole::ReferenceImage,
+            "reference-image value lineage",
+        ),
+    ] {
+        let origin_values = origin
+            .inputs
+            .iter()
+            .filter(|input| input.role == role)
+            .map(|input| input.value)
+            .collect::<Vec<_>>();
+        let target_values = target
+            .inputs
+            .iter()
+            .filter(|input| input.role == role)
+            .map(|input| input.value)
+            .collect::<Vec<_>>();
+        if origin_values != target_values {
+            differences.push(label);
+        }
+    }
+    if origin.loras != target.loras {
+        differences.push("LoRA stack");
+    }
+
+    if differences.is_empty() {
+        Ok(())
+    } else {
+        Err(Error::Incompatible(format!(
+            "resident checkpoint captured by native stage {origin_stage} cannot be restored by native stage {target_stage} because their reconstructed diffusion plans differ in: {}",
+            differences.join(", ")
+        )))
     }
 }
 
@@ -3374,7 +3495,9 @@ mod tests {
 
     use super::*;
     use crate::{ModelBlockResidualScaleControlV1, model_block_residual_scale_schema_v1};
-    use logit_loom_diffusion::{OperatorInvocation, TensorSpec};
+    use logit_loom_diffusion::{
+        ImageProgramInputBindingV1, ImageProgramNativeOutputV1, OperatorInvocation, TensorSpec,
+    };
     use logit_loom_executor::NeverCancel;
 
     struct AlwaysSuspend;
@@ -3496,6 +3619,83 @@ mod tests {
         assert!(resumed.continuation_restored);
     }
 
+    fn internally_restored_program(target_conditioning: u16) -> ImageProgramPlanV1 {
+        let (mut origin, _) = checkpoint_test_plan();
+        origin.inputs = vec![ImageProgramInputBindingV1 {
+            role: ImageBufferRole::PositiveConditioning,
+            value: 0,
+        }];
+        origin.checkpoint_after_step = Some(0);
+        origin.outputs = vec![ImageProgramNativeOutputV1 {
+            role: ImageProgramNativeOutputRoleV1::CheckpointState,
+            value: 1,
+        }];
+
+        let mut target = origin.clone();
+        target.inputs = vec![
+            ImageProgramInputBindingV1 {
+                role: ImageBufferRole::PositiveConditioning,
+                value: target_conditioning,
+            },
+            ImageProgramInputBindingV1 {
+                role: ImageBufferRole::Checkpoint,
+                value: 3,
+            },
+        ];
+        target.checkpoint_after_step = None;
+        target.checkpoint_restore_at_step = Some(0);
+        target.outputs.clear();
+
+        ImageProgramPlanV1 {
+            values: Vec::new(),
+            inputs: Vec::new(),
+            stages: vec![
+                ImageProgramStageV1 {
+                    stage: 0,
+                    operation: ImageProgramStageOperationV1::Native {
+                        plan: Box::new(origin),
+                    },
+                },
+                ImageProgramStageV1 {
+                    stage: 1,
+                    operation: ImageProgramStageOperationV1::CaptureCheckpoint {
+                        state: 1,
+                        checkpoint: 2,
+                        implementation: Digest::of_bytes("capture", b"one"),
+                    },
+                },
+                ImageProgramStageV1 {
+                    stage: 2,
+                    operation: ImageProgramStageOperationV1::RestoreCheckpoint {
+                        checkpoint: 2,
+                        state: 3,
+                        implementation: Digest::of_bytes("restore", b"one"),
+                    },
+                },
+                ImageProgramStageV1 {
+                    stage: 3,
+                    operation: ImageProgramStageOperationV1::Native {
+                        plan: Box::new(target),
+                    },
+                },
+            ],
+            outputs: Vec::new(),
+            cleanup: ImageCleanupPolicy::ClearSession,
+        }
+    }
+
+    #[test]
+    fn internal_checkpoint_restore_rejects_different_conditioning_before_native_entry() {
+        assert!(validate_internal_checkpoint_lineage(&internally_restored_program(0)).is_ok());
+
+        let error = validate_internal_checkpoint_lineage(&internally_restored_program(4))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("captured by native stage 0"));
+        assert!(error.contains("restored by native stage 3"));
+        assert!(error.contains("positive-conditioning value lineage"));
+    }
+
     #[test]
     fn scheduled_and_fixed_lora_targets_remain_distinct() {
         assert_ne!(resident_lora_target_v1(false), lora_target_v1(false));
@@ -3604,7 +3804,7 @@ mod tests {
                 observations: Vec::new(),
                 checkpoint_restore_at_step: None,
                 checkpoint_after_step: None,
-                outputs: vec![logit_loom_diffusion::ImageProgramNativeOutputV1 {
+                outputs: vec![ImageProgramNativeOutputV1 {
                     role: ImageProgramNativeOutputRoleV1::Primary,
                     value: 0,
                 }],

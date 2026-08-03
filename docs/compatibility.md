@@ -289,7 +289,11 @@ must authenticate that plan before any result is accepted. The companion
 copies the finite checkpoint state into the latent and resumes at the recorded
 next Euler transition without replaying completed transitions. It does not
 promise cross-backend portability or compatibility across conditioning or
-schedule changes.
+schedule changes. A resident program that captures and restores its own
+checkpoint is rejected during preflight when its statically bound profile,
+load, dimensions, seed, RNG, placement, schedule, guidance, conditioning,
+reference, or `LoRA` lineage already proves that the reconstructed plans will
+differ.
 
 ## Optional model profile compatibility
 
