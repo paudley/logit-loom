@@ -264,6 +264,25 @@ pub(crate) fn native_step_offset(
         .map_err(|_| Error::Invalid("native image strength offset exceeds u32".to_owned()))
 }
 
+pub(crate) fn validate_native_step_window(
+    role: &str,
+    step: u32,
+    initial_step: u32,
+    step_count: usize,
+) -> Result<()> {
+    let step_count = u32::try_from(step_count)
+        .map_err(|_| Error::Invalid("native image schedule exceeds u32".to_owned()))?;
+    let last_step = step_count.checked_sub(1).ok_or_else(|| {
+        Error::Invalid("native image schedule must contain at least one transition".to_owned())
+    })?;
+    if step < initial_step || step >= step_count {
+        return Err(Error::Invalid(format!(
+            "native {role} transition {step} is outside the executed strength window {initial_step}..{last_step} within {step_count} declared transitions"
+        )));
+    }
+    Ok(())
+}
+
 impl AdvancedNativeInputs {
     fn new(request: &AdvancedImageRequest<'_>) -> Result<Self> {
         let base = request.base();
@@ -2645,6 +2664,20 @@ mod tests {
         assert_eq!(
             native_step_offset(ImageOperation::Inpaint, 0.25, 4).expect("quarter inpaint schedule"),
             2
+        );
+        validate_native_step_window("checkpoint", 2, 2, 4).expect("first executed transition");
+        validate_native_step_window("checkpoint", 3, 2, 4).expect("last executed transition");
+        assert_eq!(
+            validate_native_step_window("checkpoint", 1, 2, 4)
+                .expect_err("transition before strength window")
+                .to_string(),
+            "invalid stable-diffusion.cpp input: native checkpoint transition 1 is outside the executed strength window 2..3 within 4 declared transitions"
+        );
+        assert_eq!(
+            validate_native_step_window("checkpoint", 0, 0, 0)
+                .expect_err("empty schedule")
+                .to_string(),
+            "invalid stable-diffusion.cpp input: native image schedule must contain at least one transition"
         );
     }
 

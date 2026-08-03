@@ -46,7 +46,7 @@ use crate::{
     },
     runtime::{
         CallbackState, condition_callback, native_status_error, native_step_offset, path_c_string,
-        step_callback,
+        step_callback, validate_native_step_window,
     },
 };
 
@@ -1993,6 +1993,22 @@ impl<R: ResidentArtifactPathResolver> SdcppResidentProgram<'_, R> {
             native.strength(),
             request.schedule().steps(),
         )?;
+        if let Some(checkpoint) = native.checkpoint_after_step {
+            validate_native_step_window(
+                "checkpoint",
+                checkpoint,
+                initial_step,
+                request.schedule().steps(),
+            )?;
+        }
+        for snapshot in &prepared.snapshot_steps {
+            validate_native_step_window(
+                "snapshot",
+                *snapshot,
+                initial_step,
+                request.schedule().steps(),
+            )?;
+        }
         let mut callbacks = CallbackState::new_full_at(
             profile,
             &profile_receipt,
@@ -2090,16 +2106,26 @@ impl<R: ResidentArtifactPathResolver> SdcppResidentProgram<'_, R> {
         let model_block_applications =
             verified_model_block_applications(stage.stage, prepared, &invocation)?;
         let result = invocation.result;
+        let expected_checkpoint = native.checkpoint_after_step.is_some();
+        let observed_checkpoint = !result.checkpoint_state.is_empty();
+        let expected_restore = native.checkpoint_restore_at_step.is_some();
+        let observed_restore = stage_program.declared_restored;
+        let continuation_available = stage_program.continuation_restore.is_some();
+        let continuation_applied = stage_program.continuation_restored;
         if result.abi_version != PROGRAM_ABI_VERSION
             || result.primary.is_empty()
             || result.snapshot_count != snapshot_handles.len()
-            || result.checkpoint_state.is_empty() != native.checkpoint_after_step.is_none()
-            || stage_program.declared_restored != native.checkpoint_restore_at_step.is_some()
-            || stage_program.continuation_restore.is_some() != stage_program.continuation_restored
+            || observed_checkpoint != expected_checkpoint
+            || observed_restore != expected_restore
+            || continuation_available != continuation_applied
         {
-            return Err(Error::Incompatible(
-                "resident diffusion result or checkpoint accounting differs".to_owned(),
-            ));
+            return Err(Error::Incompatible(format!(
+                "resident diffusion accounting differs: ABI observed={} expected={PROGRAM_ABI_VERSION}; primary-empty={}; snapshots observed={} expected={}; checkpoint observed={observed_checkpoint} expected={expected_checkpoint}; restore observed={observed_restore} expected={expected_restore}; continuation available={continuation_available} applied={continuation_applied}",
+                result.abi_version,
+                result.primary.is_empty(),
+                result.snapshot_count,
+                snapshot_handles.len(),
+            )));
         }
         let actual_plan = actual_plan.ok_or_else(|| {
             Error::Incompatible("resident diffusion produced no exact step plan".to_owned())
