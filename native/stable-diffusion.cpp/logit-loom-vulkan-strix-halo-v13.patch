@@ -1,0 +1,26 @@
+diff --git src/ggml-vulkan/ggml-vulkan.cpp src/ggml-vulkan/ggml-vulkan.cpp
+--- src/ggml-vulkan/ggml-vulkan.cpp
++++ src/ggml-vulkan/ggml-vulkan.cpp
+@@ -5909,14 +5909,20 @@ static vk_device ggml_vk_get_device(size_t idx) {
+             device->external_memory_host = false;
+         }
+ 
++        // RADV can lose AMD Strix Halo 1002:1586 while an asynchronous graph
++        // submission remains in flight. Force synchronous graph completion on
++        // this exact device; preserve upstream async behavior everywhere else.
++        const bool strix_halo = device->vendor_id == VK_VENDOR_ID_AMD && device->properties.deviceID == 0x1586;
++
+         // Implementing the async backend interfaces seems broken on older Intel HW,
+         // see https://github.com/ggml-org/llama.cpp/issues/17302.
+-        device->support_async = (device->vendor_id != VK_VENDOR_ID_INTEL ||
++        device->support_async = !strix_halo && (device->vendor_id != VK_VENDOR_ID_INTEL ||
+                                  std::string(device->properties.deviceName.data()).find("(DG1)") == std::string::npos) &&
+                                 getenv("GGML_VK_DISABLE_ASYNC") == nullptr;
+ 
+         if (!device->support_async) {
+-            GGML_LOG_DEBUG("ggml_vulkan: WARNING: Async execution disabled on certain Intel devices.\n");
++            GGML_LOG_DEBUG("ggml_vulkan: WARNING: Async execution disabled for %s (%04x:%04x).\n",
++                           device->properties.deviceName.data(), device->vendor_id, device->properties.deviceID);
+         }
+ 
+         const char* GGML_VK_FORCE_MAX_ALLOCATION_SIZE = getenv("GGML_VK_FORCE_MAX_ALLOCATION_SIZE");

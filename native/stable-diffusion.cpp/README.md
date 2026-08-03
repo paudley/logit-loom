@@ -86,6 +86,8 @@ and finally the exact ggml-submodule
 [`logit-loom-vulkan-strix-halo-v11.patch`](logit-loom-vulkan-strix-halo-v11.patch),
 followed by
 [`logit-loom-vulkan-strix-halo-v12.patch`](logit-loom-vulkan-strix-halo-v12.patch),
+then
+[`logit-loom-vulkan-strix-halo-v13.patch`](logit-loom-vulkan-strix-halo-v13.patch),
 initializes only the required `ggml` submodule, and builds a shared library.
 Existing incompatible source changes are rejected. The script never runs from
 tests, CI, documentation, package builds, or `make check`.
@@ -117,7 +119,9 @@ type, required flags, Vulkan error code/category/message, and C++ exception to
 the installed native log callback; allocation failures are never collapsed to
 an anonymous null buffer. On AMD Strix Halo device `1002:1586`, all Vulkan
 cooperative-matrix implementations are disabled because workloads using them
-can lose that device. Scalar Vulkan implementations remain available.
+can lose that device. Scalar Vulkan implementations remain available, and
+graph submission is synchronous on that exact device so an in-flight async
+submission cannot leave the native session or device state uncertain.
 
 The reviewed decision and boundary are in
 [`docs/adr/0001-stable-diffusion-runtime.md`](../../docs/adr/0001-stable-diffusion-runtime.md).
