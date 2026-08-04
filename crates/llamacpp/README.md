@@ -114,9 +114,12 @@ Ordinary aggregate checkpoints use
 cross-operation stop prefix; speculative snapshots retain their complete
 aggregate plan and native sampler. Both forms are process-local and
 thread-affine. A continuation must preserve every mechanic apart from its
-explicit parent-checkpoint field. Because native state omits the next-token
-logits, exact steering is reapplied while reconstructing the restored boundary
-and cleared again before successor capture.
+explicit parent-checkpoint field. Checkpoint-capable ordinary execution
+reserves one recurrent rollback snapshot when the loaded model is recurrent or
+hybrid. Because native state omits the next-token logits, restore removes and
+re-decodes the final token from that snapshot; exact steering is reapplied
+while reconstructing the restored boundary and cleared again before successor
+capture.
 
 ## Activation and speculation
 
@@ -234,9 +237,10 @@ format and reconstruct it with `StateSnapshot::from_parts`. Reconstruction
 validates internal byte and token-lineage identities; restore additionally
 requires the original model and compatible backend build. Because the pinned
 llama.cpp state format omits next-token logits, restore re-decodes the final
-recorded token at its exact position after restoring causal memory. A backend
-that cannot remove that one position is rejected, and a failed refresh poisons
-the session.
+recorded token at its exact position after restoring causal memory. Aggregate
+ordinary checkpoint sessions reserve one recurrent rollback snapshot when the
+model needs it. A backend architecture that still cannot remove that one
+position is rejected, and a failed refresh poisons the session.
 
 See the [compatibility policy](https://github.com/paudley/logit-loom/blob/main/docs/compatibility.md)
 and [capability status](https://github.com/paudley/logit-loom/blob/main/docs/capabilities.md)

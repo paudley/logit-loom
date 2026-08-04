@@ -146,6 +146,18 @@ mod tests {
             identity,
             session_compatibility_identity(&runtime, defaults, LlamaContextType::Mtp, 4)
         );
+        assert_ne!(
+            identity,
+            session_compatibility_identity(&runtime, defaults, LlamaContextType::Default, 1)
+        );
+    }
+
+    #[test]
+    fn ordinary_checkpoint_sessions_reserve_only_the_required_recurrent_snapshot() {
+        assert_eq!(ordinary_checkpoint_recurrent_state_slots(false, false), 0);
+        assert_eq!(ordinary_checkpoint_recurrent_state_slots(false, true), 0);
+        assert_eq!(ordinary_checkpoint_recurrent_state_slots(true, false), 0);
+        assert_eq!(ordinary_checkpoint_recurrent_state_slots(true, true), 1);
     }
 
     #[test]
@@ -416,6 +428,26 @@ impl<'model> Session<'model> {
         )
     }
 
+    pub(crate) fn new_ordinary_text_mechanics(
+        model: &'model Model,
+        runtime: &Runtime,
+        options: SessionOptions,
+        checkpoint_capable: bool,
+        activation: Option<ActivationConfiguration>,
+    ) -> Result<Self, Error> {
+        let recurrent_or_hybrid = model.native.is_recurrent() || model.native.is_hybrid();
+        let recurrent_state_slots =
+            ordinary_checkpoint_recurrent_state_slots(checkpoint_capable, recurrent_or_hybrid);
+        Self::new_inner(
+            model,
+            runtime,
+            options,
+            LlamaContextType::Default,
+            recurrent_state_slots,
+            activation,
+        )
+    }
+
     pub(crate) fn new_speculative(
         model: &'model Model,
         runtime: &Runtime,
@@ -465,6 +497,7 @@ impl<'model> Session<'model> {
             .native
             .new_context(&runtime.native, params)
             .map_err(native)?;
+        let recurrent_state_slots = context.n_rs_seq();
         Ok(Self {
             context,
             model,
@@ -1350,6 +1383,17 @@ fn checkpoint_logit_refresh_range(position: u64) -> Result<Option<(u32, u32)>, E
         .checked_add(1)
         .ok_or_else(|| Error::Incompatible("checkpoint position overflowed".to_owned()))?;
     Ok(Some((last_position, end_position)))
+}
+
+const fn ordinary_checkpoint_recurrent_state_slots(
+    checkpoint_capable: bool,
+    recurrent_or_hybrid: bool,
+) -> u32 {
+    if checkpoint_capable && recurrent_or_hybrid {
+        1
+    } else {
+        0
+    }
 }
 
 fn session_compatibility_identity(

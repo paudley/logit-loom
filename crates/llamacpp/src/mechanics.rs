@@ -19,7 +19,7 @@ use crate::{
     SpeculativeRequest, SpeculativeSessionOptions, SpeculativeStateSnapshot, StateSnapshot,
     generate_speculative, generate_speculative_checkpointed, resume_speculative,
     resume_speculative_checkpointed,
-    session::StatefulGenerationOutput,
+    session::{Session, StatefulGenerationOutput},
     speculation::{
         SpeculativeExecutionOutcome, SpeculativePrefillStoppedOutput, clone_sampler,
         generate_speculative_controlled,
@@ -305,13 +305,14 @@ fn execute_ordinary(
         )),
         _ => None,
     };
-    let mut session = match request.target_activation.take() {
-        Some(activation) => {
-            target.session_with_activation(runtime, request.options.target, activation)?
-        }
-        None => target.session(runtime, request.options.target)?,
-    };
     let resume = request.resume;
+    let mut session = Session::new_ordinary_text_mechanics(
+        target,
+        runtime,
+        request.options.target,
+        request.capture_checkpoint || resume.is_some(),
+        request.target_activation.take(),
+    )?;
     if let Some(TextMechanicsResume::Ordinary(snapshot)) = resume {
         session.restore_envelope_state(snapshot.state(), None)?;
     }

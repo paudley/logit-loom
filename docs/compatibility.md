@@ -262,7 +262,10 @@ metadata before reconstructing untrusted state.
 The pinned llama.cpp state API serializes causal memory but not the
 next-token output logits. After consuming every checkpoint byte, the adapter
 therefore removes only the final sequence position and re-decodes its exact
-recorded token to restore the next-token boundary. A backend whose memory
+recorded token to restore the next-token boundary. Checkpoint-capable ordinary
+aggregate execution allocates one recurrent-state rollback snapshot for a
+recurrent or hybrid model and binds the native context's resulting slot count
+into `llamacpp-session-compatibility-v3`. A backend architecture that still
 cannot remove that position is incompatible with checkpoint replay. A partial
 native restore or a failed post-restore logit refresh poisons the session
 because its resulting backend state is unknown.
