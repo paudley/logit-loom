@@ -16,7 +16,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 rust-version = "1.97.1"
 authors = ["Blackcat Informatics Inc."]
@@ -28,14 +28,14 @@ homepage = "https://github.com/paudley/logit-loom"
 blake3 = "1.8.5"
 llama-cpp-4 = { version = "=0.5.0", default-features = false }
 libloading = "0.9.0"
-logit-loom = { version = "=0.2.0", path = "crates/loom" }
-logit-loom-core = { version = "=0.2.0", path = "crates/core" }
-logit-loom-diffusion = { version = "=0.2.0", path = "crates/diffusion" }
-logit-loom-diffusion-sdcpp = { version = "=0.2.0", path = "crates/diffusion-sdcpp" }
-logit-loom-executor = { version = "=0.2.0", path = "crates/executor" }
-logit-loom-llamacpp = { version = "=0.2.0", path = "crates/llamacpp" }
-logit-loom-models = { version = "=0.2.0", path = "models" }
-logit-loom-tokenizer = { version = "=0.2.0", path = "crates/tokenizer" }
+logit-loom = { version = "=0.2.1", path = "crates/loom" }
+logit-loom-core = { version = "=0.2.1", path = "crates/core" }
+logit-loom-diffusion = { version = "=0.2.1", path = "crates/diffusion" }
+logit-loom-diffusion-sdcpp = { version = "=0.2.1", path = "crates/diffusion-sdcpp" }
+logit-loom-executor = { version = "=0.2.1", path = "crates/executor" }
+logit-loom-llamacpp = { version = "=0.2.1", path = "crates/llamacpp" }
+logit-loom-models = { version = "=0.2.1", path = "models" }
+logit-loom-tokenizer = { version = "=0.2.1", path = "crates/tokenizer" }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.150"
 sha2 = "0.11.0"

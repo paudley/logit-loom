@@ -8,6 +8,16 @@ include breaking API changes.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-08-03
+
+### Fixed
+
+- Packaged the exact Krea activation patch inside
+  `logit-loom-diffusion-sdcpp` so the published crate compiles independently
+  of the repository layout. Release validation now requires the packaged copy
+  to match the canonical native patch byte-for-byte and to appear in the crate
+  archive; the existing implementation identity is unchanged.
+
 ## [0.2.0] - 2026-08-03
 
 ### Added
@@ -275,7 +285,8 @@ include breaking API changes.
 - Model and `LoRA` loading reject files whose content identity changes across
   the native load operation.
 
-[Unreleased]: https://github.com/paudley/logit-loom/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/paudley/logit-loom/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/paudley/logit-loom/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/paudley/logit-loom/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/paudley/logit-loom/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/paudley/logit-loom/releases/tag/v0.1.0

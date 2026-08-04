@@ -803,7 +803,7 @@ checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
 
 [[package]]
 name = "logit-loom"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "logit-loom-core",
  "thiserror",
@@ -811,7 +811,7 @@ dependencies = [
 
 [[package]]
 name = "logit-loom-core"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "blake3",
  "serde",
@@ -821,7 +821,7 @@ dependencies = [
 
 [[package]]
 name = "logit-loom-diffusion"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "logit-loom-core",
  "logit-loom-executor",
@@ -832,7 +832,7 @@ dependencies = [
 
 [[package]]
 name = "logit-loom-diffusion-sdcpp"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "blake3",
  "libloading 0.9.0",
@@ -847,7 +847,7 @@ dependencies = [
 
 [[package]]
 name = "logit-loom-executor"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "logit-loom-core",
  "serde",
@@ -856,7 +856,7 @@ dependencies = [
 
 [[package]]
 name = "logit-loom-llamacpp"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "blake3",
  "llama-cpp-4",
@@ -866,7 +866,7 @@ dependencies = [
 
 [[package]]
 name = "logit-loom-models"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -876,7 +876,7 @@ dependencies = [
 
 [[package]]
 name = "logit-loom-runtime"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "logit-loom",
  "logit-loom-llamacpp",
@@ -888,7 +888,7 @@ dependencies = [
 
 [[package]]
 name = "logit-loom-tokenizer"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "blake3",
  "logit-loom-core",

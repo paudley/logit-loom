@@ -1,0 +1,2151 @@
+diff --git include/stable-diffusion.h include/stable-diffusion.h
+index 72432fa7eaef56d5f67f044639377784b9b90fcb..ff1e974641576ec01c66f744def20f5ebfe0eeea 100644
+--- include/stable-diffusion.h
++++ include/stable-diffusion.h
+@@ -719,6 +719,200 @@ typedef struct {
+     uint32_t controls_cleared;
+ } sd_loom_program_image_result_v5_t;
+ 
++#define SD_LOOM_KREA_ACTIVATION_ABI_VERSION 6
++
++enum sd_loom_krea_site_kind_v6_t {
++    SD_LOOM_KREA_CONDITIONER_LAYER_V6 = 1,
++    SD_LOOM_KREA_POST_FUSION_V6 = 2,
++    SD_LOOM_KREA_POST_PROJECTION_V6 = 3,
++    SD_LOOM_KREA_TEXT_RESIDUAL_V6 = 4,
++    SD_LOOM_KREA_TRANSFORMER_RESIDUAL_V6 = 5,
++};
++
++enum sd_loom_krea_boundary_v6_t {
++    SD_LOOM_KREA_PRE_DENOISER_V6 = 1,
++    SD_LOOM_KREA_TRANSITION_V6 = 2,
++};
++
++enum sd_loom_krea_token_domain_v6_t {
++    SD_LOOM_KREA_TEXT_V6 = 1,
++    SD_LOOM_KREA_IMAGE_V6 = 2,
++    SD_LOOM_KREA_REFERENCE_V6 = 3,
++};
++
++enum sd_loom_krea_branch_v6_t {
++    SD_LOOM_KREA_CONDITIONAL_V6 = 1,
++    SD_LOOM_KREA_UNCONDITIONAL_V6 = 2,
++};
++
++enum sd_loom_krea_capture_retention_v6_t {
++    SD_LOOM_KREA_CAPTURE_DIGEST_V6 = 1,
++    SD_LOOM_KREA_CAPTURE_STATISTICS_V6 = 2,
++    SD_LOOM_KREA_CAPTURE_DEVICE_SNAPSHOT_V6 = 3,
++};
++
++enum sd_loom_krea_input_representation_v6_t {
++    SD_LOOM_KREA_DONOR_F32_ROWS_V6 = 1,
++    SD_LOOM_KREA_VECTOR_F32_ROWS_V6 = 2,
++    SD_LOOM_KREA_ORTHONORMAL_F32_ROWS_V6 = 3,
++};
++
++enum sd_loom_krea_operator_v6_t {
++    SD_LOOM_KREA_DONOR_TRANSPLANT_V6 = 1,
++    SD_LOOM_KREA_SCALED_VECTOR_ADD_V6 = 2,
++    SD_LOOM_KREA_SCALED_VECTOR_SUBTRACT_V6 = 3,
++    SD_LOOM_KREA_PROJECTION_REMOVAL_V6 = 4,
++    SD_LOOM_KREA_ONE_SIDED_REMOVAL_V6 = 5,
++};
++
++enum sd_loom_krea_input_source_v6_t {
++    SD_LOOM_KREA_RESIDENT_INPUT_V6 = 1,
++    SD_LOOM_KREA_CAPTURE_INPUT_V6 = 2,
++};
++
++enum sd_loom_krea_selection_v6_t {
++    SD_LOOM_KREA_ALL_TOKENS_V6 = 1,
++    SD_LOOM_KREA_TOKEN_RANGES_V6 = 2,
++};
++
++enum sd_loom_krea_event_v6_t {
++    SD_LOOM_KREA_CAPTURE_EVENT_V6 = 1,
++    SD_LOOM_KREA_APPLICATION_BEFORE_EVENT_V6 = 2,
++    SD_LOOM_KREA_APPLICATION_AFTER_EVENT_V6 = 3,
++};
++
++typedef struct {
++    uint32_t site;
++    enum sd_loom_krea_site_kind_v6_t kind;
++    uint32_t index;
++    uint32_t width;
++    uint32_t boundary_mask;
++    uint32_t domain_mask;
++    uint32_t branch_mask;
++} sd_loom_krea_site_v6_t;
++
++typedef struct {
++    uint32_t abi_version;
++    uint32_t conditioner_layers;
++    uint32_t transformer_blocks;
++    size_t site_count;
++} sd_loom_krea_topology_v6_t;
++
++typedef struct {
++    uint64_t generation;
++    uint32_t slot;
++    uint32_t reserved;
++} sd_loom_krea_input_handle_v6_t;
++
++typedef struct {
++    uint32_t abi_version;
++    uint32_t site;
++    uint32_t rows;
++    enum sd_loom_krea_input_representation_v6_t representation;
++    const float* values;
++    size_t element_count;
++} sd_loom_krea_input_v6_t;
++
++typedef struct {
++    uint32_t abi_version;
++    sd_loom_krea_input_handle_v6_t handle;
++    uint32_t site;
++    uint32_t width;
++    uint32_t rows;
++    enum sd_loom_krea_input_representation_v6_t representation;
++    uint64_t bytes;
++    uint64_t host_to_device_transfers;
++    uint64_t host_to_device_bytes;
++} sd_loom_krea_input_description_v6_t;
++
++typedef struct {
++    uint32_t start;
++    uint32_t end;
++} sd_loom_krea_token_range_v6_t;
++
++typedef struct {
++    enum sd_loom_krea_token_domain_v6_t domain;
++    enum sd_loom_krea_selection_v6_t selection;
++    const sd_loom_krea_token_range_v6_t* ranges;
++    size_t range_count;
++} sd_loom_krea_token_selection_v6_t;
++
++typedef struct {
++    enum sd_loom_krea_boundary_v6_t boundary;
++    enum sd_loom_step_selection_v4_t step_selection;
++    const uint32_t* steps;
++    size_t step_count;
++} sd_loom_krea_boundary_selection_v6_t;
++
++typedef struct {
++    uint32_t capture_index;
++    uint32_t site;
++    sd_loom_krea_token_selection_v6_t tokens;
++    sd_loom_krea_boundary_selection_v6_t boundary;
++    enum sd_loom_krea_branch_v6_t branch;
++    enum sd_loom_krea_capture_retention_v6_t retention;
++    uint64_t maximum_elements;
++    uint64_t maximum_host_bytes;
++    uint64_t maximum_device_bytes;
++} sd_loom_krea_capture_v6_t;
++
++typedef struct {
++    uint32_t operation_index;
++    uint32_t site;
++    sd_loom_krea_token_selection_v6_t tokens;
++    sd_loom_krea_boundary_selection_v6_t boundary;
++    enum sd_loom_krea_branch_v6_t branch;
++    enum sd_loom_krea_operator_v6_t operation;
++    enum sd_loom_krea_input_source_v6_t input_source;
++    sd_loom_krea_input_handle_v6_t resident_input;
++    uint32_t capture_input;
++    uint32_t vector;
++    float strength;
++} sd_loom_krea_operation_v6_t;
++
++typedef int32_t (*sd_loom_krea_event_cb_v6_t)(
++    enum sd_loom_krea_event_v6_t event,
++    uint32_t index,
++    uint64_t reach,
++    const float* values,
++    size_t element_count,
++    void* data);
++
++typedef struct {
++    uint32_t capture_index;
++    uint64_t reached;
++    uint64_t elements;
++} sd_loom_krea_capture_result_v6_t;
++
++typedef struct {
++    uint32_t operation_index;
++    uint64_t reached;
++    uint64_t applied;
++    uint64_t unchanged;
++} sd_loom_krea_application_result_v6_t;
++
++typedef struct {
++    uint32_t abi_version;
++    sd_loom_program_image_params_v5_t image;
++    const sd_loom_krea_capture_v6_t* captures;
++    size_t capture_count;
++    const sd_loom_krea_operation_v6_t* operations;
++    size_t operation_count;
++    uint64_t maximum_host_bytes;
++    uint64_t maximum_device_bytes;
++    uint64_t maximum_applications;
++} sd_loom_program_image_params_v6_t;
++
++typedef struct {
++    uint32_t abi_version;
++    sd_loom_program_image_result_v5_t image;
++    size_t capture_count;
++    size_t operation_count;
++    uint32_t activation_controls_cleared;
++    uint64_t peak_host_bytes;
++    uint64_t peak_device_bytes;
++} sd_loom_program_image_result_v6_t;
++
+ typedef int32_t (*sd_loom_value_read_cb_v3_t)(const uint8_t* bytes,
+                                               size_t byte_count,
+                                               void* data);
+@@ -961,6 +1155,43 @@ SD_API int32_t sd_loom_program_generate_image_v5(
+     uint64_t* transition_masks,
+     size_t transition_mask_capacity,
+     sd_loom_program_image_result_v5_t* result_out);
++SD_API int32_t sd_loom_krea_topology_v6(
++    const sd_ctx_t* sd_ctx,
++    sd_loom_krea_topology_v6_t* topology_out,
++    sd_loom_krea_site_v6_t* sites,
++    size_t site_capacity);
++SD_API int32_t sd_loom_krea_import_input_v6(
++    sd_ctx_t* sd_ctx,
++    const sd_loom_krea_input_v6_t* input,
++    sd_loom_krea_input_description_v6_t* description_out);
++SD_API int32_t sd_loom_krea_describe_input_v6(
++    const sd_ctx_t* sd_ctx,
++    sd_loom_krea_input_handle_v6_t input,
++    sd_loom_krea_input_description_v6_t* description_out);
++SD_API int32_t sd_loom_krea_release_input_v6(
++    sd_ctx_t* sd_ctx,
++    sd_loom_krea_input_handle_v6_t input);
++SD_API int32_t sd_loom_krea_clear_inputs_v6(sd_ctx_t* sd_ctx);
++SD_API int32_t sd_loom_program_generate_image_v6(
++    sd_loom_program_v3_t* program,
++    const sd_loom_program_image_params_v6_t* params,
++    sd_loom_condition_cb_v1_t condition_callback,
++    void* condition_callback_data,
++    sd_loom_step_cb_v1_t step_callback,
++    void* step_callback_data,
++    sd_loom_krea_event_cb_v6_t activation_callback,
++    void* activation_callback_data,
++    sd_loom_value_handle_v3_t* snapshot_values,
++    size_t snapshot_capacity,
++    sd_loom_model_block_application_v5_t* model_block_results,
++    size_t model_block_capacity,
++    uint64_t* transition_masks,
++    size_t transition_mask_capacity,
++    sd_loom_krea_capture_result_v6_t* capture_results,
++    size_t capture_capacity,
++    sd_loom_krea_application_result_v6_t* application_results,
++    size_t application_capacity,
++    sd_loom_program_image_result_v6_t* result_out);
+ SD_API int32_t sd_loom_program_describe_v3(const sd_loom_program_v3_t* program,
+                                            sd_loom_value_handle_v3_t value,
+                                            sd_loom_value_descriptor_v3_t* descriptor_out);
+diff --git src/model/diffusion/krea2.hpp src/model/diffusion/krea2.hpp
+index 91d5782aae97e29eb6d51b2082243b9e030b27f7..0628e3ce0589efee2c782f59ac5cca470a383010 100644
+--- src/model/diffusion/krea2.hpp
++++ src/model/diffusion/krea2.hpp
+@@ -4,11 +4,15 @@
+ #include <inttypes.h>
+ #include <algorithm>
+ #include <cmath>
++#include <cstring>
+ #include <cstdint>
+ #include <cstdlib>
++#include <functional>
++#include <limits>
+ #include <memory>
+ #include <set>
+ #include <string>
++#include <unordered_map>
+ #include <utility>
+ #include <vector>
+ 
+@@ -589,6 +593,415 @@ namespace Krea2 {
+         }
+     };
+ 
++    struct KreaActivationResidentTensor {
++        KreaActivationResidentInputDescription description;
++        ggml_context* context            = nullptr;
++        ggml_backend_buffer_t buffer      = nullptr;
++        ggml_tensor* tensor               = nullptr;
++
++        ~KreaActivationResidentTensor() {
++            if (buffer != nullptr) {
++                ggml_backend_buffer_free(buffer);
++            }
++            if (context != nullptr) {
++                ggml_free(context);
++            }
++        }
++
++        KreaActivationResidentTensor() = default;
++        KreaActivationResidentTensor(const KreaActivationResidentTensor&) = delete;
++        KreaActivationResidentTensor& operator=(const KreaActivationResidentTensor&) = delete;
++    };
++
++    struct KreaActivationPendingEvent {
++        KreaActivationEventKind kind = KREA_ACTIVATION_CAPTURE_EVENT;
++        uint32_t index               = 0;
++        uint64_t reach               = 0;
++        ggml_tensor* tensor           = nullptr;
++        KreaActivationOperationControl* operation = nullptr;
++    };
++
++    class KreaActivationGraph {
++    public:
++        using ResidentLookup = std::function<ggml_tensor*(KreaActivationResidentHandle)>;
++
++        KreaActivationGraph(GGMLRunnerContext* context,
++                            KreaActivationRequest* request,
++                            uint32_t transition,
++                            KreaActivationBranch branch,
++                            ResidentLookup resident_lookup,
++                            std::vector<KreaActivationPendingEvent>* events)
++            : context_(context),
++              request_(request),
++              transition_(transition),
++              branch_(branch),
++              resident_lookup_(std::move(resident_lookup)),
++              events_(events) {}
++
++        ggml_tensor* apply(uint32_t site,
++                           KreaActivationBoundaryKind site_boundary,
++                           ggml_tensor* tensor,
++                           int64_t text_start,
++                           int64_t text_length,
++                           int64_t image_start,
++                           int64_t image_length,
++                           int64_t reference_start,
++                           int64_t reference_length) {
++            if (request_ == nullptr || tensor == nullptr || request_->execution_failed) {
++                return tensor;
++            }
++            if (tensor->type != GGML_TYPE_F32 || tensor->ne[2] != 1 || tensor->ne[3] != 1) {
++                request_->execution_failed = true;
++                return tensor;
++            }
++
++            std::unordered_map<uint32_t, ggml_tensor*> captures;
++            uint64_t snapshot_device_bytes = 0;
++            for (auto& capture : request_->captures) {
++                if (capture.site != site || capture.branch != branch_ ||
++                    !boundary_active(capture.boundary, site_boundary)) {
++                    continue;
++                }
++                ggml_tensor* selected = select(tensor,
++                                               capture.selection,
++                                               text_start,
++                                               text_length,
++                                               image_start,
++                                               image_length,
++                                               reference_start,
++                                               reference_length);
++                if (selected == nullptr) {
++                    request_->execution_failed = true;
++                    return tensor;
++                }
++                captures[capture.capture_index] = selected;
++                if (capture.retention == KREA_ACTIVATION_DEVICE_SNAPSHOT) {
++                    uint64_t bytes = static_cast<uint64_t>(ggml_nbytes(selected));
++                    if (snapshot_device_bytes >
++                        std::numeric_limits<uint64_t>::max() - bytes) {
++                        request_->execution_failed = true;
++                        return tensor;
++                    }
++                    snapshot_device_bytes += bytes;
++                }
++                if (records_boundary(capture.boundary)) {
++                    ++capture.reached;
++                    capture.elements += static_cast<uint64_t>(ggml_nelements(selected));
++                    queue_event(KREA_ACTIVATION_CAPTURE_EVENT,
++                                capture.capture_index,
++                                capture.reached,
++                                selected,
++                                nullptr);
++                }
++            }
++            if (request_->resident_device_bytes > request_->maximum_device_bytes ||
++                snapshot_device_bytes >
++                    request_->maximum_device_bytes - request_->resident_device_bytes) {
++                request_->execution_failed = true;
++                return tensor;
++            }
++            request_->peak_device_bytes = std::max(
++                request_->peak_device_bytes,
++                request_->resident_device_bytes + snapshot_device_bytes);
++
++            ggml_tensor* current = tensor;
++            for (auto& operation : request_->operations) {
++                if (operation.site != site || operation.branch != branch_ ||
++                    !boundary_active(operation.boundary, site_boundary)) {
++                    continue;
++                }
++                ggml_tensor* before = select(current,
++                                             operation.selection,
++                                             text_start,
++                                             text_length,
++                                             image_start,
++                                             image_length,
++                                             reference_start,
++                                             reference_length);
++                if (before == nullptr) {
++                    request_->execution_failed = true;
++                    return tensor;
++                }
++                ggml_tensor* source = nullptr;
++                if (operation.source_is_capture) {
++                    auto found = captures.find(operation.capture_source);
++                    if (found != captures.end()) {
++                        source = found->second;
++                    }
++                } else {
++                    source = resident_lookup_(operation.resident);
++                }
++                if (source == nullptr || source->type != GGML_TYPE_F32 ||
++                    source->ne[0] != before->ne[0]) {
++                    request_->execution_failed = true;
++                    return tensor;
++                }
++
++                ggml_tensor* after = transform(before, source, operation);
++                if (after == nullptr) {
++                    request_->execution_failed = true;
++                    return tensor;
++                }
++                current = splice(current,
++                                 after,
++                                 operation.selection,
++                                 text_start,
++                                 text_length,
++                                 image_start,
++                                 image_length,
++                                 reference_start,
++                                 reference_length);
++                if (current == nullptr) {
++                    request_->execution_failed = true;
++                    return tensor;
++                }
++                if (records_boundary(operation.boundary)) {
++                    if (request_->applications >= request_->maximum_applications) {
++                        request_->execution_failed = true;
++                        return tensor;
++                    }
++                    ++request_->applications;
++                    ++operation.reached;
++                    ++operation.applied;
++                    queue_event(KREA_ACTIVATION_APPLICATION_BEFORE_EVENT,
++                                operation.operation_index,
++                                operation.reached,
++                                before,
++                                &operation);
++                    queue_event(KREA_ACTIVATION_APPLICATION_AFTER_EVENT,
++                                operation.operation_index,
++                                operation.reached,
++                                after,
++                                &operation);
++                }
++            }
++            return current;
++        }
++
++    private:
++        GGMLRunnerContext* context_ = nullptr;
++        KreaActivationRequest* request_ = nullptr;
++        uint32_t transition_ = 0;
++        KreaActivationBranch branch_ = KREA_ACTIVATION_CONDITIONAL;
++        ResidentLookup resident_lookup_;
++        std::vector<KreaActivationPendingEvent>* events_ = nullptr;
++
++        bool boundary_active(const KreaActivationBoundary& boundary,
++                             KreaActivationBoundaryKind site_boundary) const {
++            if (boundary.kind != site_boundary) {
++                return false;
++            }
++            return site_boundary == KREA_ACTIVATION_PRE_DENOISER ||
++                   boundary.selects(transition_);
++        }
++
++        bool records_boundary(const KreaActivationBoundary& boundary) const {
++            return boundary.kind == KREA_ACTIVATION_TRANSITION || transition_ == 0;
++        }
++
++        bool domain(const KreaActivationSelection& selection,
++                    int64_t text_start,
++                    int64_t text_length,
++                    int64_t image_start,
++                    int64_t image_length,
++                    int64_t reference_start,
++                    int64_t reference_length,
++                    int64_t* start,
++                    int64_t* length) const {
++            switch (selection.domain) {
++                case KREA_ACTIVATION_TEXT:
++                    *start  = text_start;
++                    *length = text_length;
++                    return true;
++                case KREA_ACTIVATION_IMAGE:
++                    *start  = image_start;
++                    *length = image_length;
++                    return true;
++                case KREA_ACTIVATION_REFERENCE:
++                    *start  = reference_start;
++                    *length = reference_length;
++                    return true;
++            }
++            return false;
++        }
++
++        ggml_tensor* select(ggml_tensor* tensor,
++                            const KreaActivationSelection& selection,
++                            int64_t text_start,
++                            int64_t text_length,
++                            int64_t image_start,
++                            int64_t image_length,
++                            int64_t reference_start,
++                            int64_t reference_length) const {
++            int64_t start  = 0;
++            int64_t length = 0;
++            if (!domain(selection,
++                        text_start,
++                        text_length,
++                        image_start,
++                        image_length,
++                        reference_start,
++                        reference_length,
++                        &start,
++                        &length) ||
++                start < 0 || length <= 0 || start + length > tensor->ne[1]) {
++                return nullptr;
++            }
++            auto view = [&](int64_t row_start, int64_t row_count) {
++                return ggml_view_2d(context_->ggml_ctx,
++                                    tensor,
++                                    tensor->ne[0],
++                                    row_count,
++                                    tensor->nb[1],
++                                    static_cast<size_t>(row_start) * tensor->nb[1]);
++            };
++            if (selection.all) {
++                return ggml_cont(context_->ggml_ctx, view(start, length));
++            }
++            ggml_tensor* selected = nullptr;
++            uint32_t prior_end = 0;
++            for (const auto& range : selection.ranges) {
++                if (range.start >= range.end || range.end > static_cast<uint64_t>(length) ||
++                    range.start < prior_end) {
++                    return nullptr;
++                }
++                ggml_tensor* part = ggml_cont(context_->ggml_ctx,
++                                              view(start + range.start,
++                                                   range.end - range.start));
++                selected = selected == nullptr
++                               ? part
++                               : ggml_concat(context_->ggml_ctx, selected, part, 1);
++                prior_end = range.end;
++            }
++            return selected;
++        }
++
++        ggml_tensor* transform(ggml_tensor* target,
++                               ggml_tensor* source,
++                               const KreaActivationOperationControl& operation) const {
++            if (operation.strength == 0.f) {
++                return target;
++            }
++            switch (operation.operation) {
++                case KREA_ACTIVATION_DONOR_TRANSPLANT:
++                    if (source->ne[1] != target->ne[1]) {
++                        return nullptr;
++                    }
++                    if (operation.strength == 1.f) {
++                        return source;
++                    }
++                    return ggml_add(
++                        context_->ggml_ctx,
++                        ggml_scale(context_->ggml_ctx, target, 1.f - operation.strength),
++                        ggml_scale(context_->ggml_ctx, source, operation.strength));
++                case KREA_ACTIVATION_SCALED_VECTOR_ADD:
++                case KREA_ACTIVATION_SCALED_VECTOR_SUBTRACT: {
++                    if (operation.vector >= static_cast<uint64_t>(source->ne[1])) {
++                        return nullptr;
++                    }
++                    ggml_tensor* vector = ggml_view_2d(
++                        context_->ggml_ctx,
++                        source,
++                        source->ne[0],
++                        1,
++                        source->nb[1],
++                        static_cast<size_t>(operation.vector) * source->nb[1]);
++                    float strength = operation.operation == KREA_ACTIVATION_SCALED_VECTOR_SUBTRACT
++                                         ? -operation.strength
++                                         : operation.strength;
++                    return ggml_add(context_->ggml_ctx,
++                                    target,
++                                    ggml_scale(context_->ggml_ctx, vector, strength));
++                }
++                case KREA_ACTIVATION_PROJECTION_REMOVAL:
++                case KREA_ACTIVATION_ONE_SIDED_REMOVAL: {
++                    ggml_tensor* coefficients = ggml_mul_mat(context_->ggml_ctx,
++                                                             source,
++                                                             target);
++                    if (operation.operation == KREA_ACTIVATION_ONE_SIDED_REMOVAL) {
++                        coefficients = ggml_clamp(context_->ggml_ctx,
++                                                  coefficients,
++                                                  0.f,
++                                                  std::numeric_limits<float>::max());
++                    }
++                    ggml_tensor* basis_transpose = ggml_cont(
++                        context_->ggml_ctx,
++                        ggml_transpose(context_->ggml_ctx, source));
++                    ggml_tensor* projection = ggml_mul_mat(context_->ggml_ctx,
++                                                           basis_transpose,
++                                                           coefficients);
++                    return ggml_sub(context_->ggml_ctx,
++                                    target,
++                                    ggml_scale(context_->ggml_ctx,
++                                               projection,
++                                               operation.strength));
++                }
++            }
++            return nullptr;
++        }
++
++        ggml_tensor* splice(ggml_tensor* target,
++                            ggml_tensor* selected,
++                            const KreaActivationSelection& selection,
++                            int64_t text_start,
++                            int64_t text_length,
++                            int64_t image_start,
++                            int64_t image_length,
++                            int64_t reference_start,
++                            int64_t reference_length) const {
++            int64_t start  = 0;
++            int64_t length = 0;
++            if (!domain(selection,
++                        text_start,
++                        text_length,
++                        image_start,
++                        image_length,
++                        reference_start,
++                        reference_length,
++                        &start,
++                        &length)) {
++                return nullptr;
++            }
++            ggml_tensor* result = target;
++            int64_t source_start = 0;
++            auto set_range = [&](int64_t target_start, int64_t count) {
++                ggml_tensor* source_view = ggml_view_2d(
++                    context_->ggml_ctx,
++                    selected,
++                    selected->ne[0],
++                    count,
++                    selected->nb[1],
++                    static_cast<size_t>(source_start) * selected->nb[1]);
++                result = ggml_set(context_->ggml_ctx,
++                                  result,
++                                  source_view,
++                                  result->nb[1],
++                                  result->nb[2],
++                                  result->nb[3],
++                                  static_cast<size_t>(target_start) * result->nb[1]);
++                source_start += count;
++            };
++            if (selection.all) {
++                set_range(start, length);
++            } else {
++                for (const auto& range : selection.ranges) {
++                    set_range(start + range.start, range.end - range.start);
++                }
++            }
++            return source_start == selected->ne[1] ? result : nullptr;
++        }
++
++        void queue_event(KreaActivationEventKind kind,
++                         uint32_t index,
++                         uint64_t reach,
++                         ggml_tensor* tensor,
++                         KreaActivationOperationControl* operation) const {
++            ggml_tensor* output = ggml_cont(context_->ggml_ctx, tensor);
++            ggml_set_output(output);
++            events_->push_back({kind, index, reach, output, operation});
++        }
++    };
++
+     class Krea2Model : public GGMLBlock {
+     protected:
+         Krea2Config config;
+@@ -617,7 +1030,8 @@ namespace Krea2 {
+                              ggml_tensor* pe,
+                              std::vector<ggml_tensor*> ref_latents = {},
+                              bool zero_timestep_refs               = false,
+-                             const std::vector<ModelBlockControl>& block_controls = {}) {
++                             const std::vector<ModelBlockControl>& block_controls = {},
++                             KreaActivationGraph* activation = nullptr) {
+             int64_t W = x->ne[0];
+             int64_t H = x->ne[1];
+             int64_t N = x->ne[3];
+@@ -656,8 +1070,81 @@ namespace Krea2 {
+                 tvec_0          = tproj->forward(ctx, t_0);
+             }
+ 
+-            auto txt        = txtfusion->forward(ctx, context);
+-            txt             = txtmlp->forward(ctx, txt);
++            if (activation != nullptr) {
++                int64_t context_width  = config.text_dim;
++                int64_t context_layers = config.text_layers;
++                int64_t context_tokens = context->ne[1] * context->ne[2];
++                auto layered = ggml_reshape_3d(ctx->ggml_ctx,
++                                               context,
++                                               context_width,
++                                               context_layers,
++                                               context_tokens);
++                for (int64_t layer = 0; layer < context_layers; ++layer) {
++                    auto layer_view = ggml_view_3d(ctx->ggml_ctx,
++                                                   layered,
++                                                   context_width,
++                                                   1,
++                                                   context_tokens,
++                                                   layered->nb[1],
++                                                   layered->nb[2],
++                                                   static_cast<size_t>(layer) * layered->nb[1]);
++                    auto layer_rows = ggml_reshape_2d(ctx->ggml_ctx,
++                                                      ggml_cont(ctx->ggml_ctx, layer_view),
++                                                      context_width,
++                                                      context_tokens);
++                    auto changed = activation->apply(static_cast<uint32_t>(layer),
++                                                     KREA_ACTIVATION_PRE_DENOISER,
++                                                     layer_rows,
++                                                     0,
++                                                     context_tokens,
++                                                     0,
++                                                     0,
++                                                     0,
++                                                     0);
++                    auto changed_layer = ggml_reshape_3d(ctx->ggml_ctx,
++                                                         changed,
++                                                         context_width,
++                                                         1,
++                                                         context_tokens);
++                    layered = ggml_set(ctx->ggml_ctx,
++                                       layered,
++                                       changed_layer,
++                                       layered->nb[1],
++                                       layered->nb[2],
++                                       layered->nb[3],
++                                       static_cast<size_t>(layer) * layered->nb[1]);
++                }
++                context = ggml_reshape_3d(ctx->ggml_ctx,
++                                          layered,
++                                          context->ne[0],
++                                          context->ne[1],
++                                          context->ne[2]);
++            }
++
++            auto txt = txtfusion->forward(ctx, context);
++            if (activation != nullptr) {
++                txt = activation->apply(static_cast<uint32_t>(config.text_layers),
++                                        KREA_ACTIVATION_TRANSITION,
++                                        txt,
++                                        0,
++                                        txt->ne[1],
++                                        0,
++                                        0,
++                                        0,
++                                        0);
++            }
++            txt = txtmlp->forward(ctx, txt);
++            if (activation != nullptr) {
++                txt = activation->apply(static_cast<uint32_t>(config.text_layers + 1),
++                                        KREA_ACTIVATION_TRANSITION,
++                                        txt,
++                                        0,
++                                        txt->ne[1],
++                                        0,
++                                        0,
++                                        0,
++                                        0);
++            }
+             int64_t txt_len = txt->ne[1];
+ 
+             auto hidden_states = ggml_concat(ctx->ggml_ctx, txt, img, 1);
+@@ -682,6 +1169,28 @@ namespace Krea2 {
+                 }
+                 if (control != block_controls.end() &&
+                     control->residual_scale == 0.f) {
++                    if (activation != nullptr) {
++                        uint32_t text_site = static_cast<uint32_t>(
++                            config.text_layers + 2 + i * 2);
++                        hidden_states = activation->apply(text_site,
++                                                          KREA_ACTIVATION_TRANSITION,
++                                                          hidden_states,
++                                                          0,
++                                                          txt_len,
++                                                          txt_len,
++                                                          img_len,
++                                                          ref_start,
++                                                          ref_len);
++                        hidden_states = activation->apply(text_site + 1,
++                                                          KREA_ACTIVATION_TRANSITION,
++                                                          hidden_states,
++                                                          0,
++                                                          txt_len,
++                                                          txt_len,
++                                                          img_len,
++                                                          ref_start,
++                                                          ref_len);
++                    }
+                     sd::ggml_graph_cut::mark_graph_cut(hidden_states, "krea2.blocks." + std::to_string(i), "hidden_states");
+                     continue;
+                 }
+@@ -697,6 +1206,29 @@ namespace Krea2 {
+                                                         residual,
+                                                         control->residual_scale));
+                 }
++                if (activation != nullptr) {
++                    uint32_t text_site = static_cast<uint32_t>(
++                        config.text_layers + 2 + i * 2);
++                    uint32_t complete_site = text_site + 1;
++                    hidden_states = activation->apply(text_site,
++                                                      KREA_ACTIVATION_TRANSITION,
++                                                      hidden_states,
++                                                      0,
++                                                      txt_len,
++                                                      txt_len,
++                                                      img_len,
++                                                      ref_start,
++                                                      ref_len);
++                    hidden_states = activation->apply(complete_site,
++                                                      KREA_ACTIVATION_TRANSITION,
++                                                      hidden_states,
++                                                      0,
++                                                      txt_len,
++                                                      txt_len,
++                                                      img_len,
++                                                      ref_start,
++                                                      ref_len);
++                }
+                 sd::ggml_graph_cut::mark_graph_cut(hidden_states, "krea2.blocks." + std::to_string(i), "hidden_states");
+             }
+ 
+@@ -730,6 +1262,9 @@ namespace Krea2 {
+         Krea2Config config;
+         Krea2Model model;
+         std::vector<float> pe_vec;
++        uint64_t activation_generation = 1;
++        std::vector<std::unique_ptr<KreaActivationResidentTensor>> activation_inputs;
++        std::vector<KreaActivationPendingEvent> activation_events;
+ 
+         Krea2Runner(ggml_backend_t backend,
+                     const String2TensorStorage& tensor_storage_map      = {},
+@@ -749,6 +1284,193 @@ namespace Krea2 {
+             return config.layers;
+         }
+ 
++        bool krea_activation_topology(KreaActivationTopology* topology) const override {
++            if (topology == nullptr || config.text_layers <= 0 || config.layers <= 0 ||
++                config.text_dim <= 0 || config.features <= 0 ||
++                config.text_layers > UINT32_MAX || config.layers > UINT32_MAX ||
++                config.text_dim > UINT32_MAX || config.features > UINT32_MAX) {
++                return false;
++            }
++            *topology = {};
++            topology->conditioner_layers = static_cast<uint32_t>(config.text_layers);
++            topology->transformer_blocks = static_cast<uint32_t>(config.layers);
++            constexpr uint32_t pre = 1u << (KREA_ACTIVATION_PRE_DENOISER - 1);
++            constexpr uint32_t transition = 1u << (KREA_ACTIVATION_TRANSITION - 1);
++            constexpr uint32_t text = 1u << (KREA_ACTIVATION_TEXT - 1);
++            constexpr uint32_t image = 1u << (KREA_ACTIVATION_IMAGE - 1);
++            constexpr uint32_t reference = 1u << (KREA_ACTIVATION_REFERENCE - 1);
++            constexpr uint32_t branches =
++                (1u << (KREA_ACTIVATION_CONDITIONAL - 1)) |
++                (1u << (KREA_ACTIVATION_UNCONDITIONAL - 1));
++            topology->sites.reserve(static_cast<size_t>(config.text_layers + 2 + config.layers * 2));
++            for (uint32_t layer = 0; layer < topology->conditioner_layers; ++layer) {
++                topology->sites.push_back({layer,
++                                           1,
++                                           layer,
++                                           static_cast<uint32_t>(config.text_dim),
++                                           pre,
++                                           text,
++                                           branches});
++            }
++            uint32_t site = topology->conditioner_layers;
++            topology->sites.push_back({site++,
++                                       2,
++                                       0,
++                                       static_cast<uint32_t>(config.text_dim),
++                                       transition,
++                                       text,
++                                       branches});
++            topology->sites.push_back({site++,
++                                       3,
++                                       0,
++                                       static_cast<uint32_t>(config.features),
++                                       transition,
++                                       text,
++                                       branches});
++            for (uint32_t block = 0; block < topology->transformer_blocks; ++block) {
++                topology->sites.push_back({site++,
++                                           4,
++                                           block,
++                                           static_cast<uint32_t>(config.features),
++                                           transition,
++                                           text,
++                                           branches});
++                topology->sites.push_back({site++,
++                                           5,
++                                           block,
++                                           static_cast<uint32_t>(config.features),
++                                           transition,
++                                           text | image | reference,
++                                           branches});
++            }
++            return true;
++        }
++
++        bool krea_activation_import(
++            const KreaActivationResidentInputSpec& spec,
++            KreaActivationResidentInputDescription* description) override {
++            if (description == nullptr || spec.values == nullptr || spec.rows == 0 ||
++                spec.elements == 0 || spec.elements > 16ull * 1024 * 1024 ||
++                activation_inputs.size() >= 128 ||
++                (spec.representation != 1 && spec.representation != 2 &&
++                 spec.representation != 3) ||
++                (spec.representation != 1 && spec.rows > 256)) {
++                return false;
++            }
++            KreaActivationTopology topology;
++            if (!krea_activation_topology(&topology)) {
++                return false;
++            }
++            auto site = std::find_if(topology.sites.begin(),
++                                     topology.sites.end(),
++                                     [&](const KreaActivationSiteTopology& candidate) {
++                                         return candidate.site == spec.site;
++                                     });
++            if (site == topology.sites.end() ||
++                static_cast<uint64_t>(site->width) * spec.rows != spec.elements ||
++                spec.elements > std::numeric_limits<size_t>::max() / sizeof(float) ||
++                std::any_of(spec.values,
++                            spec.values + spec.elements,
++                            [](float value) { return !std::isfinite(value); })) {
++                return false;
++            }
++            if (spec.representation == 3) {
++                constexpr double tolerance = 1.0e-5;
++                for (uint32_t left = 0; left < spec.rows; ++left) {
++                    for (uint32_t right = left; right < spec.rows; ++right) {
++                        double dot = 0.0;
++                        for (uint32_t element = 0; element < site->width; ++element) {
++                            dot += static_cast<double>(
++                                       spec.values[static_cast<size_t>(left) * site->width + element]) *
++                                   spec.values[static_cast<size_t>(right) * site->width + element];
++                        }
++                        double expected = left == right ? 1.0 : 0.0;
++                        if (!std::isfinite(dot) || std::abs(dot - expected) > tolerance) {
++                            return false;
++                        }
++                    }
++                }
++            }
++
++            auto resident = std::make_unique<KreaActivationResidentTensor>();
++            ggml_init_params params;
++            params.mem_size = ggml_tensor_overhead() * 2;
++            params.mem_buffer = nullptr;
++            params.no_alloc = true;
++            resident->context = ggml_init(params);
++            if (resident->context == nullptr) {
++                return false;
++            }
++            resident->tensor = ggml_new_tensor_2d(resident->context,
++                                                   GGML_TYPE_F32,
++                                                   site->width,
++                                                   spec.rows);
++            resident->buffer = ggml_backend_alloc_ctx_tensors(resident->context,
++                                                               runtime_backend);
++            if (resident->buffer == nullptr || resident->tensor->buffer == nullptr) {
++                return false;
++            }
++            ggml_backend_buffer_set_usage(resident->buffer,
++                                          GGML_BACKEND_BUFFER_USAGE_COMPUTE);
++            ggml_backend_tensor_set(resident->tensor,
++                                    spec.values,
++                                    0,
++                                    spec.elements * sizeof(float));
++            ggml_backend_synchronize(runtime_backend);
++
++            uint32_t slot = static_cast<uint32_t>(activation_inputs.size());
++            resident->description.handle = {activation_generation, slot};
++            resident->description.site = spec.site;
++            resident->description.width = site->width;
++            resident->description.rows = spec.rows;
++            resident->description.representation = spec.representation;
++            resident->description.bytes = spec.elements * sizeof(float);
++            resident->description.host_to_device_transfers = 1;
++            resident->description.host_to_device_bytes = resident->description.bytes;
++            *description = resident->description;
++            activation_inputs.push_back(std::move(resident));
++            return true;
++        }
++
++        bool krea_activation_describe(
++            KreaActivationResidentHandle handle,
++            KreaActivationResidentInputDescription* description) const override {
++            if (description == nullptr || handle.generation != activation_generation ||
++                handle.slot >= activation_inputs.size() ||
++                activation_inputs[handle.slot] == nullptr) {
++                return false;
++            }
++            *description = activation_inputs[handle.slot]->description;
++            return true;
++        }
++
++        bool krea_activation_release(KreaActivationResidentHandle handle) override {
++            if (handle.generation != activation_generation ||
++                handle.slot >= activation_inputs.size()) {
++                return false;
++            }
++            if (activation_inputs[handle.slot] == nullptr) {
++                return true;
++            }
++            activation_inputs[handle.slot].reset();
++            return true;
++        }
++
++        bool krea_activation_clear() override {
++            activation_events.clear();
++            activation_inputs.clear();
++            ++activation_generation;
++            if (activation_generation == 0) {
++                activation_generation = 1;
++            }
++            return true;
++        }
++
++        bool krea_activation_finish_request() override {
++            activation_events.clear();
++            return activation_events.empty();
++        }
++
+         void get_param_tensors(std::map<std::string, ggml_tensor*>& tensors, const std::string& prefix) override {
+             model.get_param_tensors(tensors, prefix);
+         }
+@@ -758,7 +1480,11 @@ namespace Krea2 {
+                                  const sd::Tensor<float>& context_tensor,
+                                  const std::vector<sd::Tensor<float>>& ref_latents_tensor = {},
+                                  const RefImageParams& ref_image_params                   = REF_IMAGE_PRESETS.at("krea2_ostris_edit"),
+-                                 const std::vector<ModelBlockControl>& block_controls     = {}) {
++                                 const std::vector<ModelBlockControl>& block_controls     = {},
++                                 KreaActivationRequest* activation_request                = nullptr,
++                                 uint32_t activation_transition                            = 0,
++                                 KreaActivationBranch activation_branch                    = KREA_ACTIVATION_CONDITIONAL) {
++            activation_events.clear();
+             ggml_cgraph* gf        = new_graph_custom(KREA2_GRAPH_SIZE);
+             ggml_tensor* x         = make_input(x_tensor);
+             ggml_tensor* timesteps = make_input(timesteps_tensor);
+@@ -785,7 +1511,21 @@ namespace Krea2 {
+             auto pe     = ggml_new_tensor_4d(compute_ctx, GGML_TYPE_F32, 2, 2, config.axes_dim_sum / 2, pos_len);
+             set_backend_tensor_data(pe, pe_vec.data());
+ 
+-            auto runner_ctx  = get_context();
++            auto runner_ctx = get_context();
++            KreaActivationGraph activation(
++                &runner_ctx,
++                activation_request,
++                activation_transition,
++                activation_branch,
++                [this](KreaActivationResidentHandle handle) {
++                    if (handle.generation != activation_generation ||
++                        handle.slot >= activation_inputs.size() ||
++                        activation_inputs[handle.slot] == nullptr) {
++                        return static_cast<ggml_tensor*>(nullptr);
++                    }
++                    return activation_inputs[handle.slot]->tensor;
++                },
++                &activation_events);
+             ggml_tensor* out = model.forward(&runner_ctx,
+                                              x,
+                                              timesteps,
+@@ -793,7 +1533,11 @@ namespace Krea2 {
+                                              pe,
+                                              ref_latents,
+                                              ref_image_params.force_ref_timestep_zero,
+-                                             block_controls);
++                                             block_controls,
++                                             activation_request == nullptr ? nullptr : &activation);
++            for (const auto& event : activation_events) {
++                ggml_build_forward_expand(gf, event.tensor);
++            }
+             ggml_build_forward_expand(gf, out);
+             return gf;
+         }
+@@ -804,16 +1548,29 @@ namespace Krea2 {
+                                   const sd::Tensor<float>& context,
+                                   const std::vector<sd::Tensor<float>>& ref_latents = {},
+                                   const RefImageParams& ref_image_params            = REF_IMAGE_PRESETS.at("krea2_ostris_edit"),
+-                                  const std::vector<ModelBlockControl>& block_controls = {}) {
++                                  const std::vector<ModelBlockControl>& block_controls = {},
++                                  KreaActivationRequest* activation_request = nullptr,
++                                  uint32_t activation_transition = 0,
++                                  KreaActivationBranch activation_branch = KREA_ACTIVATION_CONDITIONAL) {
+             auto get_graph = [&]() -> ggml_cgraph* {
+                 return build_graph(x,
+                                    timesteps,
+                                    context,
+                                    ref_latents,
+                                    ref_image_params,
+-                                   block_controls);
++                                   block_controls,
++                                   activation_request,
++                                   activation_transition,
++                                   activation_branch);
+             };
+-            return restore_trailing_singleton_dims(GGMLRunner::compute<float>(get_graph, n_threads, false, false, false), x.dim());
++            auto output = restore_trailing_singleton_dims(
++                GGMLRunner::compute<float>(get_graph, n_threads, false, false, false),
++                x.dim());
++            if (!output.empty() && activation_request != nullptr) {
++                emit_activation_events(*activation_request);
++            }
++            activation_events.clear();
++            return output;
+         }
+ 
+         sd::Tensor<float> compute(int n_threads,
+@@ -831,7 +1588,78 @@ namespace Krea2 {
+                            diffusion_params.ref_image_params,
+                            extra != nullptr && extra->controls != nullptr
+                                ? *extra->controls
+-                               : empty_block_controls);
++                               : empty_block_controls,
++                           extra == nullptr ? nullptr : extra->activation,
++                           extra == nullptr ? 0 : extra->activation_transition,
++                           extra == nullptr ? KREA_ACTIVATION_CONDITIONAL
++                                            : extra->activation_branch);
++        }
++
++    private:
++        void emit_activation_events(KreaActivationRequest& request) {
++            std::unordered_map<uint32_t, std::vector<uint8_t>> before_values;
++            for (const auto& event : activation_events) {
++                if (event.tensor == nullptr || event.tensor->buffer == nullptr ||
++                    event.tensor->type != GGML_TYPE_F32) {
++                    request.execution_failed = true;
++                    continue;
++                }
++                size_t bytes = ggml_nbytes(event.tensor);
++                uint64_t event_bytes = static_cast<uint64_t>(bytes);
++                uint64_t retained_host_bytes = 0;
++                for (const auto& retained : before_values) {
++                    if (retained_host_bytes >
++                        std::numeric_limits<uint64_t>::max() - retained.second.size()) {
++                        request.execution_failed = true;
++                        break;
++                    }
++                    retained_host_bytes += retained.second.size();
++                }
++                uint64_t copies =
++                    event.kind == KREA_ACTIVATION_APPLICATION_BEFORE_EVENT ? 2 : 1;
++                if (request.execution_failed ||
++                    retained_host_bytes > request.maximum_host_bytes ||
++                    event_bytes >
++                        (request.maximum_host_bytes - retained_host_bytes) / copies) {
++                    request.execution_failed = true;
++                    continue;
++                }
++                request.peak_host_bytes = std::max(
++                    request.peak_host_bytes,
++                    retained_host_bytes + event_bytes * copies);
++                std::vector<float> values(static_cast<size_t>(ggml_nelements(event.tensor)));
++                ggml_backend_tensor_get(event.tensor, values.data(), 0, bytes);
++                if (std::any_of(values.begin(), values.end(), [](float value) {
++                        return !std::isfinite(value);
++                    })) {
++                    request.execution_failed = true;
++                    continue;
++                }
++                if (event.kind == KREA_ACTIVATION_APPLICATION_BEFORE_EVENT) {
++                    const auto* begin = reinterpret_cast<const uint8_t*>(values.data());
++                    before_values[event.index] = std::vector<uint8_t>(begin, begin + bytes);
++                } else if (event.kind == KREA_ACTIVATION_APPLICATION_AFTER_EVENT &&
++                           event.operation != nullptr) {
++                    auto before = before_values.find(event.index);
++                    if (before != before_values.end() && before->second.size() == bytes &&
++                        std::memcmp(before->second.data(), values.data(), bytes) == 0) {
++                        ++event.operation->unchanged;
++                    }
++                    before_values.erase(event.index);
++                }
++                if (request.callback != nullptr &&
++                    !request.callback(request.callback_data,
++                                      event.kind,
++                                      event.index,
++                                      event.reach,
++                                      values.data(),
++                                      values.size())) {
++                    request.callback_failed = true;
++                }
++            }
++            if (!before_values.empty()) {
++                request.execution_failed = true;
++            }
+         }
+     };
+ }  // namespace Krea2
+diff --git src/model/diffusion/model.hpp src/model/diffusion/model.hpp
+index 249c9fe9c9b3f83ecdbc5f4a30d5ab680cda33d1..a16c3d63df6a9ab7304c2d83cdc913e38be83ecc 100644
+--- src/model/diffusion/model.hpp
++++ src/model/diffusion/model.hpp
+@@ -1,9 +1,13 @@
+ #ifndef __SD_MODEL_DIFFUSION_MODEL_HPP__
+ #define __SD_MODEL_DIFFUSION_MODEL_HPP__
+ 
++#include <algorithm>
++#include <cstddef>
++#include <cstdint>
+ #include <string>
+ #include <utility>
+ #include <variant>
++#include <vector>
+ 
+ #include "core/ggml_extend.hpp"
+ #include "core/tensor_ggml.hpp"
+@@ -63,8 +67,165 @@ struct ModelBlockControl {
+     ModelBlockApplicationCounter* application = nullptr;
+ };
+ 
++enum KreaActivationBoundaryKind {
++    KREA_ACTIVATION_PRE_DENOISER = 1,
++    KREA_ACTIVATION_TRANSITION   = 2,
++};
++
++enum KreaActivationTokenDomain {
++    KREA_ACTIVATION_TEXT      = 1,
++    KREA_ACTIVATION_IMAGE     = 2,
++    KREA_ACTIVATION_REFERENCE = 3,
++};
++
++enum KreaActivationBranch {
++    KREA_ACTIVATION_CONDITIONAL   = 1,
++    KREA_ACTIVATION_UNCONDITIONAL = 2,
++};
++
++enum KreaActivationRetention {
++    KREA_ACTIVATION_DIGEST          = 1,
++    KREA_ACTIVATION_STATISTICS      = 2,
++    KREA_ACTIVATION_DEVICE_SNAPSHOT = 3,
++};
++
++enum KreaActivationOperatorKind {
++    KREA_ACTIVATION_DONOR_TRANSPLANT       = 1,
++    KREA_ACTIVATION_SCALED_VECTOR_ADD      = 2,
++    KREA_ACTIVATION_SCALED_VECTOR_SUBTRACT = 3,
++    KREA_ACTIVATION_PROJECTION_REMOVAL     = 4,
++    KREA_ACTIVATION_ONE_SIDED_REMOVAL      = 5,
++};
++
++struct KreaActivationRange {
++    uint32_t start = 0;
++    uint32_t end   = 0;
++};
++
++struct KreaActivationSelection {
++    KreaActivationTokenDomain domain = KREA_ACTIVATION_TEXT;
++    bool all                             = false;
++    std::vector<KreaActivationRange> ranges;
++};
++
++struct KreaActivationBoundary {
++    KreaActivationBoundaryKind kind = KREA_ACTIVATION_TRANSITION;
++    bool all                         = false;
++    std::vector<uint32_t> steps;
++
++    bool selects(uint32_t transition) const {
++        if (kind != KREA_ACTIVATION_TRANSITION) {
++            return false;
++        }
++        return all || std::binary_search(steps.begin(), steps.end(), transition);
++    }
++};
++
++struct KreaActivationResidentHandle {
++    uint64_t generation = 0;
++    uint32_t slot       = UINT32_MAX;
++};
++
++struct KreaActivationCaptureControl {
++    uint32_t capture_index = 0;
++    uint32_t site          = 0;
++    KreaActivationSelection selection;
++    KreaActivationBoundary boundary;
++    KreaActivationBranch branch       = KREA_ACTIVATION_CONDITIONAL;
++    KreaActivationRetention retention = KREA_ACTIVATION_DIGEST;
++    uint64_t maximum_elements         = 0;
++    uint64_t maximum_host_bytes       = 0;
++    uint64_t maximum_device_bytes     = 0;
++    uint64_t reached                  = 0;
++    uint64_t elements                 = 0;
++};
++
++struct KreaActivationOperationControl {
++    uint32_t operation_index = 0;
++    uint32_t site            = 0;
++    KreaActivationSelection selection;
++    KreaActivationBoundary boundary;
++    KreaActivationBranch branch          = KREA_ACTIVATION_CONDITIONAL;
++    KreaActivationOperatorKind operation = KREA_ACTIVATION_SCALED_VECTOR_ADD;
++    bool source_is_capture                = false;
++    KreaActivationResidentHandle resident;
++    uint32_t capture_source = UINT32_MAX;
++    uint32_t vector         = 0;
++    float strength          = 0.f;
++    uint64_t reached        = 0;
++    uint64_t applied        = 0;
++    uint64_t unchanged      = 0;
++};
++
++enum KreaActivationEventKind {
++    KREA_ACTIVATION_CAPTURE_EVENT            = 1,
++    KREA_ACTIVATION_APPLICATION_BEFORE_EVENT = 2,
++    KREA_ACTIVATION_APPLICATION_AFTER_EVENT  = 3,
++};
++
++using KreaActivationEventCallback = bool (*)(void* data,
++                                              KreaActivationEventKind kind,
++                                              uint32_t index,
++                                              uint64_t reach,
++                                              const float* values,
++                                              size_t elements);
++
++struct KreaActivationRequest {
++    std::vector<KreaActivationCaptureControl> captures;
++    std::vector<KreaActivationOperationControl> operations;
++    KreaActivationEventCallback callback = nullptr;
++    void* callback_data                  = nullptr;
++    bool callback_failed                 = false;
++    bool execution_failed                = false;
++    uint64_t maximum_host_bytes          = 0;
++    uint64_t maximum_device_bytes        = 0;
++    uint64_t maximum_applications        = 0;
++    uint64_t resident_device_bytes       = 0;
++    uint64_t peak_host_bytes             = 0;
++    uint64_t peak_device_bytes           = 0;
++    uint64_t applications                = 0;
++};
++
++struct KreaActivationSiteTopology {
++    uint32_t site          = 0;
++    uint32_t kind          = 0;
++    uint32_t index         = 0;
++    uint32_t width         = 0;
++    uint32_t boundary_mask = 0;
++    uint32_t domain_mask   = 0;
++    uint32_t branch_mask   = 0;
++};
++
++struct KreaActivationTopology {
++    uint32_t conditioner_layers = 0;
++    uint32_t transformer_blocks = 0;
++    std::vector<KreaActivationSiteTopology> sites;
++};
++
++struct KreaActivationResidentInputSpec {
++    uint32_t site = 0;
++    uint32_t rows = 0;
++    uint32_t representation = 0;
++    const float* values = nullptr;
++    size_t elements = 0;
++};
++
++struct KreaActivationResidentInputDescription {
++    KreaActivationResidentHandle handle;
++    uint32_t site                = 0;
++    uint32_t width               = 0;
++    uint32_t rows                = 0;
++    uint32_t representation      = 0;
++    uint64_t bytes               = 0;
++    uint64_t host_to_device_transfers = 0;
++    uint64_t host_to_device_bytes     = 0;
++};
++
+ struct ModelBlockDiffusionExtra {
+     const std::vector<ModelBlockControl>* controls = nullptr;
++    KreaActivationRequest* activation               = nullptr;
++    uint32_t activation_transition                   = 0;
++    KreaActivationBranch activation_branch           = KREA_ACTIVATION_CONDITIONAL;
+ };
+ 
+ struct FluxDiffusionExtra {
+@@ -161,6 +322,32 @@ public:
+     virtual sd::Tensor<float> compute(int n_threads,
+                                       const DiffusionParams& diffusion_params) = 0;
+ 
++    virtual bool krea_activation_topology(KreaActivationTopology*) const {
++        return false;
++    }
++
++    virtual bool krea_activation_import(const KreaActivationResidentInputSpec&,
++                                        KreaActivationResidentInputDescription*) {
++        return false;
++    }
++
++    virtual bool krea_activation_describe(KreaActivationResidentHandle,
++                                          KreaActivationResidentInputDescription*) const {
++        return false;
++    }
++
++    virtual bool krea_activation_release(KreaActivationResidentHandle) {
++        return false;
++    }
++
++    virtual bool krea_activation_clear() {
++        return false;
++    }
++
++    virtual bool krea_activation_finish_request() {
++        return false;
++    }
++
+     void get_param_tensors(std::map<std::string, ggml_tensor*>& tensors) {
+         get_param_tensors(tensors, prefix);
+     }
+diff --git src/stable-diffusion.cpp src/stable-diffusion.cpp
+index 2e5ebcf24bfab29a37a437981de9216ba8b886a6..acfb968973f56538c688af88b2430978d089936f 100644
+--- src/stable-diffusion.cpp
++++ src/stable-diffusion.cpp
+@@ -238,6 +238,7 @@ public:
+     uint64_t loom_program_generation          = 0;
+     bool loom_program_active                  = false;
+     std::vector<sd_loom_scheduled_model_block_v4_t> loom_model_block_controls;
++    KreaActivationRequest* loom_krea_activation = nullptr;
+     int n_threads                    = -1;
+     float default_flow_shift         = INFINITY;
+ 
+@@ -2583,7 +2584,8 @@ public:
+             auto run_condition = [&](const SDCondition& condition,
+                                      const sd::Tensor<float>* c_concat_override                 = nullptr,
+                                      const std::vector<int>* local_skip_layers                  = nullptr,
+-                                     const std::vector<sd::Tensor<float>>* ref_latents_override = nullptr) -> sd::Tensor<float> {
++                                     const std::vector<sd::Tensor<float>>* ref_latents_override = nullptr,
++                                     KreaActivationBranch activation_branch = KREA_ACTIVATION_CONDITIONAL) -> sd::Tensor<float> {
+                 diffusion_params.context     = condition.c_crossattn.empty() ? nullptr : &condition.c_crossattn;
+                 diffusion_params.c_concat    = c_concat_override != nullptr ? c_concat_override : (condition.c_concat.empty() ? nullptr : &condition.c_concat);
+                 diffusion_params.y           = condition.c_vector.empty() ? nullptr : &condition.c_vector;
+@@ -2604,7 +2606,10 @@ public:
+                     diffusion_params.extra = ModelBlockDiffusionExtra{
+                         active_model_block_controls.empty()
+                             ? nullptr
+-                            : &active_model_block_controls};
++                            : &active_model_block_controls,
++                        loom_krea_activation,
++                        step > 0 ? static_cast<uint32_t>(step - 1) : 0,
++                        activation_branch};
+                 } else if (sd_version_is_anima(version)) {
+                     diffusion_params.extra = AnimaDiffusionExtra{condition.c_t5_ids.empty() ? nullptr : &condition.c_t5_ids,
+                                                                  condition.c_t5_weights.empty() ? nullptr : &condition.c_t5_weights};
+@@ -2639,7 +2644,8 @@ public:
+                 }
+ 
+                 sd::Tensor<float> cached_output;
+-                if (step_cache.before_condition(&condition, noised_input, &cached_output)) {
++                if (loom_krea_activation == nullptr &&
++                    step_cache.before_condition(&condition, noised_input, &cached_output)) {
+                     return std::move(cached_output);
+                 }
+ 
+@@ -2690,7 +2696,9 @@ public:
+                 }
+                 uncond_out = run_condition(uncond,
+                                            uncond.c_concat.empty() ? nullptr : &uncond.c_concat,
+-                                           uncond_skip_layers);
++                                           uncond_skip_layers,
++                                           nullptr,
++                                           KREA_ACTIVATION_UNCONDITIONAL);
+                 if (uncond_out.empty()) {
+                     return {};
+                 }
+@@ -2699,7 +2707,8 @@ public:
+                 img_uncond_out = run_condition(img_uncond,
+                                                img_uncond.c_concat.empty() ? nullptr : &img_uncond.c_concat,
+                                                nullptr,
+-                                               uncond_without_ref_latents ? &empty_ref_latents : nullptr);
++                                               uncond_without_ref_latents ? &empty_ref_latents : nullptr,
++                                               KREA_ACTIVATION_UNCONDITIONAL);
+                 if (img_uncond_out.empty()) {
+                     return {};
+                 }
+@@ -6252,6 +6261,12 @@ int32_t sd_loom_clear_session_v2(sd_ctx_t* sd_ctx) {
+     try {
+         sd_ctx->sd->apply_loras(nullptr, 0);
+         sd_ctx->sd->reset_cancel_flag();
++        if (sd_ctx->sd->loom_krea_activation != nullptr ||
++            (sd_ctx->sd->version == VERSION_KREA2 &&
++             sd_ctx->sd->diffusion_model != nullptr &&
++             !sd_ctx->sd->diffusion_model->krea_activation_clear())) {
++            return SD_LOOM_STATUS_NATIVE_ERROR;
++        }
+         return SD_LOOM_STATUS_OK;
+     } catch (...) {
+         return SD_LOOM_STATUS_NATIVE_ERROR;
+@@ -7745,6 +7760,651 @@ int32_t sd_loom_program_generate_image_v5(
+     }
+ }
+ 
++static sd_loom_krea_input_handle_v6_t sd_loom_krea_handle_v6(
++    KreaActivationResidentHandle handle) {
++    return {handle.generation, handle.slot, 0};
++}
++
++static KreaActivationResidentHandle sd_loom_krea_handle_v6(
++    sd_loom_krea_input_handle_v6_t handle) {
++    return {handle.generation, handle.slot};
++}
++
++static void sd_loom_krea_description_v6(
++    const KreaActivationResidentInputDescription& source,
++    sd_loom_krea_input_description_v6_t* destination) {
++    *destination = {
++        SD_LOOM_KREA_ACTIVATION_ABI_VERSION,
++        sd_loom_krea_handle_v6(source.handle),
++        source.site,
++        source.width,
++        source.rows,
++        static_cast<sd_loom_krea_input_representation_v6_t>(source.representation),
++        source.bytes,
++        source.host_to_device_transfers,
++        source.host_to_device_bytes,
++    };
++}
++
++int32_t sd_loom_krea_topology_v6(
++    const sd_ctx_t* sd_ctx,
++    sd_loom_krea_topology_v6_t* topology_out,
++    sd_loom_krea_site_v6_t* sites,
++    size_t site_capacity) {
++    if (topology_out != nullptr) {
++        *topology_out = {SD_LOOM_KREA_ACTIVATION_ABI_VERSION, 0, 0, 0};
++    }
++    if (sd_ctx == nullptr || sd_ctx->sd == nullptr || topology_out == nullptr ||
++        (sites == nullptr && site_capacity != 0)) {
++        return SD_LOOM_STATUS_INVALID_ARGUMENT;
++    }
++    try {
++        KreaActivationTopology topology;
++        if (sd_ctx->sd->diffusion_model == nullptr ||
++            !sd_ctx->sd->diffusion_model->krea_activation_topology(&topology)) {
++            return SD_LOOM_STATUS_UNSUPPORTED;
++        }
++        topology_out->conditioner_layers = topology.conditioner_layers;
++        topology_out->transformer_blocks = topology.transformer_blocks;
++        topology_out->site_count = topology.sites.size();
++        if (sites == nullptr) {
++            return site_capacity == 0 ? SD_LOOM_STATUS_OK
++                                      : SD_LOOM_STATUS_INVALID_ARGUMENT;
++        }
++        if (site_capacity != topology.sites.size()) {
++            return SD_LOOM_STATUS_INVALID_ARGUMENT;
++        }
++        for (size_t index = 0; index < topology.sites.size(); ++index) {
++            const auto& source = topology.sites[index];
++            sites[index] = {
++                source.site,
++                static_cast<sd_loom_krea_site_kind_v6_t>(source.kind),
++                source.index,
++                source.width,
++                source.boundary_mask,
++                source.domain_mask,
++                source.branch_mask,
++            };
++        }
++        return SD_LOOM_STATUS_OK;
++    } catch (...) {
++        return SD_LOOM_STATUS_NATIVE_ERROR;
++    }
++}
++
++int32_t sd_loom_krea_import_input_v6(
++    sd_ctx_t* sd_ctx,
++    const sd_loom_krea_input_v6_t* input,
++    sd_loom_krea_input_description_v6_t* description_out) {
++    if (description_out != nullptr) {
++        *description_out = {};
++    }
++    if (sd_ctx == nullptr || sd_ctx->sd == nullptr || input == nullptr ||
++        description_out == nullptr ||
++        input->abi_version != SD_LOOM_KREA_ACTIVATION_ABI_VERSION ||
++        input->values == nullptr || input->rows == 0 || input->element_count == 0 ||
++        sd_ctx->sd->loom_krea_activation != nullptr) {
++        return SD_LOOM_STATUS_INVALID_ARGUMENT;
++    }
++    try {
++        KreaActivationResidentInputSpec spec;
++        spec.site = input->site;
++        spec.rows = input->rows;
++        spec.representation = static_cast<uint32_t>(input->representation);
++        spec.values = input->values;
++        spec.elements = input->element_count;
++        KreaActivationResidentInputDescription description;
++        if (sd_ctx->sd->diffusion_model == nullptr ||
++            !sd_ctx->sd->diffusion_model->krea_activation_import(spec, &description)) {
++            return SD_LOOM_STATUS_INVALID_ARGUMENT;
++        }
++        sd_loom_krea_description_v6(description, description_out);
++        return SD_LOOM_STATUS_OK;
++    } catch (...) {
++        return SD_LOOM_STATUS_NATIVE_ERROR;
++    }
++}
++
++int32_t sd_loom_krea_describe_input_v6(
++    const sd_ctx_t* sd_ctx,
++    sd_loom_krea_input_handle_v6_t input,
++    sd_loom_krea_input_description_v6_t* description_out) {
++    if (description_out != nullptr) {
++        *description_out = {};
++    }
++    if (sd_ctx == nullptr || sd_ctx->sd == nullptr || description_out == nullptr ||
++        input.reserved != 0) {
++        return SD_LOOM_STATUS_INVALID_ARGUMENT;
++    }
++    try {
++        KreaActivationResidentInputDescription description;
++        if (sd_ctx->sd->diffusion_model == nullptr ||
++            !sd_ctx->sd->diffusion_model->krea_activation_describe(
++                sd_loom_krea_handle_v6(input),
++                &description)) {
++            return SD_LOOM_STATUS_INVALID_ARGUMENT;
++        }
++        sd_loom_krea_description_v6(description, description_out);
++        return SD_LOOM_STATUS_OK;
++    } catch (...) {
++        return SD_LOOM_STATUS_NATIVE_ERROR;
++    }
++}
++
++int32_t sd_loom_krea_release_input_v6(
++    sd_ctx_t* sd_ctx,
++    sd_loom_krea_input_handle_v6_t input) {
++    if (sd_ctx == nullptr || sd_ctx->sd == nullptr || input.reserved != 0 ||
++        sd_ctx->sd->loom_krea_activation != nullptr) {
++        return SD_LOOM_STATUS_INVALID_ARGUMENT;
++    }
++    try {
++        return sd_ctx->sd->diffusion_model != nullptr &&
++                       sd_ctx->sd->diffusion_model->krea_activation_release(
++                           sd_loom_krea_handle_v6(input))
++                   ? SD_LOOM_STATUS_OK
++                   : SD_LOOM_STATUS_INVALID_ARGUMENT;
++    } catch (...) {
++        return SD_LOOM_STATUS_NATIVE_ERROR;
++    }
++}
++
++int32_t sd_loom_krea_clear_inputs_v6(sd_ctx_t* sd_ctx) {
++    if (sd_ctx == nullptr || sd_ctx->sd == nullptr ||
++        sd_ctx->sd->loom_krea_activation != nullptr) {
++        return SD_LOOM_STATUS_INVALID_ARGUMENT;
++    }
++    try {
++        return sd_ctx->sd->diffusion_model != nullptr &&
++                       sd_ctx->sd->diffusion_model->krea_activation_clear()
++                   ? SD_LOOM_STATUS_OK
++                   : SD_LOOM_STATUS_UNSUPPORTED;
++    } catch (...) {
++        return SD_LOOM_STATUS_NATIVE_ERROR;
++    }
++}
++
++static const KreaActivationSiteTopology* sd_loom_krea_site_v6(
++    const KreaActivationTopology& topology,
++    uint32_t site) {
++    auto found = std::find_if(topology.sites.begin(),
++                              topology.sites.end(),
++                              [site](const KreaActivationSiteTopology& candidate) {
++                                  return candidate.site == site;
++                              });
++    return found == topology.sites.end() ? nullptr : &*found;
++}
++
++static bool sd_loom_krea_selection_v6(
++    const sd_loom_krea_token_selection_v6_t& source,
++    uint32_t domain_mask,
++    KreaActivationSelection* destination,
++    uint64_t* selected_rows) {
++    if (destination == nullptr || selected_rows == nullptr ||
++        source.domain < SD_LOOM_KREA_TEXT_V6 ||
++        source.domain > SD_LOOM_KREA_REFERENCE_V6 ||
++        (domain_mask & (1u << (source.domain - 1))) == 0) {
++        return false;
++    }
++    *destination = {};
++    destination->domain = static_cast<KreaActivationTokenDomain>(source.domain);
++    *selected_rows = 0;
++    if (source.selection == SD_LOOM_KREA_ALL_TOKENS_V6) {
++        if (source.ranges != nullptr || source.range_count != 0) {
++            return false;
++        }
++        destination->all = true;
++        return true;
++    }
++    if (source.selection != SD_LOOM_KREA_TOKEN_RANGES_V6 ||
++        source.ranges == nullptr || source.range_count == 0 ||
++        source.range_count > 256) {
++        return false;
++    }
++    destination->ranges.reserve(source.range_count);
++    uint32_t prior_end = 0;
++    for (size_t index = 0; index < source.range_count; ++index) {
++        const auto& range = source.ranges[index];
++        if (range.start >= range.end || (index > 0 && prior_end > range.start)) {
++            return false;
++        }
++        uint64_t length = static_cast<uint64_t>(range.end) - range.start;
++        if (*selected_rows > std::numeric_limits<uint64_t>::max() - length) {
++            return false;
++        }
++        *selected_rows += length;
++        destination->ranges.push_back({range.start, range.end});
++        prior_end = range.end;
++    }
++    return true;
++}
++
++static bool sd_loom_krea_boundary_v6(
++    const sd_loom_krea_boundary_selection_v6_t& source,
++    uint32_t boundary_mask,
++    uint32_t step_count,
++    KreaActivationBoundary* destination,
++    uint64_t* reaches) {
++    if (destination == nullptr || reaches == nullptr ||
++        source.boundary < SD_LOOM_KREA_PRE_DENOISER_V6 ||
++        source.boundary > SD_LOOM_KREA_TRANSITION_V6 ||
++        (boundary_mask & (1u << (source.boundary - 1))) == 0) {
++        return false;
++    }
++    *destination = {};
++    destination->kind = static_cast<KreaActivationBoundaryKind>(source.boundary);
++    if (source.boundary == SD_LOOM_KREA_PRE_DENOISER_V6) {
++        if (source.step_selection != SD_LOOM_STEP_ALL_V4 ||
++            source.steps != nullptr || source.step_count != 0) {
++            return false;
++        }
++        destination->all = true;
++        *reaches = 1;
++        return true;
++    }
++    if (source.step_selection == SD_LOOM_STEP_ALL_V4) {
++        if (source.steps != nullptr || source.step_count != 0) {
++            return false;
++        }
++        destination->all = true;
++        *reaches = step_count;
++        return true;
++    }
++    if (source.step_selection != SD_LOOM_STEP_EXACT_V4 ||
++        source.steps == nullptr || source.step_count == 0 ||
++        source.step_count > step_count) {
++        return false;
++    }
++    destination->steps.reserve(source.step_count);
++    uint32_t prior = 0;
++    for (size_t index = 0; index < source.step_count; ++index) {
++        uint32_t step = source.steps[index];
++        if (step >= step_count || (index > 0 && prior >= step)) {
++            return false;
++        }
++        destination->steps.push_back(step);
++        prior = step;
++    }
++    *reaches = source.step_count;
++    return true;
++}
++
++static bool sd_loom_equal_krea_selection_v6(
++    const sd_loom_krea_token_selection_v6_t& left,
++    const sd_loom_krea_token_selection_v6_t& right) {
++    if (left.domain != right.domain || left.selection != right.selection ||
++        left.range_count != right.range_count) {
++        return false;
++    }
++    for (size_t index = 0; index < left.range_count; ++index) {
++        if (left.ranges[index].start != right.ranges[index].start ||
++            left.ranges[index].end != right.ranges[index].end) {
++            return false;
++        }
++    }
++    return true;
++}
++
++static bool sd_loom_equal_krea_boundary_v6(
++    const sd_loom_krea_boundary_selection_v6_t& left,
++    const sd_loom_krea_boundary_selection_v6_t& right) {
++    if (left.boundary != right.boundary ||
++        left.step_selection != right.step_selection ||
++        left.step_count != right.step_count) {
++        return false;
++    }
++    for (size_t index = 0; index < left.step_count; ++index) {
++        if (left.steps[index] != right.steps[index]) {
++            return false;
++        }
++    }
++    return true;
++}
++
++struct sd_loom_krea_callback_state_v6_t {
++    sd_loom_krea_event_cb_v6_t callback = nullptr;
++    void* data = nullptr;
++};
++
++static bool sd_loom_krea_callback_v6(void* opaque,
++                                     KreaActivationEventKind kind,
++                                     uint32_t index,
++                                     uint64_t reach,
++                                     const float* values,
++                                     size_t elements) {
++    auto* state = static_cast<sd_loom_krea_callback_state_v6_t*>(opaque);
++    return state != nullptr && state->callback != nullptr &&
++           state->callback(static_cast<sd_loom_krea_event_v6_t>(kind),
++                           index,
++                           reach,
++                           values,
++                           elements,
++                           state->data) == SD_LOOM_CALLBACK_CONTINUE;
++}
++
++int32_t sd_loom_program_generate_image_v6(
++    sd_loom_program_v3_t* program,
++    const sd_loom_program_image_params_v6_t* params,
++    sd_loom_condition_cb_v1_t condition_callback,
++    void* condition_callback_data,
++    sd_loom_step_cb_v1_t step_callback,
++    void* step_callback_data,
++    sd_loom_krea_event_cb_v6_t activation_callback,
++    void* activation_callback_data,
++    sd_loom_value_handle_v3_t* snapshot_values,
++    size_t snapshot_capacity,
++    sd_loom_model_block_application_v5_t* model_block_results,
++    size_t model_block_capacity,
++    uint64_t* transition_masks,
++    size_t transition_mask_capacity,
++    sd_loom_krea_capture_result_v6_t* capture_results,
++    size_t capture_capacity,
++    sd_loom_krea_application_result_v6_t* application_results,
++    size_t application_capacity,
++    sd_loom_program_image_result_v6_t* result_out) {
++    if (result_out != nullptr) {
++        *result_out = {
++            SD_LOOM_KREA_ACTIVATION_ABI_VERSION,
++            {
++                SD_LOOM_MODEL_BLOCK_APPLICATION_ABI_VERSION,
++                {
++                    SD_LOOM_PROGRAM_ABI_VERSION,
++                    sd_loom_empty_handle_v3(),
++                    sd_loom_empty_handle_v3(),
++                    0,
++                },
++                0,
++                0,
++                0,
++            },
++            0,
++            0,
++            0,
++            0,
++            0,
++        };
++    }
++    if (capture_results != nullptr) {
++        std::fill(capture_results,
++                  capture_results + capture_capacity,
++                  sd_loom_krea_capture_result_v6_t{});
++    }
++    if (application_results != nullptr) {
++        std::fill(application_results,
++                  application_results + application_capacity,
++                  sd_loom_krea_application_result_v6_t{});
++    }
++    if (!sd_loom_program_live_v3(program) || params == nullptr ||
++        result_out == nullptr ||
++        params->abi_version != SD_LOOM_KREA_ACTIVATION_ABI_VERSION ||
++        params->image.abi_version != SD_LOOM_MODEL_BLOCK_APPLICATION_ABI_VERSION ||
++        params->image.image.abi_version != SD_LOOM_PROGRAM_ABI_VERSION ||
++        params->image.image.sigma_count < 2 ||
++        params->image.image.sigma_count > 4097 ||
++        params->capture_count > 128 || params->operation_count > 256 ||
++        (params->capture_count == 0 && params->operation_count == 0) ||
++        params->maximum_host_bytes > 64ull * 1024 * 1024 ||
++        params->maximum_device_bytes > 64ull * 1024 * 1024 ||
++        params->maximum_applications == 0 ||
++        params->maximum_applications > 1000000 ||
++        (params->capture_count > 0 && params->captures == nullptr) ||
++        (params->operation_count > 0 && params->operations == nullptr) ||
++        capture_capacity != params->capture_count ||
++        application_capacity != params->operation_count ||
++        (capture_capacity > 0 && capture_results == nullptr) ||
++        (application_capacity > 0 && application_results == nullptr) ||
++        model_block_capacity != params->image.model_block_operator_count ||
++        (model_block_capacity > 0 && model_block_results == nullptr) ||
++        program->context->sd->loom_krea_activation != nullptr ||
++        activation_callback == nullptr) {
++        return SD_LOOM_STATUS_INVALID_ARGUMENT;
++    }
++
++    uint32_t step_count = static_cast<uint32_t>(params->image.image.sigma_count - 1);
++    size_t transition_words = params->image.model_block_operator_count == 0
++                                  ? 0
++                                  : params->image.model_block_operator_count *
++                                        ((static_cast<size_t>(step_count) + 63) / 64);
++    if (transition_mask_capacity != transition_words ||
++        (transition_words > 0 && transition_masks == nullptr)) {
++        return SD_LOOM_STATUS_INVALID_ARGUMENT;
++    }
++
++    KreaActivationTopology topology;
++    if (program->context->sd->diffusion_model == nullptr ||
++        !program->context->sd->diffusion_model->krea_activation_topology(&topology)) {
++        return SD_LOOM_STATUS_UNSUPPORTED;
++    }
++
++    try {
++        KreaActivationRequest request;
++        request.maximum_host_bytes = params->maximum_host_bytes;
++        request.maximum_device_bytes = params->maximum_device_bytes;
++        request.maximum_applications = params->maximum_applications;
++        request.captures.reserve(params->capture_count);
++        uint32_t prior_capture = 0;
++        for (size_t index = 0; index < params->capture_count; ++index) {
++            const auto& source = params->captures[index];
++            const auto* site = sd_loom_krea_site_v6(topology, source.site);
++            uint64_t selected_rows = 0;
++            uint64_t reaches = 0;
++            KreaActivationCaptureControl capture;
++            if (site == nullptr || (index > 0 && prior_capture >= source.capture_index) ||
++                source.branch < SD_LOOM_KREA_CONDITIONAL_V6 ||
++                source.branch > SD_LOOM_KREA_UNCONDITIONAL_V6 ||
++                (site->branch_mask & (1u << (source.branch - 1))) == 0 ||
++                source.retention < SD_LOOM_KREA_CAPTURE_DIGEST_V6 ||
++                source.retention > SD_LOOM_KREA_CAPTURE_DEVICE_SNAPSHOT_V6 ||
++                source.maximum_elements == 0 ||
++                source.maximum_elements > 16ull * 1024 * 1024 ||
++                source.maximum_host_bytes > 64ull * 1024 * 1024 ||
++                source.maximum_device_bytes > 64ull * 1024 * 1024 ||
++                !sd_loom_krea_selection_v6(source.tokens,
++                                           site->domain_mask,
++                                           &capture.selection,
++                                           &selected_rows) ||
++                !sd_loom_krea_boundary_v6(source.boundary,
++                                          site->boundary_mask,
++                                          step_count,
++                                          &capture.boundary,
++                                          &reaches)) {
++                return SD_LOOM_STATUS_INVALID_ARGUMENT;
++            }
++            if (selected_rows > 0 &&
++                (selected_rows > std::numeric_limits<uint64_t>::max() / site->width ||
++                 selected_rows * site->width > source.maximum_elements)) {
++                return SD_LOOM_STATUS_INVALID_ARGUMENT;
++            }
++            capture.capture_index = source.capture_index;
++            capture.site = source.site;
++            capture.branch = static_cast<KreaActivationBranch>(source.branch);
++            capture.retention = static_cast<KreaActivationRetention>(source.retention);
++            capture.maximum_elements = source.maximum_elements;
++            capture.maximum_host_bytes = source.maximum_host_bytes;
++            capture.maximum_device_bytes = source.maximum_device_bytes;
++            request.captures.push_back(std::move(capture));
++            prior_capture = source.capture_index;
++        }
++
++        request.operations.reserve(params->operation_count);
++        std::set<std::pair<uint32_t, uint32_t>> resident_inputs;
++        uint32_t prior_operation = 0;
++        for (size_t index = 0; index < params->operation_count; ++index) {
++            const auto& source = params->operations[index];
++            const auto* site = sd_loom_krea_site_v6(topology, source.site);
++            uint64_t selected_rows = 0;
++            uint64_t reaches = 0;
++            KreaActivationOperationControl operation;
++            if (site == nullptr || (index > 0 && prior_operation >= source.operation_index) ||
++                source.branch < SD_LOOM_KREA_CONDITIONAL_V6 ||
++                source.branch > SD_LOOM_KREA_UNCONDITIONAL_V6 ||
++                (site->branch_mask & (1u << (source.branch - 1))) == 0 ||
++                source.operation < SD_LOOM_KREA_DONOR_TRANSPLANT_V6 ||
++                source.operation > SD_LOOM_KREA_ONE_SIDED_REMOVAL_V6 ||
++                !std::isfinite(source.strength) ||
++                ((source.operation == SD_LOOM_KREA_SCALED_VECTOR_ADD_V6 ||
++                  source.operation == SD_LOOM_KREA_SCALED_VECTOR_SUBTRACT_V6)
++                     ? source.strength < -64.f || source.strength > 64.f
++                     : source.strength < 0.f || source.strength > 1.f) ||
++                !sd_loom_krea_selection_v6(source.tokens,
++                                           site->domain_mask,
++                                           &operation.selection,
++                                           &selected_rows) ||
++                !sd_loom_krea_boundary_v6(source.boundary,
++                                          site->boundary_mask,
++                                          step_count,
++                                          &operation.boundary,
++                                          &reaches)) {
++                return SD_LOOM_STATUS_INVALID_ARGUMENT;
++            }
++            operation.operation_index = source.operation_index;
++            operation.site = source.site;
++            operation.branch = static_cast<KreaActivationBranch>(source.branch);
++            operation.operation = static_cast<KreaActivationOperatorKind>(source.operation);
++            operation.vector = source.vector;
++            operation.strength = source.strength;
++
++            if (source.input_source == SD_LOOM_KREA_RESIDENT_INPUT_V6) {
++                KreaActivationResidentInputDescription description;
++                if (source.resident_input.reserved != 0 ||
++                    !program->context->sd->diffusion_model->krea_activation_describe(
++                        sd_loom_krea_handle_v6(source.resident_input),
++                        &description) ||
++                    description.site != source.site ||
++                    ((source.operation == SD_LOOM_KREA_DONOR_TRANSPLANT_V6 &&
++                      description.representation != SD_LOOM_KREA_DONOR_F32_ROWS_V6) ||
++                     ((source.operation == SD_LOOM_KREA_SCALED_VECTOR_ADD_V6 ||
++                       source.operation == SD_LOOM_KREA_SCALED_VECTOR_SUBTRACT_V6) &&
++                      (description.representation != SD_LOOM_KREA_VECTOR_F32_ROWS_V6 ||
++                       source.vector >= description.rows)) ||
++                     ((source.operation == SD_LOOM_KREA_PROJECTION_REMOVAL_V6 ||
++                       source.operation == SD_LOOM_KREA_ONE_SIDED_REMOVAL_V6) &&
++                      description.representation != SD_LOOM_KREA_ORTHONORMAL_F32_ROWS_V6)) ||
++                    (source.operation == SD_LOOM_KREA_DONOR_TRANSPLANT_V6 &&
++                     selected_rows > 0 && description.rows != selected_rows)) {
++                    return SD_LOOM_STATUS_INVALID_ARGUMENT;
++                }
++                operation.resident = sd_loom_krea_handle_v6(source.resident_input);
++                auto identity = std::make_pair(source.resident_input.generation,
++                                               source.resident_input.slot);
++                if (resident_inputs.insert(identity).second) {
++                    if (request.resident_device_bytes > request.maximum_device_bytes ||
++                        description.bytes >
++                            request.maximum_device_bytes - request.resident_device_bytes) {
++                        return SD_LOOM_STATUS_INVALID_ARGUMENT;
++                    }
++                    request.resident_device_bytes += description.bytes;
++                }
++            } else if (source.input_source == SD_LOOM_KREA_CAPTURE_INPUT_V6) {
++                const sd_loom_krea_capture_v6_t* capture = nullptr;
++                for (size_t capture_index = 0;
++                     capture_index < params->capture_count;
++                     ++capture_index) {
++                    if (params->captures[capture_index].capture_index ==
++                        source.capture_input) {
++                        capture = &params->captures[capture_index];
++                        break;
++                    }
++                }
++                if (capture == nullptr ||
++                    source.operation != SD_LOOM_KREA_DONOR_TRANSPLANT_V6 ||
++                    capture->site != source.site || capture->branch != source.branch ||
++                    capture->retention != SD_LOOM_KREA_CAPTURE_DEVICE_SNAPSHOT_V6 ||
++                    !sd_loom_equal_krea_selection_v6(capture->tokens, source.tokens) ||
++                    !sd_loom_equal_krea_boundary_v6(capture->boundary, source.boundary) ||
++                    (capture->boundary.boundary == SD_LOOM_KREA_TRANSITION_V6 &&
++                     (capture->boundary.step_selection != SD_LOOM_STEP_EXACT_V4 ||
++                      capture->boundary.step_count != 1))) {
++                    return SD_LOOM_STATUS_INVALID_ARGUMENT;
++                }
++                operation.source_is_capture = true;
++                operation.capture_source = source.capture_input;
++            } else {
++                return SD_LOOM_STATUS_INVALID_ARGUMENT;
++            }
++            request.operations.push_back(std::move(operation));
++            prior_operation = source.operation_index;
++        }
++
++        sd_loom_krea_callback_state_v6_t callback_state{
++            activation_callback,
++            activation_callback_data,
++        };
++        request.callback = sd_loom_krea_callback_v6;
++        request.callback_data = &callback_state;
++        request.peak_device_bytes = request.resident_device_bytes;
++        program->context->sd->loom_krea_activation = &request;
++
++        int32_t status;
++        if (params->image.model_block_operator_count > 0) {
++            status = sd_loom_program_generate_image_v5(
++                program,
++                &params->image,
++                condition_callback,
++                condition_callback_data,
++                step_callback,
++                step_callback_data,
++                snapshot_values,
++                snapshot_capacity,
++                model_block_results,
++                model_block_capacity,
++                transition_masks,
++                transition_mask_capacity,
++                &result_out->image);
++        } else {
++            status = sd_loom_program_generate_image_v3(
++                program,
++                &params->image.image,
++                condition_callback,
++                condition_callback_data,
++                step_callback,
++                step_callback_data,
++                snapshot_values,
++                snapshot_capacity,
++                &result_out->image.image);
++            result_out->image.model_block_application_count = 0;
++            result_out->image.transition_words_per_operator = 0;
++            result_out->image.controls_cleared = 1;
++        }
++
++        program->context->sd->loom_krea_activation = nullptr;
++        bool cleaned = program->context->sd->diffusion_model->krea_activation_finish_request();
++        result_out->activation_controls_cleared = cleaned ? 1 : 0;
++        for (size_t index = 0; index < request.captures.size(); ++index) {
++            capture_results[index] = {
++                request.captures[index].capture_index,
++                request.captures[index].reached,
++                request.captures[index].elements,
++            };
++        }
++        for (size_t index = 0; index < request.operations.size(); ++index) {
++            application_results[index] = {
++                request.operations[index].operation_index,
++                request.operations[index].reached,
++                request.operations[index].applied,
++                request.operations[index].unchanged,
++            };
++        }
++        result_out->capture_count = request.captures.size();
++        result_out->operation_count = request.operations.size();
++        result_out->peak_host_bytes = request.peak_host_bytes;
++        result_out->peak_device_bytes = request.peak_device_bytes;
++        if (!cleaned || request.execution_failed) {
++            return SD_LOOM_STATUS_NATIVE_ERROR;
++        }
++        if (request.callback_failed) {
++            return SD_LOOM_STATUS_CALLBACK_ERROR;
++        }
++        return status;
++    } catch (...) {
++        program->context->sd->loom_krea_activation = nullptr;
++        if (program->context->sd->diffusion_model != nullptr) {
++            program->context->sd->diffusion_model->krea_activation_finish_request();
++        }
++        return SD_LOOM_STATUS_NATIVE_ERROR;
++    }
++}
++
+ int32_t sd_loom_program_describe_v3(const sd_loom_program_v3_t* program,
+                                     sd_loom_value_handle_v3_t handle,
+                                     sd_loom_value_descriptor_v3_t* descriptor_out) {

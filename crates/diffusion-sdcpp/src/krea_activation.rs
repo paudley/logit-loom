@@ -27,8 +27,7 @@ use crate::{
     },
 };
 
-const KREA_PATCH: &[u8] =
-    include_bytes!("../../../native/stable-diffusion.cpp/logit-loom-krea-activation-v6.patch");
+const KREA_PATCH: &[u8] = include_bytes!("../assets/logit-loom-krea-activation-v6.patch");
 
 /// One caller-verified finite input mapped from a sealed descriptor.
 #[derive(Clone, Copy, Debug)]

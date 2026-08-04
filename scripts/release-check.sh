@@ -27,6 +27,13 @@ if rg -q \
     exit 1
 fi
 
+canonical_krea_patch="native/stable-diffusion.cpp/logit-loom-krea-activation-v6.patch"
+packaged_krea_patch="crates/diffusion-sdcpp/assets/logit-loom-krea-activation-v6.patch"
+if ! cmp -s "${canonical_krea_patch}" "${packaged_krea_patch}"; then
+    echo "packaged Krea activation patch does not match the canonical native patch" >&2
+    exit 1
+fi
+
 cargo run --quiet --locked -p logit-loom-xtask -- models check
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
@@ -46,7 +53,13 @@ cargo package -p logit-loom "${package_flags[@]}" --list >/dev/null
 cargo package -p logit-loom-diffusion "${package_flags[@]}" --list >/dev/null
 cargo package -p logit-loom-llamacpp "${package_flags[@]}" --list >/dev/null
 cargo package -p logit-loom-runtime "${package_flags[@]}" --list >/dev/null
-cargo package -p logit-loom-diffusion-sdcpp "${package_flags[@]}" --list >/dev/null
+sdcpp_package_files="$(
+    cargo package -p logit-loom-diffusion-sdcpp "${package_flags[@]}" --list
+)"
+if ! grep -Fxq 'assets/logit-loom-krea-activation-v6.patch' <<<"${sdcpp_package_files}"; then
+    echo "logit-loom-diffusion-sdcpp package omits the Krea activation patch" >&2
+    exit 1
+fi
 
 if rg -n --hidden --glob '!target/**' --glob '!.git/**' \
     --glob '!scripts/release-check.sh' \
