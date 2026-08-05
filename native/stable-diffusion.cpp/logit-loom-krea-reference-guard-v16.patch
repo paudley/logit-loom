@@ -1,0 +1,58 @@
+diff --git src/conditioning/conditioner.hpp src/conditioning/conditioner.hpp
+--- src/conditioning/conditioner.hpp
++++ src/conditioning/conditioner.hpp
+@@ -126,6 +126,9 @@ public:
+     virtual void set_flash_attention_enabled(bool enabled) = 0;
+     virtual void set_weight_adapter(const std::shared_ptr<WeightAdapter>& adapter) {}
+     virtual void runner_done() {}
++    // Logit Loom: whether this conditioner can encode reference images into the
++    // multimodal context when the active reference preset requests pass_to_vlm.
++    virtual bool supports_vision_references() const { return true; }
+ };
+ 
+ // ldm.modules.encoders.modules.FrozenCLIPEmbedder
+@@ -1784,6 +1787,10 @@ struct LLMEmbedder : public Conditioner {
+     std::shared_ptr<LLM::LLMRunner> llm;
+     std::shared_ptr<T5Runner> byt5;
+ 
++    bool supports_vision_references() const override {
++        return llm != nullptr && llm->enable_vision;
++    }
++
+     LLMEmbedder(ggml_backend_t backend,
+                 const String2TensorStorage& tensor_storage_map      = {},
+                 SDVersion version                                   = VERSION_QWEN_IMAGE,
+diff --git src/stable-diffusion.cpp src/stable-diffusion.cpp
+--- src/stable-diffusion.cpp
++++ src/stable-diffusion.cpp
+@@ -5551,6 +5551,30 @@ SD_API bool generate_image(sd_ctx_t* sd_ctx,
+ 
+     const RefImageParams ref_image_params = sd_ctx->sd->resolve_ref_image_params(sd_img_gen_params->ref_image_args);
+ 
++    // Logit Loom: Krea2 reference conditioning implements the community
++    // edit-LoRA protocol (Krea2OstrisEdit / krea2 identity edit). That protocol
++    // encodes every reference twice: into the Qwen3-VL multimodal context
++    // (pass_to_vlm) and as timestep-zero latent tokens appended to the DiT
++    // sequence (pass_to_dit). A text-only Qwen3-VL artifact silently drops the
++    // whole multimodal half, and the base Krea2 model was never trained on
++    // appended reference tokens, so this configuration deterministically
++    // degrades every generation into a per-latent-cell mosaic instead of
++    // conditioning it. Fail loudly instead of returning corrupted images.
++    if (sd_version_is_krea2(sd_ctx->sd->version) &&
++        sd_img_gen_params->ref_images_count > 0 &&
++        ref_image_params.pass_to_vlm &&
++        sd_ctx->sd->cond_stage_model != nullptr &&
++        !sd_ctx->sd->cond_stage_model->supports_vision_references()) {
++        LOG_ERROR(
++            "Krea2 reference images require the community edit-LoRA protocol: the active "
++            "reference preset passes references to the Qwen3-VL vision tower, but the loaded "
++            "text encoder has no vision weights, and the base Krea2 model cannot consume "
++            "appended reference tokens. This configuration corrupts the output into a "
++            "per-latent-cell mosaic. Deploy the vision-capable Qwen3-VL text encoder together "
++            "with a Krea2 edit LoRA, or withhold the reference images.");
++        return false;
++    }
++
+     ImageVaeAxesGuard axes_guard(sd_ctx, sd_img_gen_params, request);
+ 
+     SamplePlan plan(sd_ctx, sd_img_gen_params, request);

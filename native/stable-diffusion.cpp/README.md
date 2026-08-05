@@ -40,6 +40,18 @@ The companion ABI exposes:
 - complete native exception and failed-invariant diagnostics returned through
   the safe adapter without digest substitution or message truncation.
 
+Krea 2 reference images implement the community edit-LoRA protocol
+(`krea2_ostris_edit`): every reference is encoded both into the Qwen3-VL
+multimodal context and as timestep-zero latent tokens appended to the DiT
+sequence. The base Krea 2 model was never trained on appended reference
+tokens, and a text-only Qwen3-VL artifact silently drops the multimodal half,
+which deterministically corrupts every reference-bound generation into a
+per-latent-cell mosaic. The companion therefore rejects Krea 2 reference
+requests with a native error when the loaded text encoder has no vision
+weights, instead of returning corrupted images. Reference conditioning
+requires the vision-capable Qwen3-VL artifact together with a Krea 2 edit
+LoRA.
+
 Image ABI v3 checks that every requested `LoRA` participates in at least one
 model tensor before reporting success. It clears the request-local adapter
 stack on reusable return paths. A native exception still returns an error so
@@ -82,6 +94,8 @@ then
 [`logit-loom-native-errors-v9.patch`](logit-loom-native-errors-v9.patch),
 then
 [`logit-loom-image-strength-window-v15.patch`](logit-loom-image-strength-window-v15.patch),
+then
+[`logit-loom-krea-reference-guard-v16.patch`](logit-loom-krea-reference-guard-v16.patch),
 and finally the exact ggml-submodule
 [`logit-loom-vulkan-budget-v8.patch`](logit-loom-vulkan-budget-v8.patch),
 [`logit-loom-vulkan-errors-v10.patch`](logit-loom-vulkan-errors-v10.patch), and

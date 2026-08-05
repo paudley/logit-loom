@@ -8,6 +8,25 @@ include breaking API changes.
 
 ## [Unreleased]
 
+### Added
+
+- `krea2_reference_probe` example: a standalone daemon-free probe that runs
+  one exact Krea 2 request without and with a reference image and reports
+  saturation plus 8/16-pixel grid-edge mosaic statistics for the
+  reference-binding corruption signature.
+
+### Fixed
+
+- Krea 2 reference-image requests now fail with a typed native error when the
+  loaded Qwen3-VL text encoder has no vision weights
+  (`logit-loom-krea-reference-guard-v16.patch`). Krea 2 reference
+  conditioning implements the community edit-LoRA protocol, which encodes
+  every reference both into the Qwen3-VL multimodal context and as
+  timestep-zero DiT tokens; a text-only encoder silently dropped the
+  multimodal half and the base model cannot consume appended reference
+  tokens, so every reference-bound generation deterministically degraded
+  into a per-latent-cell mosaic instead of failing.
+
 ## [0.2.1] - 2026-08-03
 
 ### Fixed
