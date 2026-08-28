@@ -290,7 +290,12 @@ impl Model {
     ) -> Result<Self, Error> {
         let params = LlamaModelParams::default()
             .with_n_gpu_layers(options.gpu_layers)
-            .with_main_gpu(options.main_gpu);
+            .with_main_gpu(options.main_gpu)
+            // Load MTP/NextN tensors whenever the artifact carries them. The
+            // loader otherwise skips them (TENSOR_SKIP), which leaves a
+            // NextN-declaring model with null MTP weights and turns the first
+            // MTP draft into an uncatchable native assert.
+            .with_load_mtp(true);
         let native_model =
             LlamaModel::load_from_file(&runtime.native, path, &params).map_err(native)?;
         validate_vocabulary_size(native_model.n_vocab())?;
