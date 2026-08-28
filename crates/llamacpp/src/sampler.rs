@@ -156,6 +156,7 @@ fn append_sampling(
     }
     if let Some(repetition) = &plan.sampling.repetition {
         let mut sampler = LlamaSampler::penalties(
+            model.n_vocab(),
             repetition.last_n,
             repetition.repeat_penalty,
             repetition.frequency_penalty,
@@ -165,11 +166,8 @@ fn append_sampling(
         stages.push(sampler);
     }
     if let Some(dry) = &plan.sampling.dry {
-        let training_context = i32::try_from(model.n_ctx_train())
-            .map_err(|_| Error::Incompatible("model training context exceeds i32".to_owned()))?;
         let mut sampler = LlamaSampler::new().dry(
             model,
-            training_context,
             dry.multiplier,
             dry.base,
             dry.allowed_length,
