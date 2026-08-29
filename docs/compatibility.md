@@ -69,8 +69,11 @@ Diffusion contracts use distinct domains including
 `diffusion-tensor-spec-v1`, `diffusion-schedule-v1`,
 `diffusion-plan-v1`, `diffusion-intervention-spec-v1`,
 `diffusion-channel-bias-v1`, and
-`sdcpp-deterministic-prefix-replay-v1`. Whole-image and worker-local contracts
-add `executor-buffer-spec-v1`, `image-execution-plan-v1`, and
+`sdcpp-deterministic-prefix-replay-v1`. The Krea discrete-flow inference grid
+uses `krea-discrete-flow-euler-schedule-v1`, which binds the transition count,
+flow-shift bits, and every shifted boundary bit without reinterpreting the
+generic schedule domain. Whole-image and worker-local contracts add
+`executor-buffer-spec-v1`, `image-execution-plan-v1`, and
 `image-execution-receipt-v1`. Resident staged programs add
 `image-program-stage-operation-v1`, `image-program-plan-v1`, and
 `image-program-receipt-v1`; their deployment measurements are deliberately

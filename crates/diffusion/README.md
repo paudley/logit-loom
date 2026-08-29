@@ -29,6 +29,10 @@ The crate also defines compatible worker-local whole-image contract families:
   `KreaActivationMeasurementsV1` define topology-bound activation capture,
   resident donor/vector inputs, ordered operations, exact application
   evidence, resource bounds, and cleanup without semantic labels.
+- `KreaDiscreteFlowScheduleV1` constructs the bounded Krea inference grid,
+  retains every shifted `f32` boundary as exact bits, and gives the complete
+  schedule a versioned identity. The exported Turbo defaults are eight
+  transitions and fixed flow shift `1.15`.
 - `ProjectedComponentPlanV1` defines a deterministic create-new projection
   transform for selected `F32` `SafeTensors` matrices with exact source, basis,
   output, and per-tensor lineage.

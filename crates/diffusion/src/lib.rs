@@ -10,6 +10,7 @@ mod execution_v2;
 mod execution_v3;
 mod image_program;
 mod krea_activation;
+mod krea_schedule;
 mod observer;
 mod pipeline;
 mod projected_component;
@@ -50,6 +51,9 @@ pub use image_program::{
     image_program_value_content,
 };
 pub use krea_activation::*;
+pub use krea_schedule::{
+    KREA_2_TURBO_DEFAULT_FLOW_SHIFT, KREA_2_TURBO_DEFAULT_STEPS, KreaDiscreteFlowScheduleV1,
+};
 pub use observer::{ObserverReceipt, ObserverSet, StepObserver};
 pub use pipeline::{ChannelBias, Intervention, Pipeline};
 pub use projected_component::*;

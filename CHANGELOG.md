@@ -10,6 +10,9 @@ include breaking API changes.
 
 ### Added
 
+- `KreaDiscreteFlowScheduleV1`, a bounded, versioned implementation of the
+  Krea 2 discrete-flow Euler inference grid with exact floating-point boundary
+  identity and published Turbo defaults.
 - `krea2_reference_probe` example: a standalone daemon-free probe that runs
   one exact Krea 2 request without and with a reference image and reports
   saturation plus 8/16-pixel grid-edge mosaic statistics for the
