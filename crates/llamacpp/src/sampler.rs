@@ -40,7 +40,7 @@ pub(crate) fn build_sampler(
             |value| (*value).to_owned(),
         );
         Error::Native(format!("native sampler construction panicked: {message}"))
-    })?
+    })
 }
 
 pub(crate) fn build_sampler_v2(
@@ -76,7 +76,7 @@ pub(crate) fn build_sampler_v2(
             |value| (*value).to_owned(),
         );
         Error::Native(format!("native sampler construction panicked: {message}"))
-    })?
+    })
 }
 
 #[derive(Clone, Copy)]
@@ -90,11 +90,11 @@ fn build_sampler_inner(
     plan: &GenerationPlan,
     history: &[TokenId],
     grammar: Option<GrammarInput<'_>>,
-) -> Result<LlamaSampler, Error> {
+) -> LlamaSampler {
     let mut stages = Vec::new();
     append_grammar(&mut stages, model, grammar);
-    append_sampling(&mut stages, model, plan, history)?;
-    Ok(LlamaSampler::chain_simple(stages))
+    append_sampling(&mut stages, model, plan, history);
+    LlamaSampler::chain_simple(stages)
 }
 
 fn append_grammar(
@@ -145,7 +145,7 @@ fn append_sampling(
     model: &LlamaModel,
     plan: &GenerationPlan,
     history: &[TokenId],
-) -> Result<(), Error> {
+) {
     if !plan.biases.is_empty() {
         let biases = plan
             .biases
@@ -212,8 +212,6 @@ fn append_sampling(
         stages.push(LlamaSampler::temp(plan.sampling.temperature));
         stages.push(LlamaSampler::dist(plan.sampling.seed));
     }
-
-    Ok(())
 }
 
 fn accept_history(sampler: &mut LlamaSampler, history: &[TokenId]) {

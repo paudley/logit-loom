@@ -1737,7 +1737,7 @@ fn run_backend(
     mut pipeline: Option<&mut Pipeline>,
     mut observers: Option<&mut ObserverSet>,
 ) -> Result<SpeculativeRunOutcome, Error> {
-    let (restored_sampler, mut stop_window, prefill_output) = match start {
+    let (restored_sampler, mut stop_window, prefill_output, initial_logits_index) = match start {
         SpeculativeRunStart::Fresh(prompt) => {
             let prefill = prefill(
                 backend,
@@ -1747,6 +1747,7 @@ fn run_backend(
                 prefill_monitor.as_deref_mut(),
             )?;
             if prefill
+                .output
                 .receipt
                 .as_ref()
                 .is_some_and(|receipt| receipt.finish == PrefillFinish::Stopped)
@@ -1761,7 +1762,7 @@ fn run_backend(
                 }
                 return Ok(SpeculativeRunOutcome::PrefillStopped(Box::new(
                     SpeculativePrefillStoppedOutput {
-                        prefill,
+                        prefill: prefill.output,
                         target_activation: take_activation_output(target.activation)?,
                         draft_activation: take_activation_output(draft.activation)?,
                         steering_applied: Vec::new(),
@@ -1769,12 +1770,15 @@ fn run_backend(
                     },
                 )));
             }
+            let initial_logits_index = prefill.final_logits_index.ok_or_else(|| {
+                Error::Poisoned("speculative prefill completed without a logits row".to_owned())
+            })?;
             let native_prompt = prompt
                 .iter()
                 .map(|token| LlamaToken::new(token.get()))
                 .collect::<Vec<_>>();
             backend.begin(&native_prompt)?;
-            (None, Vec::new(), Some(prefill))
+            (None, Vec::new(), Some(prefill.output), initial_logits_index)
         }
         SpeculativeRunStart::Restored { sampler, stop_tail } => {
             if prefill_monitor.is_some() {
@@ -1791,7 +1795,7 @@ fn run_backend(
                 ));
             }
             validate_stop_tail(generation, &stop_tail)?;
-            (Some(sampler), stop_tail, None)
+            (Some(sampler), stop_tail, None, -1)
         }
     };
 
@@ -1822,7 +1826,7 @@ fn run_backend(
                 target.history,
                 &target_sampler,
                 pipeline.as_deref_mut(),
-                -1,
+                initial_logits_index,
             )?;
             if target.model.is_end_of_generation(sampled.token) {
                 finish = GenerationFinish::EndOfGeneration {
@@ -2193,13 +2197,29 @@ fn run_backend(
     clippy::too_many_lines,
     reason = "target and draft chunk admission plus cooperative accounting stay adjacent"
 )]
+/// One completed speculative prefill plus the batch-relative logits row of the
+/// final decoded chunk.
+///
+/// The wrapper's logits bookkeeping records only explicitly marked
+/// batch-relative rows, so the caller must sample the first candidate from the
+/// exact row the final prefill chunk marked; the native `-1` sugar is never a
+/// member of that set.
+struct SpeculativePrefill {
+    output: PrefillOutput,
+    final_logits_index: Option<i32>,
+}
+
+#[allow(
+    clippy::too_many_lines,
+    reason = "chunk admission, both-side activation, and monitor control flow remain one auditable loop"
+)]
 fn prefill(
     backend: &mut impl NativeSpeculation,
     target: &mut SpeculativeSide<'_, '_>,
     draft: &mut SpeculativeSide<'_, '_>,
     prompt: &[TokenId],
     mut monitor: Option<&mut PrefillMonitor>,
-) -> Result<PrefillOutput, Error> {
+) -> Result<SpeculativePrefill, Error> {
     let requested_tokens = u64::try_from(prompt.len())
         .map_err(|_| Error::Invalid("speculative prefill token count exceeds u64".to_owned()))?;
     let mut progress = PrefillProgress {
@@ -2228,6 +2248,7 @@ fn prefill(
     } else {
         prompt.len()
     };
+    let mut final_logits_index = None;
     let mut offset = 0_usize;
     while offset < prompt.len() {
         let end = if offset < prefix_end {
@@ -2239,13 +2260,23 @@ fn prefill(
         if let Some(active) = monitor.as_deref_mut()
             && active.poll(progress)? == ControlFlow::Stop
         {
-            return Ok(PrefillOutput {
-                admitted_tokens: progress.admitted_tokens,
-                position: *target.position,
-                receipt: Some(active.finish(PrefillFinish::Stopped)?),
+            return Ok(SpeculativePrefill {
+                output: PrefillOutput {
+                    admitted_tokens: progress.admitted_tokens,
+                    position: *target.position,
+                    receipt: Some(active.finish(PrefillFinish::Stopped)?),
+                },
+                final_logits_index: None,
             });
         }
-        let mut batch = build_prefill_batch(*target.position, chunk, end == prompt.len())?;
+        let final_chunk = end == prompt.len();
+        let mut batch = build_prefill_batch(*target.position, chunk, final_chunk)?;
+        if final_chunk {
+            final_logits_index = Some(
+                i32::try_from(chunk.len().saturating_sub(1))
+                    .map_err(|_| Error::Invalid("prefill logits row exceeds i32".to_owned()))?,
+            );
+        }
         begin_activation(
             target.activation.as_ref(),
             ActivationPhaseV1::Prefill,
@@ -2296,10 +2327,13 @@ fn prefill(
             && active.observe_chunk(progress)? == ControlFlow::Stop
             && progress.admitted_tokens < progress.requested_tokens
         {
-            return Ok(PrefillOutput {
-                admitted_tokens: progress.admitted_tokens,
-                position: *target.position,
-                receipt: Some(active.finish(PrefillFinish::Stopped)?),
+            return Ok(SpeculativePrefill {
+                output: PrefillOutput {
+                    admitted_tokens: progress.admitted_tokens,
+                    position: *target.position,
+                    receipt: Some(active.finish(PrefillFinish::Stopped)?),
+                },
+                final_logits_index: None,
             });
         }
         offset = end;
@@ -2307,10 +2341,13 @@ fn prefill(
     let receipt = monitor
         .map(|active| active.finish(PrefillFinish::Complete))
         .transpose()?;
-    Ok(PrefillOutput {
-        admitted_tokens: progress.admitted_tokens,
-        position: *target.position,
-        receipt,
+    Ok(SpeculativePrefill {
+        output: PrefillOutput {
+            admitted_tokens: progress.admitted_tokens,
+            position: *target.position,
+            receipt,
+        },
+        final_logits_index,
     })
 }
 
