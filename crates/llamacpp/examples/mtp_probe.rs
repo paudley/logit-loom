@@ -69,6 +69,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         batch_size,
         micro_batch_size,
         threads,
+        ..SessionOptions::default()
     };
     let model_options = if cpu {
         ModelOptions {

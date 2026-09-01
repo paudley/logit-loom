@@ -6,7 +6,6 @@ use std::marker::PhantomData;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::rc::Rc;
 
-use llama_cpp_4::context::params::LlamaContextType;
 use llama_cpp_4::context::{LlamaContext, TensorTransactions, TransactionalTensorCapture};
 use llama_cpp_4::eagle::{Eagle3Session, Eagle3SessionConfig};
 use llama_cpp_4::llama_batch::LlamaBatch;
@@ -24,7 +23,7 @@ use logit_loom::{
 };
 
 use crate::{
-    ActivationCaptureOutput, ActivationConfiguration, ActivationProgramOutput, Error,
+    ActivationCaptureOutput, ActivationConfiguration, ActivationProgramOutput, ContextKind, Error,
     GenerationOutput, LLAMA_CPP_BINDING_SOURCE_REVISION, LLAMA_CPP_BINDING_VERSION,
     LLAMA_CPP_REVISION, Model, PrefillOutput, Runtime, Session, SessionOptions, StateSnapshot,
     activation::ActivationController,
@@ -591,13 +590,13 @@ fn resume_speculative_inner(
         target_model,
         runtime,
         request.options.target,
-        LlamaContextType::Default,
+        ContextKind::Ordinary,
         recurrent_slots,
         target_activation,
     )?;
     let draft_context_type = match plan.mechanism {
-        TextSpeculativeMechanismV1::Mtp => LlamaContextType::Mtp,
-        TextSpeculativeMechanismV1::Eagle3 => LlamaContextType::Default,
+        TextSpeculativeMechanismV1::Mtp => ContextKind::Mtp,
+        TextSpeculativeMechanismV1::Eagle3 => ContextKind::Ordinary,
     };
     let mut draft = Session::new_speculative(
         draft_model,
@@ -784,13 +783,13 @@ fn generate_speculative_inner(
         target_model,
         runtime,
         request.options.target,
-        LlamaContextType::Default,
+        ContextKind::Ordinary,
         recurrent_slots,
         target_activation,
     )?;
     let draft_context_type = match plan.mechanism {
-        TextSpeculativeMechanismV1::Mtp => LlamaContextType::Mtp,
-        TextSpeculativeMechanismV1::Eagle3 => LlamaContextType::Default,
+        TextSpeculativeMechanismV1::Mtp => ContextKind::Mtp,
+        TextSpeculativeMechanismV1::Eagle3 => ContextKind::Ordinary,
     };
     let mut draft = Session::new_speculative(
         draft_model,

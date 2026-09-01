@@ -26,7 +26,10 @@ pub use model::{
     AuthorizedModelArtifact, DevicePolicy, MAX_TOKENIZATION_BYTES, Model, ModelOptions,
     PreverifiedModelArtifact, Runtime, Tokenization, binding_compatibility_label,
 };
-pub use session::{GenerationOutput, PrefillOutput, Session, SessionOptions, StateSnapshot};
+pub use session::{
+    ContextCompatibility, ContextKind, FlashAttention, GenerationOutput, KvCacheType,
+    PrefillOutput, Session, SessionOptions, StateSnapshot,
+};
 pub use speculation::{
     SpeculativeActivationOutput, SpeculativeActivations, SpeculativeCheckpointOutput,
     SpeculativeCheckpointRequest, SpeculativeContinuationRequest, SpeculativeGenerationOutput,

@@ -15,6 +15,25 @@ include breaking API changes.
   function so a downstream can derive its own implementation identity from
   the exact linked binding, llama.cpp revision, adapter version, target, and
   backend features before a `Runtime` exists.
+- `SessionOptions::kv_cache_type` (`KvCacheType::{F16, Q8_0, Q4_0}`, applied
+  to both keys and values) and `SessionOptions::flash_attention`
+  (`FlashAttention::{Auto, Enabled, Disabled}`). Validation refuses a
+  quantized cache with flash attention disabled, the constraint llama.cpp
+  enforces at context creation.
+- `ContextCompatibility`, the public identity every llama.cpp checkpoint is
+  bound to: the runtime identity, the session options, the `ContextKind`
+  (`Ordinary` or `Mtp`), and the reserved recurrent-state slots, with a
+  `digest()` a downstream can compute for a context it allocates itself.
+
+### Changed
+
+- The llama.cpp checkpoint compatibility identity moved from
+  `llamacpp-session-compatibility-v3` to `-v4` because it now binds the
+  key/value cache type and the flash-attention policy. Checkpoints captured
+  by earlier releases are incompatible and restore fails typed, as before.
+- `SessionOptions` gained fields; struct literals must spread
+  `..SessionOptions::default()` to keep the previous exact f16, auto
+  flash-attention behaviour.
 - `KreaDiscreteFlowScheduleV1`, a bounded, versioned implementation of the
   Krea 2 discrete-flow Euler inference grid with exact floating-point boundary
   identity and published Turbo defaults.

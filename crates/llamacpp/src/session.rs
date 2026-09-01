@@ -32,6 +32,63 @@ use crate::{
 const STATE_BYTES_DOMAIN: &str = "llamacpp-state-bytes-v1";
 const TOKEN_HISTORY_DOMAIN: &str = "llamacpp-state-token-history-v1";
 
+/// Storage type of the attention key/value cache.
+///
+/// Applied to both keys and values. Anything other than [`KvCacheType::F16`]
+/// is lossy: saved state is smaller and the produced logits differ from the
+/// exact cache, so it is part of the session's compatibility identity and a
+/// checkpoint never restores across a different cache type.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum KvCacheType {
+    /// Exact half-precision cache, llama.cpp's default.
+    #[default]
+    F16,
+    /// 8-bit block quantization with a 32-element block.
+    Q8_0,
+    /// 4-bit block quantization with a 32-element block.
+    Q4_0,
+}
+
+impl KvCacheType {
+    const fn is_quantized(self) -> bool {
+        !matches!(self, Self::F16)
+    }
+
+    const fn native(self) -> llama_cpp_4::quantize::GgmlType {
+        match self {
+            Self::F16 => llama_cpp_4::quantize::GgmlType::F16,
+            Self::Q8_0 => llama_cpp_4::quantize::GgmlType::Q8_0,
+            Self::Q4_0 => llama_cpp_4::quantize::GgmlType::Q4_0,
+        }
+    }
+}
+
+/// Flash-attention policy for the context.
+///
+/// llama.cpp requires flash attention for a quantized value cache, so it
+/// promotes [`FlashAttention::Auto`] to enabled for such a session, and
+/// [`FlashAttention::Disabled`] is rejected at validation.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum FlashAttention {
+    /// llama.cpp resolves the kernel from the model and the active backend.
+    #[default]
+    Auto,
+    /// Flash attention is required.
+    Enabled,
+    /// Flash attention is refused.
+    Disabled,
+}
+
+impl FlashAttention {
+    const fn native(self) -> llama_cpp_4::context::params::LlamaFlashAttnType {
+        match self {
+            Self::Auto => llama_cpp_4::context::params::LlamaFlashAttnType::Auto,
+            Self::Enabled => llama_cpp_4::context::params::LlamaFlashAttnType::Enabled,
+            Self::Disabled => llama_cpp_4::context::params::LlamaFlashAttnType::Disabled,
+        }
+    }
+}
+
 /// Context-allocation options.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SessionOptions {
@@ -43,6 +100,10 @@ pub struct SessionOptions {
     pub micro_batch_size: u32,
     /// Host orchestration threads used by llama.cpp.
     pub threads: i32,
+    /// Storage type of the attention key/value cache.
+    pub kv_cache_type: KvCacheType,
+    /// Flash-attention policy.
+    pub flash_attention: FlashAttention,
 }
 
 impl Default for SessionOptions {
@@ -52,6 +113,8 @@ impl Default for SessionOptions {
             batch_size: 512,
             micro_batch_size: 512,
             threads: 4,
+            kv_cache_type: KvCacheType::F16,
+            flash_attention: FlashAttention::Auto,
         }
     }
 }
@@ -71,7 +134,83 @@ impl SessionOptions {
                     .to_owned(),
             ));
         }
+        if self.kv_cache_type.is_quantized() && self.flash_attention == FlashAttention::Disabled {
+            return Err(Error::Invalid(
+                "a quantized key/value cache requires flash attention".to_owned(),
+            ));
+        }
         Ok(())
+    }
+}
+
+/// The kind of native context a session allocates.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ContextKind {
+    /// An ordinary causal context.
+    #[default]
+    Ordinary,
+    /// A context carrying the model's multi-token-prediction draft graph.
+    Mtp,
+}
+
+impl ContextKind {
+    const fn native(self) -> LlamaContextType {
+        match self {
+            Self::Ordinary => LlamaContextType::Default,
+            Self::Mtp => LlamaContextType::Mtp,
+        }
+    }
+}
+
+/// Everything a saved native state is bound to besides the model and tokens.
+///
+/// Two contexts with equal compatibility can exchange saved state; a
+/// checkpoint's `backend` digest is [`ContextCompatibility::digest`]. Every
+/// field is what was requested at allocation, so a policy llama.cpp resolves
+/// at load (an `Auto` flash-attention kernel, a promoted quantized-cache
+/// setting) is still bound by the request that produced it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ContextCompatibility {
+    /// The linked binding identity, [`Runtime::identity`].
+    pub runtime: Digest,
+    /// The allocation options.
+    pub options: SessionOptions,
+    /// The native context kind.
+    pub context: ContextKind,
+    /// Recurrent-state snapshot slots (`n_rs_seq`) the context reserved.
+    pub recurrent_state_slots: u32,
+}
+
+const CONTEXT_COMPATIBILITY_DOMAIN: &str = "llamacpp-session-compatibility-v4";
+
+impl ContextCompatibility {
+    /// Returns the domain-separated digest of this compatibility.
+    #[must_use]
+    pub fn digest(&self) -> Digest {
+        let options = self.options;
+        let mut bytes = Vec::with_capacity(self.runtime.as_str().len() + 26);
+        bytes.extend_from_slice(self.runtime.as_str().as_bytes());
+        bytes.extend_from_slice(&options.context_size.get().to_le_bytes());
+        bytes.extend_from_slice(&options.batch_size.to_le_bytes());
+        bytes.extend_from_slice(&options.micro_batch_size.to_le_bytes());
+        bytes.extend_from_slice(&options.threads.to_le_bytes());
+        bytes.push(match options.kv_cache_type {
+            KvCacheType::F16 => 0,
+            KvCacheType::Q8_0 => 1,
+            KvCacheType::Q4_0 => 2,
+        });
+        bytes.push(match options.flash_attention {
+            FlashAttention::Auto => 0,
+            FlashAttention::Enabled => 1,
+            FlashAttention::Disabled => 2,
+        });
+        let context = match self.context {
+            ContextKind::Ordinary => 0_u32,
+            ContextKind::Mtp => 1_u32,
+        };
+        bytes.extend_from_slice(&context.to_le_bytes());
+        bytes.extend_from_slice(&self.recurrent_state_slots.to_le_bytes());
+        Digest::of_bytes(CONTEXT_COMPATIBILITY_DOMAIN, &bytes)
     }
 }
 
@@ -111,45 +250,101 @@ mod tests {
     }
 
     #[test]
-    fn checkpoint_compatibility_binds_session_options() {
-        let runtime = Digest::of_bytes("test-runtime", b"one");
+    fn session_options_reject_a_quantized_cache_without_flash_attention() {
         let defaults = SessionOptions::default();
-        let different_context = SessionOptions {
-            context_size: NonZeroU32::new(defaults.context_size.get() + 1).unwrap(),
-            ..defaults
+        for kv_cache_type in [KvCacheType::Q8_0, KvCacheType::Q4_0] {
+            assert!(
+                SessionOptions {
+                    kv_cache_type,
+                    flash_attention: FlashAttention::Disabled,
+                    ..defaults
+                }
+                .validate()
+                .is_err()
+            );
+            for flash_attention in [FlashAttention::Auto, FlashAttention::Enabled] {
+                assert!(
+                    SessionOptions {
+                        kv_cache_type,
+                        flash_attention,
+                        ..defaults
+                    }
+                    .validate()
+                    .is_ok()
+                );
+            }
+        }
+        assert!(
+            SessionOptions {
+                flash_attention: FlashAttention::Disabled,
+                ..defaults
+            }
+            .validate()
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn checkpoint_compatibility_binds_session_options() {
+        let defaults = SessionOptions::default();
+        let compatibility = ContextCompatibility {
+            runtime: Digest::of_bytes("test-runtime", b"one"),
+            options: defaults,
+            context: ContextKind::Ordinary,
+            recurrent_state_slots: 0,
         };
-        let different_threads = SessionOptions {
-            threads: defaults.threads + 1,
-            ..defaults
-        };
-        let identity =
-            session_compatibility_identity(&runtime, defaults, LlamaContextType::Default, 0);
-        assert_ne!(
-            identity,
-            session_compatibility_identity(
-                &runtime,
-                different_context,
-                LlamaContextType::Default,
-                0
-            )
-        );
-        assert_ne!(
-            identity,
-            session_compatibility_identity(
-                &runtime,
-                different_threads,
-                LlamaContextType::Default,
-                0
-            )
-        );
-        assert_ne!(
-            identity,
-            session_compatibility_identity(&runtime, defaults, LlamaContextType::Mtp, 4)
-        );
-        assert_ne!(
-            identity,
-            session_compatibility_identity(&runtime, defaults, LlamaContextType::Default, 1)
-        );
+        let identity = compatibility.digest();
+        assert_eq!(identity, compatibility.clone().digest());
+        let variants = [
+            ContextCompatibility {
+                runtime: Digest::of_bytes("test-runtime", b"two"),
+                ..compatibility.clone()
+            },
+            ContextCompatibility {
+                options: SessionOptions {
+                    context_size: NonZeroU32::new(defaults.context_size.get() + 1).unwrap(),
+                    ..defaults
+                },
+                ..compatibility.clone()
+            },
+            ContextCompatibility {
+                options: SessionOptions {
+                    threads: defaults.threads + 1,
+                    ..defaults
+                },
+                ..compatibility.clone()
+            },
+            ContextCompatibility {
+                options: SessionOptions {
+                    kv_cache_type: KvCacheType::Q8_0,
+                    ..defaults
+                },
+                ..compatibility.clone()
+            },
+            ContextCompatibility {
+                options: SessionOptions {
+                    flash_attention: FlashAttention::Enabled,
+                    ..defaults
+                },
+                ..compatibility.clone()
+            },
+            ContextCompatibility {
+                context: ContextKind::Mtp,
+                recurrent_state_slots: 4,
+                ..compatibility.clone()
+            },
+            ContextCompatibility {
+                recurrent_state_slots: 1,
+                ..compatibility.clone()
+            },
+        ];
+        for variant in &variants {
+            assert_ne!(identity, variant.digest(), "{variant:?}");
+        }
+        let mut digests: Vec<Digest> = variants.iter().map(ContextCompatibility::digest).collect();
+        digests.sort();
+        digests.dedup();
+        assert_eq!(digests.len(), variants.len());
     }
 
     #[test]
@@ -409,7 +604,7 @@ impl<'model> Session<'model> {
         runtime: &Runtime,
         options: SessionOptions,
     ) -> Result<Self, Error> {
-        Self::new_inner(model, runtime, options, LlamaContextType::Default, 0, None)
+        Self::new_inner(model, runtime, options, ContextKind::Ordinary, 0, None)
     }
 
     pub(crate) fn new_with_activation(
@@ -422,7 +617,7 @@ impl<'model> Session<'model> {
             model,
             runtime,
             options,
-            LlamaContextType::Default,
+            ContextKind::Ordinary,
             0,
             Some(activation),
         )
@@ -442,7 +637,7 @@ impl<'model> Session<'model> {
             model,
             runtime,
             options,
-            LlamaContextType::Default,
+            ContextKind::Ordinary,
             recurrent_state_slots,
             activation,
         )
@@ -452,7 +647,7 @@ impl<'model> Session<'model> {
         model: &'model Model,
         runtime: &Runtime,
         options: SessionOptions,
-        context_type: LlamaContextType,
+        context: ContextKind,
         recurrent_state_slots: u32,
         activation: Option<ActivationConfiguration>,
     ) -> Result<Self, Error> {
@@ -460,7 +655,7 @@ impl<'model> Session<'model> {
             model,
             runtime,
             options,
-            context_type,
+            context,
             recurrent_state_slots,
             activation,
         )
@@ -470,7 +665,7 @@ impl<'model> Session<'model> {
         model: &'model Model,
         runtime: &Runtime,
         options: SessionOptions,
-        context_type: LlamaContextType,
+        context_kind: ContextKind,
         recurrent_state_slots: u32,
         activation: Option<ActivationConfiguration>,
     ) -> Result<Self, Error> {
@@ -487,7 +682,10 @@ impl<'model> Session<'model> {
             .with_n_ubatch(options.micro_batch_size)
             .with_n_threads(options.threads)
             .with_n_threads_batch(options.threads)
-            .with_ctx_type(context_type)
+            .with_cache_type_k(options.kv_cache_type.native())
+            .with_cache_type_v(options.kv_cache_type.native())
+            .with_flash_attn_type(options.flash_attention.native())
+            .with_ctx_type(context_kind.native())
             .with_n_rs_seq(recurrent_state_slots)
             .with_offload_kqv(true);
         if let Some(transactions) = transactions {
@@ -502,12 +700,13 @@ impl<'model> Session<'model> {
             context,
             model,
             options,
-            backend: session_compatibility_identity(
-                runtime.identity(),
+            backend: ContextCompatibility {
+                runtime: runtime.identity().clone(),
                 options,
-                context_type,
+                context: context_kind,
                 recurrent_state_slots,
-            ),
+            }
+            .digest(),
             token_history: Vec::new(),
             position: 0,
             active_steering: Vec::new(),
@@ -1394,25 +1593,4 @@ const fn ordinary_checkpoint_recurrent_state_slots(
     } else {
         0
     }
-}
-
-fn session_compatibility_identity(
-    runtime: &Digest,
-    options: SessionOptions,
-    context_type: LlamaContextType,
-    recurrent_state_slots: u32,
-) -> Digest {
-    let mut bytes = Vec::with_capacity(runtime.as_str().len() + 24);
-    bytes.extend_from_slice(runtime.as_str().as_bytes());
-    bytes.extend_from_slice(&options.context_size.get().to_le_bytes());
-    bytes.extend_from_slice(&options.batch_size.to_le_bytes());
-    bytes.extend_from_slice(&options.micro_batch_size.to_le_bytes());
-    bytes.extend_from_slice(&options.threads.to_le_bytes());
-    let context_type = match context_type {
-        LlamaContextType::Default => 0_u32,
-        LlamaContextType::Mtp => 1_u32,
-    };
-    bytes.extend_from_slice(&context_type.to_le_bytes());
-    bytes.extend_from_slice(&recurrent_state_slots.to_le_bytes());
-    Digest::of_bytes("llamacpp-session-compatibility-v3", &bytes)
 }
