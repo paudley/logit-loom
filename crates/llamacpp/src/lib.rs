@@ -24,7 +24,7 @@ pub use mechanics::{
 };
 pub use model::{
     AuthorizedModelArtifact, DevicePolicy, MAX_TOKENIZATION_BYTES, Model, ModelOptions,
-    PreverifiedModelArtifact, Runtime, Tokenization,
+    PreverifiedModelArtifact, Runtime, Tokenization, binding_compatibility_label,
 };
 pub use session::{GenerationOutput, PrefillOutput, Session, SessionOptions, StateSnapshot};
 pub use speculation::{

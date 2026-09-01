@@ -40,7 +40,7 @@ impl Runtime {
     /// llama.cpp initialization fails.
     pub fn initialize() -> Result<Self, Error> {
         let native = LlamaBackend::init().map_err(native)?;
-        let compatibility = compatibility_label();
+        let compatibility = binding_compatibility_label();
         Ok(Self {
             native,
             identity: Digest::of_bytes("llamacpp-binding-identity-v2", compatibility.as_bytes()),
@@ -575,7 +575,16 @@ fn validate_tokenization_shape(bytes: usize, contains_nul: bool) -> Result<(), E
     Ok(())
 }
 
-fn compatibility_label() -> String {
+/// Returns the build compatibility label of the linked native binding.
+///
+/// The label is derived entirely from compile-time facts: the binding
+/// version and source revision, the llama.cpp revision, the Logit Loom
+/// adapter version, the target triple, and the enabled backend features. It
+/// needs no initialized [`Runtime`], so a downstream can bind its own
+/// implementation identity to the exact native build before the backend
+/// starts. [`Runtime::identity`] hashes this same label.
+#[must_use]
+pub fn binding_compatibility_label() -> String {
     let features = [
         ("blas", cfg!(feature = "blas")),
         ("cuda", cfg!(feature = "cuda")),
@@ -679,7 +688,7 @@ mod tests {
 
     #[test]
     fn compatibility_label_binds_version_target_and_features() {
-        let label = compatibility_label();
+        let label = binding_compatibility_label();
         assert!(label.contains(LLAMA_CPP_BINDING_VERSION));
         assert!(label.contains(LLAMA_CPP_BINDING_SOURCE_REVISION));
         assert!(label.contains(LLAMA_CPP_REVISION));

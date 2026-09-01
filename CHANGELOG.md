@@ -10,6 +10,11 @@ include breaking API changes.
 
 ### Added
 
+- `logit_loom_llamacpp::binding_compatibility_label()`, the compile-time
+  native build label that `Runtime::identity` hashes, exposed as a free
+  function so a downstream can derive its own implementation identity from
+  the exact linked binding, llama.cpp revision, adapter version, target, and
+  backend features before a `Runtime` exists.
 - `KreaDiscreteFlowScheduleV1`, a bounded, versioned implementation of the
   Krea 2 discrete-flow Euler inference grid with exact floating-point boundary
   identity and published Turbo defaults.
