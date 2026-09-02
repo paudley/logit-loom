@@ -24,6 +24,8 @@ include breaking API changes.
   bound to: the runtime identity, the session options, the `ContextKind`
   (`Ordinary` or `Mtp`), and the reserved recurrent-state slots, with a
   `digest()` a downstream can compute for a context it allocates itself.
+  `KvCacheType::{is_quantized, native}` and `FlashAttention::native` are
+  public so such a downstream applies the identical native settings.
 
 ### Changed
 

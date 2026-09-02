@@ -50,11 +50,16 @@ pub enum KvCacheType {
 }
 
 impl KvCacheType {
-    const fn is_quantized(self) -> bool {
+    /// Whether the cache is lossy relative to the exact `f16` cache.
+    #[must_use]
+    pub const fn is_quantized(self) -> bool {
         !matches!(self, Self::F16)
     }
 
-    const fn native(self) -> llama_cpp_4::quantize::GgmlType {
+    /// The llama.cpp element type, for a downstream that allocates a native
+    /// context of its own and must apply the same setting.
+    #[must_use]
+    pub const fn native(self) -> llama_cpp_4::quantize::GgmlType {
         match self {
             Self::F16 => llama_cpp_4::quantize::GgmlType::F16,
             Self::Q8_0 => llama_cpp_4::quantize::GgmlType::Q8_0,
@@ -80,7 +85,10 @@ pub enum FlashAttention {
 }
 
 impl FlashAttention {
-    const fn native(self) -> llama_cpp_4::context::params::LlamaFlashAttnType {
+    /// The llama.cpp flash-attention setting, for a downstream that
+    /// allocates a native context of its own and must apply the same policy.
+    #[must_use]
+    pub const fn native(self) -> llama_cpp_4::context::params::LlamaFlashAttnType {
         match self {
             Self::Auto => llama_cpp_4::context::params::LlamaFlashAttnType::Auto,
             Self::Enabled => llama_cpp_4::context::params::LlamaFlashAttnType::Enabled,
