@@ -106,6 +106,8 @@ then
 [`logit-loom-vulkan-strix-halo-v13.patch`](logit-loom-vulkan-strix-halo-v13.patch),
 then
 [`logit-loom-vulkan-strix-halo-v14.patch`](logit-loom-vulkan-strix-halo-v14.patch),
+then
+[`logit-loom-vulkan-dispatch-bounds-v17.patch`](logit-loom-vulkan-dispatch-bounds-v17.patch),
 initializes only the required `ggml` submodule, and builds a shared library.
 Existing incompatible source changes are rejected. The script never runs from
 tests, CI, documentation, package builds, or `make check`.
@@ -143,6 +145,17 @@ submission cannot leave the native session or device state uncertain. Each
 logical node or fusion is a separate synchronized submission there, bounding
 individual compute-ring jobs and reporting the exact node, operation, type,
 and shape if submission fails.
+
+Every Vulkan matrix-multiply dispatch is bounded by the device's
+`maxComputeWorkGroupCount` on all three axes. Upstream chunked only the batch
+(z) axis and asserted on the row (x) and column (y) axes, so any matmul whose
+tiled row or column count exceeded the limit (65535 per axis on RADV) aborted
+the process; Krea2's text-fusion projector reaches that on prompts longer than
+1024 tokens (`n = 2560 * tokens`, 32-wide tiles). The dispatch now iterates
+the grid in device-sized chunks, the matmul shaders add the chunk's
+work-group offset from push constants, and the `split_k` reduction is chunked
+the same way. Results are bit-identical to an unchunked dispatch; no shape is
+narrowed or clamped.
 
 Image-to-image, inpaint, and outpaint strength may select a suffix of the
 declared Euler schedule. The companion reports those executed transitions at

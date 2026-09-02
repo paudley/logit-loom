@@ -60,6 +60,7 @@ ggml_patches=(
     "${repo_root}/native/stable-diffusion.cpp/logit-loom-vulkan-strix-halo-v12.patch"
     "${repo_root}/native/stable-diffusion.cpp/logit-loom-vulkan-strix-halo-v13.patch"
     "${repo_root}/native/stable-diffusion.cpp/logit-loom-vulkan-strix-halo-v14.patch"
+    "${repo_root}/native/stable-diffusion.cpp/logit-loom-vulkan-dispatch-bounds-v17.patch"
 )
 ggml_commit="eced84c86f8b012c752c016f7fe789adea168e1e"
 source_dir="$(realpath -m -- "${source_dir}")"

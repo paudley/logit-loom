@@ -1,0 +1,267 @@
+diff --git src/ggml-vulkan/ggml-vulkan.cpp src/ggml-vulkan/ggml-vulkan.cpp
+--- src/ggml-vulkan/ggml-vulkan.cpp
++++ src/ggml-vulkan/ggml-vulkan.cpp
+@@ -1138,6 +1138,10 @@ struct vk_mat_mat_push_constants {
+     uint32_t base_work_group_z; uint32_t num_batches;
+     uint32_t k_split;
+     uint32_t ne02; uint32_t ne12; uint32_t broadcast2; uint32_t broadcast3;
++    // Workgroup offsets for the row-tile (x) and column-tile (y) dimensions so a
++    // matmul whose tile grid exceeds maxComputeWorkGroupCount on either axis can
++    // be issued as several dispatches, exactly like base_work_group_z for batches.
++    uint32_t base_work_group_x; uint32_t base_work_group_y;
+     uint32_t padded_N;
+ };
+ 
+@@ -5050,7 +5054,7 @@ static void ggml_vk_load_shaders(vk_device& device, vk_pipeline requested) {
+     ggml_vk_create_pipeline(device, device->pipeline_get_rows_f32[GGML_TYPE_NVFP4],   "get_rows_nvfp4_f32",   get_rows_nvfp4_f32_len,   get_rows_nvfp4_f32_data,   "main", 3, sizeof(vk_op_binary_push_constants), {1024, 1, 1}, {}, 1);
+     ggml_vk_create_pipeline(device, device->pipeline_get_rows_back_f32, "get_rows_back_f32", get_rows_back_f32_len, get_rows_back_f32_data, "main", 3, sizeof(vk_op_binary_push_constants), {256, 1, 1}, {}, 1, true);
+ 
+-    ggml_vk_create_pipeline(device, device->pipeline_matmul_split_k_reduce, "split_k_reduce", split_k_reduce_len, split_k_reduce_data, "main", 2, 2 * sizeof(uint32_t), {256 * 4, 1, 1}, {}, 1);
++    ggml_vk_create_pipeline(device, device->pipeline_matmul_split_k_reduce, "split_k_reduce", split_k_reduce_len, split_k_reduce_data, "main", 2, 3 * sizeof(uint32_t), {256 * 4, 1, 1}, {}, 1);
+     ggml_vk_create_pipeline(device, device->pipeline_flash_attn_split_k_reduce, "fa_split_k_reduce", fa_split_k_reduce_len, fa_split_k_reduce_data, "main", 3, sizeof(vk_op_flash_attn_split_k_reduce_push_constants), {1, device->subgroup_size, 1}, {device->subgroup_size}, 1, true);
+ 
+     for (auto &it : device->pipeline_fa_mask_opt) {
+@@ -8267,44 +8271,71 @@ static void ggml_vk_matmul(
+         uint32_t split_k, uint32_t batch, uint32_t ne02, uint32_t ne12, uint32_t broadcast2, uint32_t broadcast3,
+         uint32_t padded_n) {
+         VK_LOG_DEBUG("ggml_vk_matmul(a: (" << a.buffer->buffer << ", " << a.offset << ", " << a.size << "), b: (" << b.buffer->buffer << ", " << b.offset << ", " << b.size << "), d: (" << d.buffer->buffer << ", " << d.offset << ", " << d.size << "), split_k: (" << (split_k_buffer.buffer != nullptr ? split_k_buffer.buffer->buffer : VK_NULL_HANDLE) << ", " << split_k_buffer.offset << ", " << split_k_buffer.size << "), m: " << m << ", n: " << n << ", k: " << k << ", stride_a: " << stride_a << ", stride_b: " << stride_b << ", stride_d: " << stride_d << ", batch_stride_a: " << batch_stride_a << ", batch_stride_b: " << batch_stride_b << ", batch_stride_d: " << batch_stride_d << ", split_k: " << split_k << ", batch: " << batch << ", ne02: " << ne02 << ", ne12: " << ne12 << ", broadcast2: " << broadcast2 << ", broadcast3: " << broadcast3 << ", padded_n: " << padded_n << ")");
+-    if (split_k == 1) {
+-        ggml_pipeline_request_descriptor_sets(ctx, pipeline, CEIL_DIV(batch, ctx->device->properties.limits.maxComputeWorkGroupCount[2]));
++    // Vulkan bounds every dispatch by maxComputeWorkGroupCount per axis (65535
++    // on RADV).  The tile grid of a matmul is CEIL_DIV(m, BM) * split_k row
++    // tiles by CEIL_DIV(n, BN) column tiles by batch, and any of the three can
++    // exceed that bound (a [12 -> 1] projection applied to 2560 * T columns
++    // does so on the y axis once T > 819).  Walk the grid in chunks that fit,
++    // handing the shader the workgroup offset of each chunk in push constants,
++    // exactly as the batch (z) axis was already walked.
++    const uint32_t max_wg_x = ctx->device->properties.limits.maxComputeWorkGroupCount[0];
++    const uint32_t max_wg_y = ctx->device->properties.limits.maxComputeWorkGroupCount[1];
++    const uint32_t max_wg_z = ctx->device->properties.limits.maxComputeWorkGroupCount[2];
++    const uint32_t tile_m = pipeline->wg_denoms[0];
++    const uint32_t tile_n = pipeline->wg_denoms[1];
++    // Make sure enough workgroups get assigned for split k to work
++    const uint32_t wg_x_total = CEIL_DIV(m, tile_m) * split_k;
++    const uint32_t wg_y_total = CEIL_DIV(n, tile_n);
++    const uint32_t chunks_x = CEIL_DIV(wg_x_total, max_wg_x);
++    const uint32_t chunks_y = CEIL_DIV(wg_y_total, max_wg_y);
++    const uint32_t chunks_z = CEIL_DIV(batch, max_wg_z);
+ 
+-        uint32_t base_work_group_z = 0;
+-        while (base_work_group_z < batch) {
+-            uint32_t groups_z = std::min(batch - base_work_group_z, ctx->device->properties.limits.maxComputeWorkGroupCount[2]);
+-
+-            const vk_mat_mat_push_constants pc = { m, n, k, stride_a, stride_b, stride_d, batch_stride_a, batch_stride_b, batch_stride_d, base_work_group_z, batch, k, ne02, ne12, broadcast2, broadcast3, padded_n };
+-            ggml_vk_dispatch_pipeline(ctx, subctx, pipeline, { a, b, d }, pc, { m, n, groups_z });
+-            base_work_group_z += groups_z;
++    uint32_t k_split = k;
++    if (split_k > 1) {
++        if (ctx->prealloc_split_k_need_sync) {
++            ggml_vk_sync_buffers(ctx, subctx);
+         }
++
++        GGML_ASSERT(batch_stride_d == m * n);
++
++        // Round the split size up to a multiple of 256 (k-quant alignment)
++        k_split = CEIL_DIV(k, split_k);
++        k_split = ROUNDUP_POW2(k_split, 256);
++    }
++
++    ggml_pipeline_request_descriptor_sets(ctx, pipeline, chunks_x * chunks_y * chunks_z);
++
++    for (uint32_t base_work_group_z = 0; base_work_group_z < batch; base_work_group_z += max_wg_z) {
++        const uint32_t groups_z = std::min(batch - base_work_group_z, max_wg_z);
++        for (uint32_t base_work_group_y = 0; base_work_group_y < wg_y_total; base_work_group_y += max_wg_y) {
++            const uint32_t groups_y = std::min(wg_y_total - base_work_group_y, max_wg_y);
++            for (uint32_t base_work_group_x = 0; base_work_group_x < wg_x_total; base_work_group_x += max_wg_x) {
++                const uint32_t groups_x = std::min(wg_x_total - base_work_group_x, max_wg_x);
++
++                const vk_mat_mat_push_constants pc = { m, n, k, stride_a, stride_b, stride_d, batch_stride_a, batch_stride_b, batch_stride_d, base_work_group_z, batch, k_split, ne02, ne12, broadcast2, broadcast3, base_work_group_x, base_work_group_y, padded_n };
++                if (split_k == 1) {
++                    ggml_vk_dispatch_pipeline(ctx, subctx, pipeline, { a, b, d }, pc, { groups_x * tile_m, groups_y * tile_n, groups_z });
++                } else {
++                    ggml_vk_dispatch_pipeline(ctx, subctx, pipeline, { a, b, split_k_buffer }, pc, { groups_x * tile_m, groups_y * tile_n, groups_z });
++                }
++            }
++        }
++    }
++    if (split_k == 1) {
+         return;
+     }
+-
+-    if (ctx->prealloc_split_k_need_sync) {
+-        ggml_vk_sync_buffers(ctx, subctx);
+-    }
+-
+-    GGML_ASSERT(batch_stride_d == m * n);
+-
+-    // Round the split size up to a multiple of 256 (k-quant alignment)
+-    uint32_t k_split = CEIL_DIV(k, split_k);
+-    k_split = ROUNDUP_POW2(k_split, 256);
+-
+-    ggml_pipeline_request_descriptor_sets(ctx, pipeline, CEIL_DIV(batch, ctx->device->properties.limits.maxComputeWorkGroupCount[2]));
+-
+-    uint32_t base_work_group_z = 0;
+-    while (base_work_group_z < batch) {
+-        uint32_t groups_z = std::min(batch - base_work_group_z, ctx->device->properties.limits.maxComputeWorkGroupCount[2]);
+-
+-        const vk_mat_mat_push_constants pc1 = { m, n, k, stride_a, stride_b, stride_d, batch_stride_a, batch_stride_b, batch_stride_d, base_work_group_z, batch, k_split, ne02, ne12, broadcast2, broadcast3, padded_n };
+-        // Make sure enough workgroups get assigned for split k to work
+-        ggml_vk_dispatch_pipeline(ctx, subctx, pipeline, { a, b, split_k_buffer }, pc1, { (CEIL_DIV(m, pipeline->wg_denoms[0]) * pipeline->wg_denoms[0]) * split_k, n, groups_z });
+-        base_work_group_z += groups_z;
+-    }
+     ggml_vk_sync_buffers(ctx, subctx);
+-    const std::array<uint32_t, 2> pc2 = { (uint32_t)(m * n * batch), split_k };
+-    ggml_vk_dispatch_pipeline(ctx, subctx, ctx->device->pipeline_matmul_split_k_reduce, { split_k_buffer, d }, pc2, { m * n * batch, 1, 1 });
++    // The reduction is one invocation per four output elements; it is bounded
++    // by the same workgroup-count limit, so walk it in chunks too.
++    const uint32_t reduce_elements = m * n * batch;
++    const uint32_t reduce_wg_elements = ctx->device->pipeline_matmul_split_k_reduce->wg_denoms[0];
++    const uint32_t reduce_chunk = max_wg_x * reduce_wg_elements;
++    ggml_pipeline_request_descriptor_sets(ctx, ctx->device->pipeline_matmul_split_k_reduce, CEIL_DIV(reduce_elements, reduce_chunk));
++    for (uint32_t base = 0; base < reduce_elements; base += reduce_chunk) {
++        const uint32_t count = std::min(reduce_elements - base, reduce_chunk);
++        const std::array<uint32_t, 3> pc2 = { reduce_elements, split_k, base };
++        ggml_vk_dispatch_pipeline(ctx, subctx, ctx->device->pipeline_matmul_split_k_reduce, { split_k_buffer, d }, pc2, { count, 1, 1 });
++    }
+     ctx->prealloc_split_k_need_sync = true;
+ }
+ 
+diff --git src/ggml-vulkan/vulkan-shaders/mul_mat_split_k_reduce.comp src/ggml-vulkan/vulkan-shaders/mul_mat_split_k_reduce.comp
+--- src/ggml-vulkan/vulkan-shaders/mul_mat_split_k_reduce.comp
++++ src/ggml-vulkan/vulkan-shaders/mul_mat_split_k_reduce.comp
+@@ -12,11 +12,14 @@ layout (binding = 1) writeonly buffer D4 {vec4 data_d4[];};
+ layout (push_constant) uniform parameter {
+     uint ne;
+     uint k_num;
++    // First output element handled by this dispatch; the host walks the
++    // reduction in chunks bounded by maxComputeWorkGroupCount.
++    uint base;
+ } p;
+ 
+ void main() {
+     // Each invocation handles four consecutive components
+-    const uint idx = gl_GlobalInvocationID.x * 4;
++    const uint idx = p.base + gl_GlobalInvocationID.x * 4;
+ 
+     if (idx >= p.ne) {
+         return;
+diff --git src/ggml-vulkan/vulkan-shaders/mul_mm.comp src/ggml-vulkan/vulkan-shaders/mul_mm.comp
+--- src/ggml-vulkan/vulkan-shaders/mul_mm.comp
++++ src/ggml-vulkan/vulkan-shaders/mul_mm.comp
+@@ -96,6 +96,8 @@ layout (push_constant) uniform parameter
+     uint ne12;
+     uint broadcast2;
+     uint broadcast3;
++    uint base_work_group_x;
++    uint base_work_group_y;
+ #endif
+ } p;
+ 
+@@ -137,7 +139,11 @@ shared ACC_TYPE coopmat_stage[TM * TN * NUM_WARPS];
+ #include "mul_mm_funcs.glsl"
+ 
+ void main() {
++#ifdef MUL_MAT_ID
+     const uint ic = gl_WorkGroupID.y;
++#else
++    const uint ic = gl_WorkGroupID.y + p.base_work_group_y;
++#endif
+ 
+ #ifdef MUL_MAT_ID
+     const uint expert_idx = gl_WorkGroupID.z;
+@@ -162,8 +168,13 @@ void main() {
+ #endif
+ 
+     const uint blocks_m = (p.M + BM - 1) / BM;
+-    const uint ir = gl_WorkGroupID.x % blocks_m;
+-    const uint ik = gl_WorkGroupID.x / blocks_m;
++#ifdef MUL_MAT_ID
++    const uint wg_x = gl_WorkGroupID.x;
++#else
++    const uint wg_x = gl_WorkGroupID.x + p.base_work_group_x;
++#endif
++    const uint ir = wg_x % blocks_m;
++    const uint ik = wg_x / blocks_m;
+ 
+     const uint WNITER = (WM * WN) / (WARP * TM * TN * WMITER);
+     const uint WSUBM = WM / WMITER;
+diff --git src/ggml-vulkan/vulkan-shaders/mul_mm_cm2.comp src/ggml-vulkan/vulkan-shaders/mul_mm_cm2.comp
+--- src/ggml-vulkan/vulkan-shaders/mul_mm_cm2.comp
++++ src/ggml-vulkan/vulkan-shaders/mul_mm_cm2.comp
+@@ -64,6 +64,8 @@ layout (push_constant) uniform parameter
+     uint ne12;
+     uint broadcast2;
+     uint broadcast3;
++    uint base_work_group_x;
++    uint base_work_group_y;
+ #endif
+     // N dimension for the B matrix can be >= p.N
+     uint padded_N;
+@@ -229,7 +231,11 @@ void load_row_ids(uint expert_idx, bool nei0_is_pow2, uint ic) {
+ 
+ void main() {
+     const uint tid = gl_LocalInvocationIndex;
++#ifdef MUL_MAT_ID
+     const uint ic = gl_WorkGroupID.y;
++#else
++    const uint ic = gl_WorkGroupID.y + p.base_work_group_y;
++#endif
+ 
+ #ifdef MUL_MAT_ID
+     const uint expert_idx = gl_WorkGroupID.z;
+@@ -262,8 +268,13 @@ void main() {
+ #endif
+ 
+     const uint blocks_m = (p.M + BM - 1) / BM;
+-    const uint ir = gl_WorkGroupID.x % blocks_m;
+-    const uint ik = gl_WorkGroupID.x / blocks_m;
++#ifdef MUL_MAT_ID
++    const uint wg_x = gl_WorkGroupID.x;
++#else
++    const uint wg_x = gl_WorkGroupID.x + p.base_work_group_x;
++#endif
++    const uint ir = wg_x % blocks_m;
++    const uint ik = wg_x / blocks_m;
+ 
+ #ifdef MUL_MAT_ID
+     if (bitCount(p.nei0) == 1) {
+diff --git src/ggml-vulkan/vulkan-shaders/mul_mmq.comp src/ggml-vulkan/vulkan-shaders/mul_mmq.comp
+--- src/ggml-vulkan/vulkan-shaders/mul_mmq.comp
++++ src/ggml-vulkan/vulkan-shaders/mul_mmq.comp
+@@ -64,6 +64,8 @@ layout (push_constant) uniform parameter
+     uint ne12;
+     uint broadcast2;
+     uint broadcast3;
++    uint base_work_group_x;
++    uint base_work_group_y;
+ #endif
+ } p;
+ 
+@@ -107,7 +109,11 @@ block_b_cache cache_b;
+ #include "mul_mmq_funcs.glsl"
+ 
+ void main() {
++#ifdef MUL_MAT_ID
+     const uint ic = gl_WorkGroupID.y;
++#else
++    const uint ic = gl_WorkGroupID.y + p.base_work_group_y;
++#endif
+ 
+ #ifdef MUL_MAT_ID
+     const uint expert_idx = gl_WorkGroupID.z;
+@@ -132,8 +138,13 @@ void main() {
+ #endif
+ 
+     const uint blocks_m = (p.M + BM - 1) / BM;
+-    const uint ir = gl_WorkGroupID.x % blocks_m;
+-    const uint ik = gl_WorkGroupID.x / blocks_m;
++#ifdef MUL_MAT_ID
++    const uint wg_x = gl_WorkGroupID.x;
++#else
++    const uint wg_x = gl_WorkGroupID.x + p.base_work_group_x;
++#endif
++    const uint ir = wg_x % blocks_m;
++    const uint ik = wg_x / blocks_m;
+ 
+     const uint WNITER = (WM * WN) / (WARP * TM * TN * WMITER);
+     const uint WSUBM = WM / WMITER;
