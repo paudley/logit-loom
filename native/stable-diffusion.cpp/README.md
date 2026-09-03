@@ -107,7 +107,7 @@ then
 then
 [`logit-loom-vulkan-strix-halo-v14.patch`](logit-loom-vulkan-strix-halo-v14.patch),
 then
-[`logit-loom-vulkan-dispatch-bounds-v17.patch`](logit-loom-vulkan-dispatch-bounds-v17.patch),
+[`logit-loom-vulkan-dispatch-bounds-v18.patch`](logit-loom-vulkan-dispatch-bounds-v18.patch),
 initializes only the required `ggml` submodule, and builds a shared library.
 Existing incompatible source changes are rejected. The script never runs from
 tests, CI, documentation, package builds, or `make check`.
@@ -154,8 +154,12 @@ the process; Krea2's text-fusion projector reaches that on prompts longer than
 1024 tokens (`n = 2560 * tokens`, 32-wide tiles). The dispatch now iterates
 the grid in device-sized chunks, the matmul shaders add the chunk's
 work-group offset from push constants, and the `split_k` reduction is chunked
-the same way. Results are bit-identical to an unchunked dispatch; no shape is
-narrowed or clamped.
+the same way. Chunk counts are computed in 64 bits: RADV reports the x-axis
+limit as `0xFFFFFFFF`, where a 32-bit ceiling division wraps to zero and would
+request no descriptor set for a dispatch that still happens (the v17 revision
+of this patch did exactly that and aborted every matmul on Strix Halo).
+Results are bit-identical to an unchunked dispatch; no shape is narrowed or
+clamped.
 
 Image-to-image, inpaint, and outpaint strength may select a suffix of the
 declared Euler schedule. The companion reports those executed transitions at
