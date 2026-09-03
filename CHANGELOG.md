@@ -26,6 +26,13 @@ include breaking API changes.
   `digest()` a downstream can compute for a context it allocates itself.
   `KvCacheType::{is_quantized, native}` and `FlashAttention::native` are
   public so such a downstream applies the identical native settings.
+- `generation_bench` example: prefill and decode throughput plus captured
+  state size for one model at one `SessionOptions` geometry, one JSON line
+  per repeat carrying the `ContextCompatibility` digest, so a sweep can
+  compare geometries by the identity a checkpoint would actually bind to.
+  `--native-logs on` keeps the native llama.cpp log for load diagnosis.
+- `mtp_probe` example reports wall time and tokens per second alongside the
+  draft acceptance counts.
 
 ### Changed
 

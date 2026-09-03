@@ -19,13 +19,31 @@ use logit_loom::{
     TextSpeculativeMechanismV1,
 };
 use logit_loom_llamacpp::{
-    DevicePolicy, Model, ModelOptions, Runtime, SessionOptions, SpeculativeRequest,
-    SpeculativeSessionOptions, Tokenization, generate_speculative,
+    DevicePolicy, Model, ModelOptions, Runtime, SessionOptions, SpeculativeGenerationOutput,
+    SpeculativeRequest, SpeculativeSessionOptions, Tokenization, generate_speculative,
     speculation_implementation_identity,
 };
 
 const USAGE: &str = "usage: mtp_probe MODEL.gguf PROMPT [--cpu] [--ctx N] [--batch N] \
                      [--draft N] [--max-tokens N] [--threads N]";
+
+/// Token counts here are far below 2^52, so the cast is exact.
+#[allow(clippy::cast_precision_loss)]
+fn report(output: &SpeculativeGenerationOutput, prompt_tokens: usize, wall_millis: f64) {
+    let generated = output.generation.tokens.len();
+    eprintln!(
+        "\n{} boundaries: {} proposed, {} accepted, {} rejected",
+        output.speculation.boundaries.len(),
+        output.speculation.proposed,
+        output.speculation.accepted,
+        output.speculation.rejected
+    );
+    eprintln!(
+        "{generated} tokens in {wall_millis:.0} ms (prompt {prompt_tokens} tokens included): \
+         {:.2} tokens/s",
+        generated as f64 / wall_millis * 1_000.0
+    );
+}
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut arguments = std::env::args().skip(1);
@@ -119,15 +137,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             draft: session,
         },
     );
+    let started = std::time::Instant::now();
     let output = generate_speculative(&runtime, &model, &model, request)?;
+    let wall_millis = started.elapsed().as_secs_f64() * 1_000.0;
 
     io::stdout().lock().write_all(&output.generation.bytes)?;
-    eprintln!(
-        "\n{} boundaries: {} proposed, {} accepted, {} rejected",
-        output.speculation.boundaries.len(),
-        output.speculation.proposed,
-        output.speculation.accepted,
-        output.speculation.rejected
-    );
+    report(&output, prompt.len(), wall_millis);
     Ok(())
 }
