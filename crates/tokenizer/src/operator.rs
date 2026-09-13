@@ -360,7 +360,7 @@ pub trait ExactTokenizer: Send + Sync {
 /// # Errors
 ///
 /// Returns an error for oversized, invalid UTF-8, or NUL-containing input.
-pub fn validate_source(source: &[u8]) -> Result<&str, TokenizationError> {
+pub(crate) fn validate_source(source: &[u8]) -> Result<&str, TokenizationError> {
     if source.len() > MAX_ROW_BYTES {
         return Err(TokenizationError::Bound {
             field: "source bytes",
@@ -381,7 +381,7 @@ pub fn validate_source(source: &[u8]) -> Result<&str, TokenizationError> {
 /// # Errors
 ///
 /// Returns an error for too many tokens or non-monotonic/out-of-range spans.
-pub fn validate_spans(source_len: usize, spans: &[TokenSpan]) -> Result<(), TokenizationError> {
+pub(crate) fn validate_spans(source_len: usize, spans: &[TokenSpan]) -> Result<(), TokenizationError> {
     if spans.len() > MAX_TOKENS_PER_ROW {
         return Err(TokenizationError::Bound {
             field: "token spans",

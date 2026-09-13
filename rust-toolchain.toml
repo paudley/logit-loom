@@ -1,6 +1,11 @@
 # SPDX-License-Identifier: MIT OR Apache-2.0
 
+# Machine policy (Patrick, 2026-09-10): Rust is ALWAYS the floating stage
+# nightly. RUSTUP_TOOLCHAIN=nightly is enforced machine-wide, so this file
+# cannot select anything else locally; it exists so CI and other checkouts
+# follow the same floating channel. Old Rust versions are used only via
+# `rust-validate <ver> <cmd>` for validating specific external packages.
 [toolchain]
-channel = "1.97.1"
+channel = "nightly"
 components = ["clippy", "rustfmt"]
 profile = "minimal"

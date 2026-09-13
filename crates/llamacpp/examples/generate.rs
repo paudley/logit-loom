@@ -14,9 +14,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .ok_or("usage: generate MODEL.gguf PROMPT")?;
     let prompt = arguments
         .next()
-        .ok_or("usage: generate MODEL.gguf PROMPT")?
+        .ok_or("usage: generate MODEL.gguf PROMPT [MAX_TOKENS]")?
         .into_string()
         .map_err(|_| "prompt must be valid UTF-8")?;
+    let max_tokens = match arguments.next() {
+        Some(v) => v
+            .into_string()
+            .map_err(|_| "MAX_TOKENS must be UTF-8")?
+            .parse()?,
+        None => 64,
+    };
 
     let mut runtime = Runtime::initialize()?;
     runtime.silence_native_logs();
@@ -28,7 +35,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let output = session.generate(
         &GenerationPlan {
             sampling: SamplingPlan::default(),
-            max_tokens: 64,
+            max_tokens,
             biases: Vec::new(),
             grammar: None,
             stops: Vec::new(),

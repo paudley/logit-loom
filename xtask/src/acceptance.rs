@@ -97,7 +97,7 @@ struct Blocker {
     detail: String,
 }
 
-pub fn check_reports(repository: &Path, catalog: &Catalog) -> Result<usize, String> {
+pub(crate) fn check_reports(repository: &Path, catalog: &Catalog) -> Result<usize, String> {
     let directory = repository.join("docs/acceptance");
     let mut paths = fs::read_dir(&directory)
         .map_err(|error| format!("failed to read {}: {error}", directory.display()))?

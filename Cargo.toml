@@ -44,6 +44,13 @@ tokenizers = { version = "=0.23.1", default-features = false, features = ["onig"
 wide = "=1.6.0"
 
 [workspace.lints.rust]
+# In a library crate every `pub` item is a dead_code lint ROOT, so `pub`
+# silently disables dead-code detection and a function whose only caller is
+# a test survives forever. Declared here, not as -Zcrate-attr in
+# .cargo/config.toml: rustflags apply to every unit compiled, INCLUDING path
+# dependencies in sibling repos we do not own. Workspace lints apply to
+# workspace MEMBERS only, which is the scope actually intended.
+unreachable_pub = "deny"
 missing_docs = "deny"
 unsafe_code = "deny"
 unused_qualifications = "warn"

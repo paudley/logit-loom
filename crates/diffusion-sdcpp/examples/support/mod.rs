@@ -16,7 +16,7 @@ use serde::Serialize;
 /// Result of one explicit mechanical assertion.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum CheckStatus {
+pub(crate) enum CheckStatus {
     /// The assertion held.
     Passed,
     /// The assertion did not hold.
@@ -31,7 +31,7 @@ impl From<bool> for CheckStatus {
 
 /// Mechanical checks shared by the two checkpoint experiments.
 #[derive(Debug, Serialize)]
-pub struct ForkChecks {
+pub(crate) struct ForkChecks {
     /// Capture reached the declared post-step boundary.
     pub checkpoint_captured: CheckStatus,
     /// Unchanged replay reached and authenticated the checkpoint.
@@ -52,7 +52,7 @@ pub struct ForkChecks {
 
 impl ForkChecks {
     /// Returns whether every mechanical acceptance condition passed.
-    pub const fn all_passed(&self) -> bool {
+    pub(crate) const fn all_passed(&self) -> bool {
         matches!(self.checkpoint_captured, CheckStatus::Passed)
             && matches!(self.replay_applied, CheckStatus::Passed)
             && matches!(self.branch_applied, CheckStatus::Passed)
@@ -66,7 +66,7 @@ impl ForkChecks {
 
 /// Stable catalog metadata for one three-way image experiment.
 #[derive(Clone, Copy, Debug)]
-pub struct ForkScenario {
+pub(crate) struct ForkScenario {
     scenario: &'static str,
     profile_id: &'static str,
     integration_status: &'static str,
@@ -74,7 +74,7 @@ pub struct ForkScenario {
 
 impl ForkScenario {
     /// Resolves an experiment's current status from the packaged model catalog.
-    pub fn from_catalog(
+    pub(crate) fn from_catalog(
         scenario: &'static str,
         profile_id: &'static str,
     ) -> Result<Self, Box<dyn std::error::Error>> {
@@ -92,7 +92,7 @@ impl ForkScenario {
 
 /// Path-free report for one three-way image checkpoint experiment.
 #[derive(Debug, Serialize)]
-pub struct ForkReport {
+pub(crate) struct ForkReport {
     /// Report schema version.
     pub schema_version: u32,
     /// Stable experiment identifier.
@@ -131,7 +131,7 @@ pub struct ForkReport {
 
 impl ForkReport {
     /// Constructs a report while computing each path-free run identity.
-    pub fn new(
+    pub(crate) fn new(
         scenario: ForkScenario,
         checkpoint: DiffusionCheckpointReceipt,
         baseline: GenerationOutput,
@@ -168,7 +168,7 @@ impl ForkReport {
 
 /// Path-free identities projected into a retained acceptance report.
 #[derive(Debug, Serialize)]
-pub struct RunIdentities {
+pub(crate) struct RunIdentities {
     /// Exact diffusion plan identity.
     pub plan_identity: Digest,
     /// Exact serialized generation-receipt identity.
@@ -180,7 +180,7 @@ pub struct RunIdentities {
 }
 
 /// Computes the stable identities for one generated image and its mechanics.
-pub fn run_identities(
+pub(crate) fn run_identities(
     receipt: &GenerationReceipt,
 ) -> Result<RunIdentities, Box<dyn std::error::Error>> {
     Ok(RunIdentities {
@@ -192,7 +192,7 @@ pub fn run_identities(
 }
 
 /// Parses a positive native thread count.
-pub fn parse_threads(value: std::ffi::OsString) -> Result<u32, Box<dyn std::error::Error>> {
+pub(crate) fn parse_threads(value: std::ffi::OsString) -> Result<u32, Box<dyn std::error::Error>> {
     let value = value
         .into_string()
         .map_err(|_| "thread count must be valid UTF-8")?;
@@ -204,7 +204,7 @@ pub fn parse_threads(value: std::ffi::OsString) -> Result<u32, Box<dyn std::erro
 }
 
 /// Returns one explicit output directory, creating it when absent.
-pub fn output_directory(value: std::ffi::OsString) -> Result<PathBuf, Box<dyn std::error::Error>> {
+pub(crate) fn output_directory(value: std::ffi::OsString) -> Result<PathBuf, Box<dyn std::error::Error>> {
     let path = PathBuf::from(value);
     if path.exists() {
         if !path.is_dir() {
@@ -217,7 +217,7 @@ pub fn output_directory(value: std::ffi::OsString) -> Result<PathBuf, Box<dyn st
 }
 
 /// Writes one image as a new binary PPM file without overwriting.
-pub fn write_ppm(
+pub(crate) fn write_ppm(
     directory: &Path,
     name: &str,
     image: &GenerationOutput,
@@ -250,7 +250,7 @@ pub fn write_ppm(
 }
 
 /// Writes one pretty JSON value followed by a newline.
-pub fn write_json(value: &impl Serialize) -> Result<(), Box<dyn std::error::Error>> {
+pub(crate) fn write_json(value: &impl Serialize) -> Result<(), Box<dyn std::error::Error>> {
     let stdout = io::stdout();
     let mut output = stdout.lock();
     serde_json::to_writer_pretty(&mut output, value)?;

@@ -2,3 +2,22 @@
 
 [alias]
 xtask = "run --quiet --locked --package logit-loom-xtask --"
+
+[build]
+# `-Zmacro-backtrace=yes` makes a macro- or build.rs-generated obligation that
+# fails as a bare E0277 inside OUT_DIR diagnosable rather than a puzzle. Requires
+# nightly, which is machine policy. See lillith_decodes ADR 0095, 2026-09-13.
+#
+# `unreachable_pub` is NOT set here. It lives in [workspace.lints.rust] in
+# Cargo.toml, which reaches workspace MEMBERS only. The -Zcrate-attr form was
+# tried and reverted: rustflags apply to every unit the build compiles, and path
+# dependencies are NOT shielded by --cap-lints allow. This repo is path-depended
+# on by lillith_brainstem, lillith_brain and lillith_draws, so a crate-attr here
+# would impose this repo's lint policy on all three. Note a member lacking
+# `[lints] workspace = true` silently opts out of EVERY workspace lint.
+#
+# Never move rustflags into a [target.<triple>] block: a target block REPLACES
+# build.rustflags wholesale. That trap hid `-Dwarnings` machine-wide for months.
+rustflags = [
+    "-Zmacro-backtrace=yes",
+]

@@ -8,10 +8,10 @@ use logit_loom_diffusion::{
 use crate::{DiffusionCheckpoint, Error, Result, StepProgram};
 
 /// Deferred construction of a pipeline bound to the native execution plan.
-pub type PipelineFactory<'a> =
+pub(crate) type PipelineFactory<'a> =
     Box<dyn FnOnce(&DiffusionPlan) -> std::result::Result<Pipeline, String> + 'a>;
 /// Deferred construction of observers bound to the native execution plan.
-pub type ObserverFactory<'a> =
+pub(crate) type ObserverFactory<'a> =
     Box<dyn FnOnce(&DiffusionPlan) -> std::result::Result<ObserverSet, String> + 'a>;
 
 /// Adapter glue for backend-neutral transactional pipelines and observers.
