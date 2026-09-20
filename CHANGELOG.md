@@ -36,6 +36,12 @@ include breaking API changes.
 
 ### Changed
 
+- `llama-cpp-4` pinned to 0.7.0 (llama.cpp `22397c31a0`, build b10881, up
+  from `0adcc3bb5` b10502). The binding's `dflash2` feature is gone because
+  DFlash2 merged upstream; `LlamaSampler::try_sample` and `try_accept` now
+  report `ShimError` instead of a static string. Saved context state written
+  under 0.6.1 does not load under 0.7.0 (upstream session format bump).
+
 - The llama.cpp checkpoint compatibility identity moved from
   `llamacpp-session-compatibility-v3` to `-v4` because it now binds the
   key/value cache type and the flash-attention policy. Checkpoints captured

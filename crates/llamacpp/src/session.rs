@@ -1515,8 +1515,8 @@ impl<'model> Session<'model> {
     }
 
     pub(crate) fn mark_steering_stack_active(&mut self, kinds: Vec<SteeringKind>) {
-        debug_assert!(!kinds.is_empty());
-        debug_assert!(self.active_steering.is_empty());
+        debug_assert_ne!(kinds, [] as [SteeringKind; 0]);
+        debug_assert_eq!(self.active_steering, [] as [SteeringKind; 0]);
         self.active_steering = kinds;
     }
 

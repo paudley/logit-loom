@@ -2779,8 +2779,8 @@ mod tests {
         };
         let mut window = b"prior".to_vec();
         extend_stop_window(&plan, &mut window, b"new");
-        assert!(window.is_empty());
-        assert!(checkpoint_stop_tail(&plan, &window).is_empty());
+        assert_eq!(window, [] as [u8; 0]);
+        assert_eq!(checkpoint_stop_tail(&plan, &window), [] as [u8; 0]);
         assert!(validate_stop_tail(&plan, b"x").is_err());
     }
 }
