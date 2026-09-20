@@ -204,7 +204,9 @@ pub(crate) fn parse_threads(value: std::ffi::OsString) -> Result<u32, Box<dyn st
 }
 
 /// Returns one explicit output directory, creating it when absent.
-pub(crate) fn output_directory(value: std::ffi::OsString) -> Result<PathBuf, Box<dyn std::error::Error>> {
+pub(crate) fn output_directory(
+    value: std::ffi::OsString,
+) -> Result<PathBuf, Box<dyn std::error::Error>> {
     let path = PathBuf::from(value);
     if path.exists() {
         if !path.is_dir() {

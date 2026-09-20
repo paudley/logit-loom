@@ -381,7 +381,10 @@ pub(crate) fn validate_source(source: &[u8]) -> Result<&str, TokenizationError> 
 /// # Errors
 ///
 /// Returns an error for too many tokens or non-monotonic/out-of-range spans.
-pub(crate) fn validate_spans(source_len: usize, spans: &[TokenSpan]) -> Result<(), TokenizationError> {
+pub(crate) fn validate_spans(
+    source_len: usize,
+    spans: &[TokenSpan],
+) -> Result<(), TokenizationError> {
     if spans.len() > MAX_TOKENS_PER_ROW {
         return Err(TokenizationError::Bound {
             field: "token spans",

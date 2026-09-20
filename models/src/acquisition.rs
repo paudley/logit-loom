@@ -10,7 +10,8 @@ use crate::{ArtifactReceipt, Catalog};
 /// Current serialized acquisition-report schema.
 pub(crate) const ACQUISITION_REPORT_SCHEMA_VERSION: u32 = 1;
 /// Identity domain for acquisition-report interpretation.
-pub(crate) const ACQUISITION_REPORT_IDENTITY_DOMAIN: &str = "logit-loom-model-acquisition-report-v1";
+pub(crate) const ACQUISITION_REPORT_IDENTITY_DOMAIN: &str =
+    "logit-loom-model-acquisition-report-v1";
 
 const REPORT_BYTES: &[u8] = include_bytes!("../reports/acquisition-2026-07-25.json");
 const MAX_REPORT_BYTES: usize = 1024 * 1024;
