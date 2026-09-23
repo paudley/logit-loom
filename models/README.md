@@ -54,13 +54,16 @@ local model store. It applies the same byte-count and SHA-256 checks and emits
 a path-free JSON receipt.
 
 The retained acquisition report in
-[`reports/acquisition-2026-07-25.json`](reports/acquisition-2026-07-25.json)
+[`reports/acquisition-2026-09-23.json`](reports/acquisition-2026-09-23.json)
 uses a bounded, versioned Rust contract. It records the `hf` CLI version,
 available filesystem bytes, catalog and verified artifact bytes, and exact
-path-free receipts. All three profiles are fully verified there. Krea uses the
-`mixed` acquisition method because its three runtime components were verified
-across a repository fetch and a caller-managed model store rather than one
-shared directory.
+path-free receipts. Every catalogued profile is fully verified there, by
+`verify-artifact` against files already present in caller-managed stores, so
+each uses the `existing-local-artifacts` method. The report is bound to the
+exact packaged catalog digest: a catalog edit needs a new report recorded
+against the edited catalog, and the earlier
+[`reports/acquisition-2026-07-25.json`](reports/acquisition-2026-07-25.json)
+stays as the record of what was verified against the catalog of its day.
 
 Artifacts are placed under `<destination>/<profile>/<source>/`. For example,
 the text GGUF is:

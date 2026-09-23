@@ -172,13 +172,14 @@ impl AcceptanceReport {
         if !matches!(self.status.as_str(), "passed" | "failed" | "blocked") {
             return invalid("status must be passed, failed, or blocked");
         }
+        // `catalog_sha256` records the whole catalog the run was made against.
+        // It is not compared with today's catalog: a retained run cannot be
+        // re-recorded without re-running the model, so whole-file equality
+        // made every unrelated catalog edit invalidate every run on record,
+        // leaving only falsification or deletion. The binding that matters is
+        // per artifact and is checked below: each artifact must still equal
+        // its profile's exact catalog entry, byte count and SHA-256 included.
         digest("catalog_sha256", &self.catalog_sha256)?;
-        let expected_catalog = catalog.packaged_sha256();
-        if self.catalog_sha256 != expected_catalog {
-            return invalid(format!(
-                "catalog_sha256 must match the packaged catalog {expected_catalog}"
-            ));
-        }
         let profile = catalog
             .find_profile(&self.profile_id)
             .ok_or_else(|| format!("unknown profile_id {:?}", self.profile_id))?;

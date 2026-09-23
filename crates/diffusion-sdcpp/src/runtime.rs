@@ -2194,83 +2194,22 @@ fn verify_profile_artifacts(
                     .clone(),
             );
         }
-        ProfileArtifacts::ZImage {
-            diffusion_model,
-            text_encoder,
-            vae,
-        } => {
-            receipts.push(
-                profile
-                    .verify_artifact(
-                        &catalog_sha256,
-                        "z-image-turbo-q8-0",
-                        "z_image_turbo-Q8_0.gguf",
-                        diffusion_model,
-                    )?
-                    .receipt()
-                    .clone(),
-            );
-            receipts.push(
-                profile
-                    .verify_artifact(
-                        &catalog_sha256,
-                        "qwen3-4b-instruct-text-encoder",
-                        "Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
-                        text_encoder,
-                    )?
-                    .receipt()
-                    .clone(),
-            );
-            receipts.push(
-                profile
-                    .verify_artifact(
-                        &catalog_sha256,
-                        "z-image-vae",
-                        "vae/diffusion_pytorch_model.safetensors",
-                        vae,
-                    )?
-                    .receipt()
-                    .clone(),
-            );
-        }
-        ProfileArtifacts::Krea2 {
-            diffusion_model,
-            text_encoder,
-            vae,
-        } => {
-            receipts.push(
-                profile
-                    .verify_artifact(
-                        &catalog_sha256,
-                        "krea-2-turbo-q6-k",
-                        "TURBO/Krea-2-Turbo-Q6_K.gguf",
-                        diffusion_model,
-                    )?
-                    .receipt()
-                    .clone(),
-            );
-            receipts.push(
-                profile
-                    .verify_artifact(
-                        &catalog_sha256,
-                        "qwen3-vl-text-encoder",
-                        "Qwen3VL-4B-Instruct-Q4_K_M.gguf",
-                        text_encoder,
-                    )?
-                    .receipt()
-                    .clone(),
-            );
-            receipts.push(
-                profile
-                    .verify_artifact(
-                        &catalog_sha256,
-                        "wan-2.1-vae",
-                        "split_files/vae/wan_2.1_vae.safetensors",
-                        vae,
-                    )?
-                    .receipt()
-                    .clone(),
-            );
+        ProfileArtifacts::ZImage { .. } | ProfileArtifacts::Krea2 { .. } => {
+            let vae = artifacts.vae().ok_or_else(|| {
+                Error::Incompatible(format!("{profile_id} artifacts carry no VAE"))
+            })?;
+            for (role, local_path) in [
+                ("diffusion", artifacts.diffusion_model()),
+                ("text-encoder", artifacts.text_encoder()),
+                ("vae", vae),
+            ] {
+                receipts.push(verify_catalog_role(
+                    profile,
+                    &catalog_sha256,
+                    role,
+                    local_path,
+                )?);
+            }
         }
     }
     Ok(ProfileReceipt {
@@ -2278,6 +2217,39 @@ fn verify_profile_artifacts(
         catalog_sha256,
         artifacts: receipts,
     })
+}
+
+/// Verifies the one file the catalog names for a component role.
+///
+/// The role is the catalog source's `local_subdir`, so the exact artifact a
+/// profile accepts is written once, in the catalog, rather than repeated here
+/// per model.
+fn verify_catalog_role(
+    profile: &logit_loom_models::Profile,
+    catalog_sha256: &str,
+    role: &str,
+    local_path: &Path,
+) -> Result<logit_loom_models::ArtifactReceipt> {
+    let source = profile
+        .sources()
+        .iter()
+        .find(|source| source.local_subdir() == role)
+        .ok_or_else(|| {
+            Error::Incompatible(format!(
+                "catalog profile {:?} has no {role} source",
+                profile.id()
+            ))
+        })?;
+    let [file] = source.files() else {
+        return Err(Error::Incompatible(format!(
+            "catalog profile {:?} {role} source must name exactly one file",
+            profile.id()
+        )));
+    };
+    Ok(profile
+        .verify_artifact(catalog_sha256, source.id(), file.path(), local_path)?
+        .receipt()
+        .clone())
 }
 
 fn native_identity(

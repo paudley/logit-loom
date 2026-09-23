@@ -13,7 +13,7 @@ pub(crate) const ACQUISITION_REPORT_SCHEMA_VERSION: u32 = 1;
 pub(crate) const ACQUISITION_REPORT_IDENTITY_DOMAIN: &str =
     "logit-loom-model-acquisition-report-v1";
 
-const REPORT_BYTES: &[u8] = include_bytes!("../reports/acquisition-2026-07-25.json");
+const REPORT_BYTES: &[u8] = include_bytes!("../reports/acquisition-2026-09-23.json");
 const MAX_REPORT_BYTES: usize = 1024 * 1024;
 const MAX_PROFILES: usize = 32;
 const MAX_ARTIFACTS_PER_PROFILE: usize = 128;
@@ -420,10 +420,16 @@ mod tests {
     fn packaged_report_is_path_free_and_catalog_bound() {
         let catalog = Catalog::embedded().expect("catalog should parse");
         let report = AcquisitionReport::embedded(&catalog).expect("report should validate");
-        assert_eq!(report.profiles().len(), 3);
-        assert_eq!(report.profiles()[0].status(), AcquisitionStatus::Verified);
-        assert_eq!(report.profiles()[2].status(), AcquisitionStatus::Verified);
-        assert_eq!(report.profiles()[2].method(), AcquisitionMethod::Mixed);
+        // The packaged report accounts for every catalogued profile, so a
+        // catalog edit cannot land without an acquisition record for it.
+        assert_eq!(report.profiles().len(), catalog.profiles().len());
+        assert!(
+            report
+                .profiles()
+                .iter()
+                .all(|profile| profile.status() == AcquisitionStatus::Verified
+                    && profile.method() == AcquisitionMethod::ExistingLocalArtifacts)
+        );
 
         let encoded = serde_json::to_string(&report).expect("report should serialize");
         let home_path_marker = ["/", "home", "/"].concat();

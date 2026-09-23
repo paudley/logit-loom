@@ -19,6 +19,12 @@ compilation or artifact verification into model acceptance.
 Reports establish mechanics for one exact artifact/runtime combination. They
 do not establish model quality, safety, truthfulness, or efficacy.
 
+A report's `catalog_sha256` names the whole catalog it was recorded against.
+`models check` binds a retained report to the current catalog per artifact —
+each recorded artifact must still equal its profile's exact entry — and not by
+whole-file digest, so adding or correcting an unrelated profile does not
+invalidate runs already on record.
+
 ## Retained reports
 
 - [`qwen3-0.6b-q8-0-vulkan-2026-07-25.json`](qwen3-0.6b-q8-0-vulkan-2026-07-25.json)
