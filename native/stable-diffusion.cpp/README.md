@@ -97,6 +97,8 @@ then
 [`logit-loom-image-strength-window-v15.patch`](logit-loom-image-strength-window-v15.patch),
 then
 [`logit-loom-krea-reference-guard-v16.patch`](logit-loom-krea-reference-guard-v16.patch),
+then
+[`logit-loom-vae-tiling-v20.patch`](logit-loom-vae-tiling-v20.patch),
 and finally the exact ggml-submodule
 [`logit-loom-vulkan-budget-v8.patch`](logit-loom-vulkan-budget-v8.patch),
 [`logit-loom-vulkan-errors-v10.patch`](logit-loom-vulkan-errors-v10.patch), and
@@ -173,6 +175,17 @@ then no longer be placed, and the kernel's `BO_VA -ENOMEM` path wedged the GPU
 on 2026-09-22. The patch has to be code: Brainstem passes workers no ambient
 environment. Buffers remain host-visible, so UMA mapping and borrowing paths
 are unchanged, and discrete GPUs are untouched.
+
+Every image decode through an `AutoEncoderKL` VAE (the FLUX-lineage VAEs of
+Z-Image Turbo, FLUX.2-dev and FLUX.2-klein-4B) uses upstream's default spatial
+tiling: 32 latent cells per tile with 0.5 overlap
+(`logit-loom-vae-tiling-v20.patch`). A full-frame 1024x1024 decode needs one
+Vulkan buffer above the device's ~4 GiB `maxBufferSize`, so it can never
+allocate, and upstream's tiling retry is reachable only with `auto_fit`, which
+the companion never enables; its 256-cell retry tile would in any case cover
+the whole 128x128 latent. Tiling is unconditional for this VAE, so an image
+never depends on whether an allocation failed. The Wan VAE of Krea 2 Turbo and
+Qwen-Image is not `AutoEncoderKL` and decodes exactly as before.
 
 Image-to-image, inpaint, and outpaint strength may select a suffix of the
 declared Euler schedule. The companion reports those executed transitions at

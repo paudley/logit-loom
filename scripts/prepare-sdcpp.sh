@@ -52,6 +52,7 @@ patch_files=(
     "${repo_root}/native/stable-diffusion.cpp/logit-loom-native-errors-v9.patch"
     "${repo_root}/native/stable-diffusion.cpp/logit-loom-image-strength-window-v15.patch"
     "${repo_root}/native/stable-diffusion.cpp/logit-loom-krea-reference-guard-v16.patch"
+    "${repo_root}/native/stable-diffusion.cpp/logit-loom-vae-tiling-v20.patch"
 )
 ggml_patches=(
     "${repo_root}/native/stable-diffusion.cpp/logit-loom-vulkan-budget-v8.patch"

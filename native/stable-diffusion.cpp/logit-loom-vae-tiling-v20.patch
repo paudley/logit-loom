@@ -1,0 +1,26 @@
+diff --git src/stable-diffusion.cpp src/stable-diffusion.cpp
+--- src/stable-diffusion.cpp
++++ src/stable-diffusion.cpp
+@@ -2940,8 +2940,20 @@ public:
+             return sd::ops::clamp((x + 1.f) * 0.5f, 0.0f, 1.0f);
+         }
+         auto latents = first_stage_model->diffusion_to_vae_latents(x);
+-        first_stage_model->set_temporal_tiling_enabled(vae_tiling_params.temporal_tiling);
+-        auto decoded = first_stage_model->decode(n_threads, latents, vae_tiling_params, decode_video, circular_x, circular_y);
++        // Logit Loom: a full-frame AutoEncoderKL (FLUX-lineage) decode at
++        // 1024x1024 needs a single Vulkan buffer above the device's ~4 GiB
++        // maxBufferSize, and the upstream tiling retry is reachable only with
++        // auto_fit. Image decodes through that VAE therefore always use
++        // upstream's default spatial tiles (32 latent, overlap 0.5), so the
++        // result never depends on whether an allocation failed. Wan, Hunyuan
++        // and LTX VAEs are not AutoEncoderKL and keep the caller's parameters.
++        sd_tiling_params_t decode_tiling = vae_tiling_params;
++        if (!decode_video && !decode_tiling.enabled &&
++            std::dynamic_pointer_cast<AutoEncoderKL>(first_stage_model) != nullptr) {
++            decode_tiling.enabled = true;
++        }
++        first_stage_model->set_temporal_tiling_enabled(decode_tiling.temporal_tiling);
++        auto decoded = first_stage_model->decode(n_threads, latents, decode_tiling, decode_video, circular_x, circular_y);
+         if (decoded.empty() && auto_fit_enabled) {
+             bool prefer_temporal_tiling = decode_video && std::dynamic_pointer_cast<LTXVideoVAE>(first_stage_model) != nullptr;
+             if (sd::backend_fit::prepare_vae_decode_retry_tiling(vae_tiling_params, prefer_temporal_tiling)) {
