@@ -985,8 +985,8 @@ impl DiffusionCheckpoint {
                 "checkpoint backend, step, or tensor length differs".to_owned(),
             ));
         }
-        for (destination, bytes) in state.iter_mut().zip(self.state_le_bytes.chunks_exact(4)) {
-            let bits = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+        for (destination, bytes) in state.iter_mut().zip(self.state_le_bytes.as_chunks::<4>().0) {
+            let bits = u32::from_le_bytes(*bytes);
             let value = f32::from_bits(bits);
             if !value.is_finite() {
                 return Err(Error::Incompatible(

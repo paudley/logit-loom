@@ -570,7 +570,7 @@ mod tests {
         let topology = topology(b"target", true);
         let plan = mtp_plan(&topology);
         let receipt = SpeculationReceiptV1::from_boundaries(&plan, &[]).unwrap();
-        assert!(receipt.boundaries.is_empty());
+        assert!(receipt.boundaries.is_empty(), "{:?}", receipt.boundaries);
         assert_eq!(
             (receipt.proposed, receipt.accepted, receipt.rejected),
             (0, 0, 0)

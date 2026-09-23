@@ -158,10 +158,11 @@ impl NativeResumeState {
         }
         let values = checkpoint
             .state_bytes()
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .map(|bytes| {
-                let value =
-                    f32::from_bits(u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]));
+                let value = f32::from_bits(u32::from_le_bytes(*bytes));
                 if value.is_finite() {
                     Ok(value)
                 } else {
@@ -1801,9 +1802,11 @@ impl<'a> CallbackState<'a> {
             unsafe { slice::from_raw_parts(raw.data.cast::<u8>(), raw.bytes) }
         };
         if raw.dtype == ffi::TENSOR_F32
-            && bytes.chunks_exact(4).any(|chunk| {
-                !f32::from_ne_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]).is_finite()
-            })
+            && bytes
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .any(|chunk| !f32::from_ne_bytes(*chunk).is_finite())
         {
             return Err(Error::Incompatible(
                 "condition tensor contains a non-finite value".to_owned(),
@@ -3028,7 +3031,7 @@ mod tests {
             assert_eq!(status, ffi::CALLBACK_ERROR);
             assert!(state.iter().all(|value| *value == 0.0));
             assert!(error.is_some());
-            assert!(measurements.is_empty());
+            assert!(measurements.is_empty(), "{measurements:?}");
         }
     }
 
@@ -3038,7 +3041,7 @@ mod tests {
         assert_eq!(status, ffi::CALLBACK_ERROR);
         assert!(state.iter().all(|value| *value == 0.0));
         assert!(error.is_some_and(|message| message.contains("latency")));
-        assert!(measurements.is_empty());
+        assert!(measurements.is_empty(), "{measurements:?}");
     }
 
     #[test]
@@ -3091,7 +3094,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             before
         );
-        assert!(callbacks.steps.is_empty());
+        assert!(callbacks.steps.is_empty(), "{:?}", callbacks.steps);
         assert_eq!(
             callbacks.boundaries,
             [BoundaryReceipt {

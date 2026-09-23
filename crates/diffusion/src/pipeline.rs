@@ -634,11 +634,11 @@ mod tests {
         context.tensor.device = "other0".to_owned();
         let mut state = vec![1.0; 8];
         assert!(pipeline.apply(&context, &mut state).is_err());
-        assert!(order.borrow().is_empty());
+        assert!(order.borrow().is_empty(), "{:?}", order.borrow());
 
         let context = StepContext::for_plan(&plan, 0).unwrap();
         assert!(pipeline.apply(&context, &mut state[..7]).is_err());
-        assert!(order.borrow().is_empty());
+        assert!(order.borrow().is_empty(), "{:?}", order.borrow());
     }
 
     #[test]

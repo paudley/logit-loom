@@ -88,7 +88,7 @@ fn decode_hex(input: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     }
 
     let mut decoded = Vec::with_capacity(input.len() / 2);
-    for pair in input.as_bytes().chunks_exact(2) {
+    for pair in input.as_bytes().as_chunks::<2>().0 {
         let high = hex_nibble(pair[0]).ok_or("STOP_HEX contains a non-hexadecimal byte")?;
         let low = hex_nibble(pair[1]).ok_or("STOP_HEX contains a non-hexadecimal byte")?;
         decoded.push((high << 4) | low);

@@ -1048,7 +1048,7 @@ mod tests {
             ),
             Err(TokenizationError::Cancelled)
         );
-        assert!(output.is_empty());
+        assert!(output.is_empty(), "{output:?}");
     }
 
     #[test]

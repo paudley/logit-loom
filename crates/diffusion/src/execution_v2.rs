@@ -672,7 +672,9 @@ pub fn mask_blend_rgb8(
     let overlay_digest = Digest::of_bytes("image-composite-rgb8-input-v1", overlay);
     let mask_digest = Digest::of_bytes("image-composite-gray8-input-v1", mask);
     for (pixel_index, (pixel, mask)) in output
-        .chunks_exact_mut(3)
+        .as_chunks_mut::<3>()
+        .0
+        .iter_mut()
         .zip(mask.iter().copied())
         .enumerate()
     {
