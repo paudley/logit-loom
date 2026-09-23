@@ -44,16 +44,64 @@ pub enum Profile {
     Krea2Turbo,
     /// Z-Image Turbo with Qwen3-4B-Instruct and its own VAE.
     ZImageTurbo,
+    /// Qwen-Image with Qwen2.5-VL-7B-Instruct and its own VAE.
+    QwenImage,
+    /// FLUX.2-dev with Mistral-Small-3.2-24B-Instruct and the FLUX.2 VAE.
+    Flux2Dev,
+    /// FLUX.2-klein-4B with Qwen3-4B and the FLUX.2 VAE.
+    Flux2Klein4b,
+}
+
+/// Latent geometry a profile's VAE produces for its diffusion model.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LatentGeometry {
+    /// Spatial compression from pixels to latent cells on each axis.
+    pub downsample: u32,
+    /// Latent channels per cell.
+    pub channels: u32,
 }
 
 impl Profile {
+    /// Every profile the companion ABI can construct.
+    pub const ALL: [Self; 6] = [
+        Self::MiniT2iB16,
+        Self::Krea2Turbo,
+        Self::ZImageTurbo,
+        Self::QwenImage,
+        Self::Flux2Dev,
+        Self::Flux2Klein4b,
+    ];
+
     /// Returns the catalog profile ID.
     pub const fn id(self) -> &'static str {
         match self {
             Self::MiniT2iB16 => "minit2i-b16",
             Self::Krea2Turbo => "krea-2-turbo",
             Self::ZImageTurbo => "z-image-turbo",
+            Self::QwenImage => "qwen-image",
+            Self::Flux2Dev => "flux2-dev",
+            Self::Flux2Klein4b => "flux2-klein-4b",
         }
+    }
+
+    /// Returns the artifact family token this profile's component media
+    /// types carry, as in `application/vnd.logit-loom.<family>-<role>+<format>`.
+    pub const fn artifact_family(self) -> &'static str {
+        match self {
+            Self::MiniT2iB16 => "minit2i",
+            Self::Krea2Turbo => "krea2",
+            Self::ZImageTurbo => "zimage",
+            Self::QwenImage => "qwenimage",
+            Self::Flux2Dev => "flux2dev",
+            Self::Flux2Klein4b => "flux2klein4b",
+        }
+    }
+
+    /// Returns the profile whose artifact family token is `family`.
+    pub fn from_artifact_family(family: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|profile| profile.artifact_family() == family)
     }
 
     pub(crate) const fn native_id(self) -> i32 {
@@ -61,13 +109,50 @@ impl Profile {
             Self::MiniT2iB16 => crate::ffi::PROFILE_MINIT2I,
             Self::Krea2Turbo => crate::ffi::PROFILE_KREA2,
             Self::ZImageTurbo => crate::ffi::PROFILE_ZIMAGE,
+            Self::QwenImage => crate::ffi::PROFILE_QWEN_IMAGE,
+            Self::Flux2Dev => crate::ffi::PROFILE_FLUX2_DEV,
+            Self::Flux2Klein4b => crate::ffi::PROFILE_FLUX2_KLEIN,
         }
+    }
+
+    /// Returns the latent geometry, or `None` for a direct-RGB profile.
+    ///
+    /// Values are upstream's `get_latent_channel` and VAE scale factor at the
+    /// pinned revision: the FLUX.2 VAE packs 128 channels at 16x, every other
+    /// diffusion transformer here uses 16 channels at 8x.
+    pub const fn latent_geometry(self) -> Option<LatentGeometry> {
+        match self {
+            Self::MiniT2iB16 => None,
+            Self::Krea2Turbo | Self::ZImageTurbo | Self::QwenImage => Some(LatentGeometry {
+                downsample: 8,
+                channels: 16,
+            }),
+            Self::Flux2Dev | Self::Flux2Klein4b => Some(LatentGeometry {
+                downsample: 16,
+                channels: 128,
+            }),
+        }
+    }
+
+    /// Returns whether the profile loads an explicit VAE that direct VAE
+    /// encode and decode operations can address.
+    pub const fn has_explicit_vae(self) -> bool {
+        self.latent_geometry().is_some()
+    }
+
+    /// Returns whether the native companion carries model-block and
+    /// activation mechanics for this profile's diffusion model.
+    ///
+    /// Those hooks are patched into Krea 2's transformer class only; for any
+    /// other model they do not exist to be called.
+    pub const fn has_krea_block_mechanics(self) -> bool {
+        matches!(self, Self::Krea2Turbo)
     }
 
     pub(crate) fn validate_dimensions(self, width: u32, height: u32) -> Result<()> {
         let alignment = match self {
             Self::MiniT2iB16 => 16,
-            Self::Krea2Turbo | Self::ZImageTurbo => 64,
+            _ => 64,
         };
         if width < alignment
             || height < alignment
@@ -82,17 +167,13 @@ impl Profile {
                 self.id()
             )));
         }
-        let elements = match self {
-            Self::MiniT2iB16 => u64::from(width)
-                .checked_mul(u64::from(height))
-                .and_then(|pixels| pixels.checked_mul(3)),
-            // Z-Image shares Krea's 8x spatial compression and 16-channel
-            // latent, so the state element count is computed the same way.
-            Self::Krea2Turbo | Self::ZImageTurbo => u64::from(width / 8)
-                .checked_mul(u64::from(height / 8))
-                .and_then(|pixels| pixels.checked_mul(16)),
-        }
-        .ok_or_else(|| Error::Invalid("profile state element count overflowed".to_owned()))?;
+        let elements = self
+            .state_shape(width, height)
+            .iter()
+            .try_fold(1_u64, |elements, dimension| {
+                elements.checked_mul(*dimension)
+            })
+            .ok_or_else(|| Error::Invalid("profile state element count overflowed".to_owned()))?;
         if elements > MAX_TENSOR_ELEMENTS {
             return Err(Error::Invalid(format!(
                 "{} state has {elements} elements; maximum is {MAX_TENSOR_ELEMENTS}",
@@ -100,6 +181,19 @@ impl Profile {
             )));
         }
         Ok(())
+    }
+
+    /// Returns the exact scheduler-state shape for an image of this size.
+    pub(crate) fn state_shape(self, width: u32, height: u32) -> Vec<u64> {
+        match self.latent_geometry() {
+            None => vec![u64::from(width), u64::from(height), 3, 1],
+            Some(geometry) => vec![
+                u64::from(width / geometry.downsample),
+                u64::from(height / geometry.downsample),
+                u64::from(geometry.channels),
+                1,
+            ],
+        }
     }
 }
 
@@ -113,22 +207,18 @@ pub enum ProfileArtifacts {
         /// FLAN-T5-Large `model.safetensors`.
         text_encoder: PathBuf,
     },
-    /// Z-Image diffusion GGUF, Qwen3-4B-Instruct GGUF, and its own VAE.
-    ZImage {
-        /// `z_image_turbo-Q8_0.gguf`.
+    /// A diffusion transformer, its language-model text encoder, and its VAE.
+    ///
+    /// Each path is verified against the single file the profile's catalog
+    /// source for that role names.
+    Transformer {
+        /// Exact profile the three components belong to.
+        profile: Profile,
+        /// Diffusion model weights.
         diffusion_model: PathBuf,
-        /// `Qwen3-4B-Instruct-2507-Q4_K_M.gguf`.
+        /// Language-model text encoder weights.
         text_encoder: PathBuf,
-        /// Z-Image `vae/diffusion_pytorch_model.safetensors`.
-        vae: PathBuf,
-    },
-    /// Krea diffusion GGUF, Qwen3-VL GGUF, and Wan VAE.
-    Krea2 {
-        /// `Krea-2-Turbo-Q6_K.gguf`.
-        diffusion_model: PathBuf,
-        /// `Qwen3VL-4B-Instruct-Q4_K_M.gguf`.
-        text_encoder: PathBuf,
-        /// `wan_2.1_vae.safetensors`.
+        /// VAE weights.
         vae: PathBuf,
     },
 }
@@ -142,13 +232,39 @@ impl ProfileArtifacts {
         }
     }
 
+    /// Creates the three-component layout for a diffusion-transformer profile.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for a direct-RGB profile, which has no VAE.
+    pub fn transformer(
+        profile: Profile,
+        diffusion_model: impl Into<PathBuf>,
+        text_encoder: impl Into<PathBuf>,
+        vae: impl Into<PathBuf>,
+    ) -> Result<Self> {
+        if !profile.has_explicit_vae() {
+            return Err(Error::Invalid(format!(
+                "{} is not a diffusion-transformer profile with a VAE",
+                profile.id()
+            )));
+        }
+        Ok(Self::Transformer {
+            profile,
+            diffusion_model: diffusion_model.into(),
+            text_encoder: text_encoder.into(),
+            vae: vae.into(),
+        })
+    }
+
     /// Creates the exact Z-Image Turbo component layout.
     pub fn z_image(
         diffusion_model: impl Into<PathBuf>,
         text_encoder: impl Into<PathBuf>,
         vae: impl Into<PathBuf>,
     ) -> Self {
-        Self::ZImage {
+        Self::Transformer {
+            profile: Profile::ZImageTurbo,
             diffusion_model: diffusion_model.into(),
             text_encoder: text_encoder.into(),
             vae: vae.into(),
@@ -161,7 +277,8 @@ impl ProfileArtifacts {
         text_encoder: impl Into<PathBuf>,
         vae: impl Into<PathBuf>,
     ) -> Self {
-        Self::Krea2 {
+        Self::Transformer {
+            profile: Profile::Krea2Turbo,
             diffusion_model: diffusion_model.into(),
             text_encoder: text_encoder.into(),
             vae: vae.into(),
@@ -172,8 +289,7 @@ impl ProfileArtifacts {
     pub const fn profile(&self) -> Profile {
         match self {
             Self::MiniT2i { .. } => Profile::MiniT2iB16,
-            Self::Krea2 { .. } => Profile::Krea2Turbo,
-            Self::ZImage { .. } => Profile::ZImageTurbo,
+            Self::Transformer { profile, .. } => *profile,
         }
     }
 
@@ -182,10 +298,7 @@ impl ProfileArtifacts {
             Self::MiniT2i {
                 diffusion_model, ..
             }
-            | Self::Krea2 {
-                diffusion_model, ..
-            }
-            | Self::ZImage {
+            | Self::Transformer {
                 diffusion_model, ..
             } => diffusion_model,
         }
@@ -193,16 +306,16 @@ impl ProfileArtifacts {
 
     pub(crate) fn text_encoder(&self) -> &Path {
         match self {
-            Self::MiniT2i { text_encoder, .. }
-            | Self::Krea2 { text_encoder, .. }
-            | Self::ZImage { text_encoder, .. } => text_encoder,
+            Self::MiniT2i { text_encoder, .. } | Self::Transformer { text_encoder, .. } => {
+                text_encoder
+            }
         }
     }
 
     pub(crate) fn vae(&self) -> Option<&Path> {
         match self {
             Self::MiniT2i { .. } => None,
-            Self::Krea2 { vae, .. } | Self::ZImage { vae, .. } => Some(vae),
+            Self::Transformer { vae, .. } => Some(vae),
         }
     }
 }
@@ -1070,6 +1183,53 @@ fn validate_backend(label: &str, value: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn profiles_round_trip_their_artifact_family_and_declare_geometry() {
+        for profile in Profile::ALL {
+            assert_eq!(
+                Profile::from_artifact_family(profile.artifact_family()),
+                Some(profile)
+            );
+        }
+        assert_eq!(Profile::from_artifact_family("sana"), None);
+        assert_eq!(
+            Profile::Flux2Dev.state_shape(1024, 1024),
+            vec![64, 64, 128, 1]
+        );
+        assert_eq!(
+            Profile::QwenImage.state_shape(1024, 768),
+            vec![128, 96, 16, 1]
+        );
+        assert_eq!(
+            Profile::MiniT2iB16.state_shape(256, 256),
+            vec![256, 256, 3, 1]
+        );
+        assert!(
+            Profile::Flux2Klein4b
+                .validate_dimensions(1024, 1024)
+                .is_ok()
+        );
+        assert!(
+            Profile::Flux2Klein4b
+                .validate_dimensions(1000, 1024)
+                .is_err()
+        );
+        assert!(Profile::Krea2Turbo.has_krea_block_mechanics());
+        assert!(
+            Profile::ALL
+                .into_iter()
+                .filter(|profile| *profile != Profile::Krea2Turbo)
+                .all(|profile| !profile.has_krea_block_mechanics())
+        );
+        assert!(ProfileArtifacts::transformer(Profile::MiniT2iB16, "d", "t", "v").is_err());
+        assert_eq!(
+            ProfileArtifacts::transformer(Profile::ZImageTurbo, "d", "t", "v")
+                .unwrap()
+                .profile(),
+            Profile::ZImageTurbo
+        );
+    }
 
     #[test]
     fn request_rejects_internal_zero_sigma_and_oversized_seed() {

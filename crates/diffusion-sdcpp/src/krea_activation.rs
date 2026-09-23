@@ -5,21 +5,21 @@
 use std::{collections::HashMap, ffi::c_void, str::FromStr};
 
 use logit_loom_diffusion::{
-    ActivationStatisticsV1, Digest, KreaActivationApplicationV1, KreaActivationBoundaryKindV1,
-    KreaActivationBoundaryV1, KreaActivationCaptureReceiptV1, KreaActivationCaptureRetentionV1,
-    KreaActivationCleanupDispositionV1, KreaActivationElementTypeV1, KreaActivationInputKindV1,
-    KreaActivationInputMeasurementV1, KreaActivationInputSourceV1, KreaActivationLayoutV1,
-    KreaActivationMeasurementsV1, KreaActivationOperatorV1, KreaActivationPlanV1,
-    KreaActivationReceiptV1, KreaActivationSiteKindV1, KreaActivationSiteV1,
-    KreaActivationTerminalV1, KreaActivationTopologyV1, KreaCfgBranchV1, KreaTokenDomainKindV1,
-    KreaTokenDomainV1, KreaTokenSelectionV1, KreaVectorRepresentationV1,
-    MAX_KREA_ACTIVATION_ELEMENTS, MAX_KREA_ACTIVATION_SITES, StepSelector,
+    ActivationMechanicsAbsentV1, ActivationStatisticsV1, Digest, KreaActivationApplicationV1,
+    KreaActivationBoundaryKindV1, KreaActivationBoundaryV1, KreaActivationCaptureReceiptV1,
+    KreaActivationCaptureRetentionV1, KreaActivationCleanupDispositionV1,
+    KreaActivationElementTypeV1, KreaActivationInputKindV1, KreaActivationInputMeasurementV1,
+    KreaActivationInputSourceV1, KreaActivationLayoutV1, KreaActivationMeasurementsV1,
+    KreaActivationOperatorV1, KreaActivationPlanV1, KreaActivationReceiptV1,
+    KreaActivationSiteKindV1, KreaActivationSiteV1, KreaActivationTerminalV1,
+    KreaActivationTopologyV1, KreaCfgBranchV1, KreaTokenDomainKindV1, KreaTokenDomainV1,
+    KreaTokenSelectionV1, KreaVectorRepresentationV1, MAX_KREA_ACTIVATION_ELEMENTS,
+    MAX_KREA_ACTIVATION_SITES, StepSelector,
 };
 use logit_loom_executor::ExecutorState;
 
 use crate::{
-    ADAPTER_CONTRACT_VERSION, Error, KREA_ACTIVATION_ABI_VERSION, Profile, Result, Sdcpp,
-    UPSTREAM_COMMIT,
+    ADAPTER_CONTRACT_VERSION, Error, KREA_ACTIVATION_ABI_VERSION, Result, Sdcpp, UPSTREAM_COMMIT,
     ffi::{
         self, KreaApplicationResultV6, KreaBoundarySelectionV6, KreaCaptureResultV6, KreaCaptureV6,
         KreaInputDescriptionV6, KreaInputHandleV6, KreaInputV6, KreaOperationV6, KreaSiteV6,
@@ -79,7 +79,7 @@ impl Sdcpp {
                 "Krea topology requires a resident runtime".to_owned(),
             ));
         }
-        if self.profile != Profile::Krea2Turbo {
+        if !self.profile.has_krea_block_mechanics() {
             return Err(Error::Incompatible(
                 "Krea activation mechanics require the Krea profile".to_owned(),
             ));
@@ -138,6 +138,52 @@ impl Sdcpp {
             .digest()
             .map_err(logit_loom_diffusion::Error::from)?;
         Ok(topology)
+    }
+}
+
+impl Sdcpp {
+    /// States that the resident model carries no activation mechanics.
+    ///
+    /// Activation topology is published by hooks patched into Krea 2's
+    /// transformer; other models have none. This record takes the topology's
+    /// place in resident evidence and binds the exact loaded model and
+    /// backend, so the absence is attributable rather than silent.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error unless the runtime is resident, or when the loaded
+    /// profile does carry activation mechanics and must publish its topology.
+    pub fn activation_mechanics_absent(
+        &self,
+        model: Digest,
+    ) -> Result<ActivationMechanicsAbsentV1> {
+        if self.state != ExecutorState::Resident {
+            return Err(Error::Invalid(
+                "activation evidence requires a resident runtime".to_owned(),
+            ));
+        }
+        if self.profile.has_krea_block_mechanics() {
+            return Err(Error::Incompatible(
+                "a profile with Krea block mechanics publishes its activation topology".to_owned(),
+            ));
+        }
+        let backend = Digest::of_serializable(
+            "sdcpp-activation-absent-backend-v1",
+            &(
+                ADAPTER_CONTRACT_VERSION,
+                UPSTREAM_COMMIT,
+                self.execution_bindings()?,
+                self.native_receipt(),
+            ),
+        )
+        .map_err(logit_loom_diffusion::Error::from)?;
+        let absent = ActivationMechanicsAbsentV1 {
+            profile: self.profile.id().to_owned(),
+            model,
+            backend,
+        };
+        absent.digest().map_err(logit_loom_diffusion::Error::from)?;
+        Ok(absent)
     }
 }
 

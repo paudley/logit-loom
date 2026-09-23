@@ -8,6 +8,7 @@ mod error;
 mod execution;
 mod execution_v2;
 mod execution_v3;
+mod flow_schedule;
 mod image_program;
 mod krea_activation;
 mod krea_schedule;
@@ -37,6 +38,7 @@ pub use execution_v2::{
     MAX_IMAGE_COMPOSITE_STAGES, MAX_IMAGE_GRAPH_SCRATCH_BYTES, mask_blend_rgb8,
 };
 pub use execution_v3::{ImageExecutionPlanV3, ImageExecutionReceiptV3, ImageOutputReceiptV3};
+pub use flow_schedule::{FlowMatchScheduleV1, FlowScheduleFamilyV1};
 pub use image_program::{
     ImageOpaqueValueKindV1, ImagePngColorV1, ImageProgramCleanupDispositionV1,
     ImageProgramInputBindingV1, ImageProgramInputV1, ImageProgramLivenessV1, ImageProgramLoraV1,

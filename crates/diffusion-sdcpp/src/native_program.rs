@@ -3046,10 +3046,10 @@ fn validate_native_stage(
     if matches!(
         stage.operation,
         ImageOperation::VaeEncode | ImageOperation::VaeDecode
-    ) && runtime.profile != crate::Profile::Krea2Turbo
+    ) && !runtime.profile.has_explicit_vae()
     {
         return Err(Error::Invalid(
-            "direct resident VAE operations require the Krea profile".to_owned(),
+            "direct resident VAE operations require a profile with an explicit VAE".to_owned(),
         ));
     }
     for input in &stage.inputs {
@@ -3068,12 +3068,13 @@ fn validate_native_stage(
     for operator in &stage.operators {
         match &operator.selector {
             TensorSelector::SchedulerState => {}
-            TensorSelector::ModelBlock { .. } if runtime.profile == crate::Profile::Krea2Turbo => {
+            TensorSelector::ModelBlock { .. } if runtime.profile.has_krea_block_mechanics() => {
                 InstalledModelBlockResidualScale::from_invocation(operator)?;
             }
             TensorSelector::ModelBlock { .. } => {
                 return Err(Error::Invalid(
-                    "resident model-block operators require the Krea profile".to_owned(),
+                    "resident model-block operators require a profile with Krea block mechanics"
+                        .to_owned(),
                 ));
             }
             TensorSelector::Conditioning { .. } => {

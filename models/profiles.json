@@ -216,6 +216,165 @@
           ]
         }
       ]
+    },
+    {
+      "id": "qwen-image",
+      "display_name": "Qwen-Image",
+      "modality": "image",
+      "role": "advanced",
+      "integration_status": "catalogued",
+      "acceptance_status": "not-run",
+      "adapter_target": "diffusion",
+      "requires_accelerator": true,
+      "remote_code_policy": "forbidden",
+      "notes": "Bakeoff quality candidate. Diffusion GGUF, Qwen2.5-VL-7B-Instruct GGUF text encoder, and its own VAE. Upstream documents cfg 2.5 under the discrete-flow schedule at shift 3.",
+      "sources": [
+        {
+          "id": "qwen-image-q8-0",
+          "repository": "QuantStack/Qwen-Image-GGUF",
+          "revision": "257f261fa92593bed760aa6fa3f7921a49fea00f",
+          "local_subdir": "diffusion",
+          "files": [
+            {
+              "path": "Qwen_Image-Q8_0.gguf",
+              "bytes": 21761817120,
+              "sha256": "43142b32778dc0568c27395abc6f8291ac53f1de0b98eed919712cf161f248de"
+            }
+          ]
+        },
+        {
+          "id": "qwen2.5-vl-7b-text-encoder",
+          "repository": "mradermacher/Qwen2.5-VL-7B-Instruct-GGUF",
+          "revision": "cfa2baa09946b211c107e6e104948987a64dd2c1",
+          "local_subdir": "text-encoder",
+          "files": [
+            {
+              "path": "Qwen2.5-VL-7B-Instruct.Q4_K_M.gguf",
+              "bytes": 4683072512,
+              "sha256": "0f00a930ba3108b6861ddadf74d8ebbd82e257c63eba728e62c3e8970f5eed94"
+            }
+          ]
+        },
+        {
+          "id": "qwen-image-vae",
+          "repository": "Comfy-Org/Qwen-Image_ComfyUI",
+          "revision": "1f12b17be14c89b026c51a91d67c32f84bb047bc",
+          "local_subdir": "vae",
+          "files": [
+            {
+              "path": "split_files/vae/qwen_image_vae.safetensors",
+              "bytes": 253806246,
+              "sha256": "a70580f0213e67967ee9c95f05bb400e8fb08307e017a924bf3441223e023d1f"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "flux2-dev",
+      "display_name": "FLUX.2-dev",
+      "modality": "image",
+      "role": "advanced",
+      "integration_status": "catalogued",
+      "acceptance_status": "not-run",
+      "adapter_target": "diffusion",
+      "requires_accelerator": true,
+      "remote_code_policy": "forbidden",
+      "notes": "Bakeoff quality candidate. Guidance-distilled diffusion GGUF, Mistral-Small-3.2-24B-Instruct GGUF text encoder, and the FLUX.2 VAE. Upstream documents cfg 1.0 with distilled guidance 3.5 under the FLUX.2 empirical schedule.",
+      "sources": [
+        {
+          "id": "flux2-dev-q4-k-m",
+          "repository": "city96/FLUX.2-dev-gguf",
+          "revision": "ade5d688ddab0d9cf4a5b01bf4321e01c115020d",
+          "local_subdir": "diffusion",
+          "files": [
+            {
+              "path": "flux2-dev-Q4_K_M.gguf",
+              "bytes": 20082414560,
+              "sha256": "fca680c7b221a713b5cf7db6cf6b33474875320ee61f4c585bc33fe391dab9a6"
+            }
+          ]
+        },
+        {
+          "id": "mistral-small-3.2-24b-text-encoder",
+          "repository": "unsloth/Mistral-Small-3.2-24B-Instruct-2506-GGUF",
+          "revision": "b750ec2299225e492f1bd27cab88a0a595fa848f",
+          "local_subdir": "text-encoder",
+          "files": [
+            {
+              "path": "Mistral-Small-3.2-24B-Instruct-2506-Q4_K_M.gguf",
+              "bytes": 14333922848,
+              "sha256": "a3cc56310807ed0d145eaf9f018ccda9ae7ad8edb41ec870aa2454b0d4700b3c"
+            }
+          ]
+        },
+        {
+          "id": "flux2-vae",
+          "repository": "Comfy-Org/flux2-dev",
+          "revision": "ed33133cd56476eac818c0943b6f9419b3e4a3a1",
+          "local_subdir": "vae",
+          "files": [
+            {
+              "path": "split_files/vae/flux2-vae.safetensors",
+              "bytes": 336213556,
+              "sha256": "d64f3a68e1cc4f9f4e29b6e0da38a0204fe9a49f2d4053f0ec1fa1ca02f9c4b5"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "flux2-klein-4b",
+      "display_name": "FLUX.2-klein-4B",
+      "modality": "image",
+      "role": "advanced",
+      "integration_status": "catalogued",
+      "acceptance_status": "not-run",
+      "adapter_target": "diffusion",
+      "requires_accelerator": true,
+      "remote_code_policy": "forbidden",
+      "notes": "Bakeoff speed candidate. Distilled 4B diffusion GGUF, Qwen3-4B GGUF text encoder, and the FLUX.2 VAE. Upstream documents 4 steps at cfg 1.0 under the FLUX.2 empirical schedule.",
+      "sources": [
+        {
+          "id": "flux2-klein-4b-q8-0",
+          "repository": "leejet/FLUX.2-klein-4B-GGUF",
+          "revision": "3b1f5a9dc3abb32238b053aeb3d823c30afdacbd",
+          "local_subdir": "diffusion",
+          "files": [
+            {
+              "path": "flux-2-klein-4b-Q8_0.gguf",
+              "bytes": 4300629440,
+              "sha256": "0bba6951258ec8f92d51114a8fa13e66828297bfff58a738f52729b3ef66fa28"
+            }
+          ]
+        },
+        {
+          "id": "qwen3-4b-text-encoder",
+          "repository": "unsloth/Qwen3-4B-GGUF",
+          "revision": "22c9fc8a8c7700b76a1789366280a6a5a1ad1120",
+          "local_subdir": "text-encoder",
+          "files": [
+            {
+              "path": "Qwen3-4B-Q4_K_M.gguf",
+              "bytes": 2497281312,
+              "sha256": "f6f851777709861056efcdad3af01da38b31223a3ba26e61a4f8bf3a2195813a"
+            }
+          ]
+        },
+        {
+          "id": "flux2-vae",
+          "repository": "Comfy-Org/flux2-dev",
+          "revision": "ed33133cd56476eac818c0943b6f9419b3e4a3a1",
+          "local_subdir": "vae",
+          "files": [
+            {
+              "path": "split_files/vae/flux2-vae.safetensors",
+              "bytes": 336213556,
+              "sha256": "d64f3a68e1cc4f9f4e29b6e0da38a0204fe9a49f2d4053f0ec1fa1ca02f9c4b5"
+            }
+          ]
+        }
+      ]
     }
   ]
 }

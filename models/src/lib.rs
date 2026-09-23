@@ -862,7 +862,7 @@ mod tests {
         let catalog = Catalog::embedded().expect("packaged catalog should be valid");
         assert_eq!(catalog.schema_version(), 1);
         assert_eq!(catalog.default_profiles().len(), 3);
-        assert_eq!(catalog.profiles().len(), 4);
+        assert_eq!(catalog.profiles().len(), 7);
         assert!(
             catalog
                 .find_profile(QWEN3_SMALL_PROFILE_ID)

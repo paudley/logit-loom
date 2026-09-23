@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
   "identity_domain": "logit-loom-model-acquisition-report-v1",
-  "catalog_sha256": "a04bb4eb9e8f87a88d2adf199edc1b40be17f7dd955d6ed047c87a57c74e5199",
-  "recorded_at_utc": "2026-09-23T11:46:40Z",
+  "catalog_sha256": "e020915f46fe4f12471758d4f848093213f755a037affb5974b7b4e88fe27051",
+  "recorded_at_utc": "2026-09-23T12:23:38Z",
   "hf_cli_version": "1.4.1",
-  "filesystem_available_bytes": 314536570880,
+  "filesystem_available_bytes": 310796193792,
   "profiles": [
     {
       "profile_id": "qwen3-0.6b-q8-0",
@@ -16,7 +16,7 @@
       "verified_artifacts": [
         {
           "catalog_domain": "logit-loom-model-catalog-v1",
-          "catalog_sha256": "a04bb4eb9e8f87a88d2adf199edc1b40be17f7dd955d6ed047c87a57c74e5199",
+          "catalog_sha256": "e020915f46fe4f12471758d4f848093213f755a037affb5974b7b4e88fe27051",
           "profile_id": "qwen3-0.6b-q8-0",
           "source_id": "qwen3-gguf",
           "repository": "Qwen/Qwen3-0.6B-GGUF",
@@ -38,7 +38,7 @@
       "verified_artifacts": [
         {
           "catalog_domain": "logit-loom-model-catalog-v1",
-          "catalog_sha256": "a04bb4eb9e8f87a88d2adf199edc1b40be17f7dd955d6ed047c87a57c74e5199",
+          "catalog_sha256": "e020915f46fe4f12471758d4f848093213f755a037affb5974b7b4e88fe27051",
           "profile_id": "minit2i-b16",
           "source_id": "minit2i",
           "repository": "MiniT2I/MiniT2I",
@@ -49,7 +49,7 @@
         },
         {
           "catalog_domain": "logit-loom-model-catalog-v1",
-          "catalog_sha256": "a04bb4eb9e8f87a88d2adf199edc1b40be17f7dd955d6ed047c87a57c74e5199",
+          "catalog_sha256": "e020915f46fe4f12471758d4f848093213f755a037affb5974b7b4e88fe27051",
           "profile_id": "minit2i-b16",
           "source_id": "minit2i",
           "repository": "MiniT2I/MiniT2I",
@@ -60,7 +60,7 @@
         },
         {
           "catalog_domain": "logit-loom-model-catalog-v1",
-          "catalog_sha256": "a04bb4eb9e8f87a88d2adf199edc1b40be17f7dd955d6ed047c87a57c74e5199",
+          "catalog_sha256": "e020915f46fe4f12471758d4f848093213f755a037affb5974b7b4e88fe27051",
           "profile_id": "minit2i-b16",
           "source_id": "minit2i",
           "repository": "MiniT2I/MiniT2I",
@@ -71,7 +71,7 @@
         },
         {
           "catalog_domain": "logit-loom-model-catalog-v1",
-          "catalog_sha256": "a04bb4eb9e8f87a88d2adf199edc1b40be17f7dd955d6ed047c87a57c74e5199",
+          "catalog_sha256": "e020915f46fe4f12471758d4f848093213f755a037affb5974b7b4e88fe27051",
           "profile_id": "minit2i-b16",
           "source_id": "minit2i",
           "repository": "MiniT2I/MiniT2I",
@@ -82,7 +82,7 @@
         },
         {
           "catalog_domain": "logit-loom-model-catalog-v1",
-          "catalog_sha256": "a04bb4eb9e8f87a88d2adf199edc1b40be17f7dd955d6ed047c87a57c74e5199",
+          "catalog_sha256": "e020915f46fe4f12471758d4f848093213f755a037affb5974b7b4e88fe27051",
           "profile_id": "minit2i-b16",
           "source_id": "flan-t5-large",
           "repository": "google/flan-t5-large",
@@ -93,7 +93,7 @@
         },
         {
           "catalog_domain": "logit-loom-model-catalog-v1",
-          "catalog_sha256": "a04bb4eb9e8f87a88d2adf199edc1b40be17f7dd955d6ed047c87a57c74e5199",
+          "catalog_sha256": "e020915f46fe4f12471758d4f848093213f755a037affb5974b7b4e88fe27051",
           "profile_id": "minit2i-b16",
           "source_id": "flan-t5-large",
           "repository": "google/flan-t5-large",
@@ -104,7 +104,7 @@
         },
         {
           "catalog_domain": "logit-loom-model-catalog-v1",
-          "catalog_sha256": "a04bb4eb9e8f87a88d2adf199edc1b40be17f7dd955d6ed047c87a57c74e5199",
+          "catalog_sha256": "e020915f46fe4f12471758d4f848093213f755a037affb5974b7b4e88fe27051",
           "profile_id": "minit2i-b16",
           "source_id": "flan-t5-large",
           "repository": "google/flan-t5-large",
@@ -115,7 +115,7 @@
         },
         {
           "catalog_domain": "logit-loom-model-catalog-v1",
-          "catalog_sha256": "a04bb4eb9e8f87a88d2adf199edc1b40be17f7dd955d6ed047c87a57c74e5199",
+          "catalog_sha256": "e020915f46fe4f12471758d4f848093213f755a037affb5974b7b4e88fe27051",
           "profile_id": "minit2i-b16",
           "source_id": "flan-t5-large",
           "repository": "google/flan-t5-large",
@@ -126,7 +126,7 @@
         },
         {
           "catalog_domain": "logit-loom-model-catalog-v1",
-          "catalog_sha256": "a04bb4eb9e8f87a88d2adf199edc1b40be17f7dd955d6ed047c87a57c74e5199",
+          "catalog_sha256": "e020915f46fe4f12471758d4f848093213f755a037affb5974b7b4e88fe27051",
           "profile_id": "minit2i-b16",
           "source_id": "flan-t5-large",
           "repository": "google/flan-t5-large",
@@ -137,7 +137,7 @@
         },
         {
           "catalog_domain": "logit-loom-model-catalog-v1",
-          "catalog_sha256": "a04bb4eb9e8f87a88d2adf199edc1b40be17f7dd955d6ed047c87a57c74e5199",
+          "catalog_sha256": "e020915f46fe4f12471758d4f848093213f755a037affb5974b7b4e88fe27051",
           "profile_id": "minit2i-b16",
           "source_id": "flan-t5-large",
           "repository": "google/flan-t5-large",
@@ -148,7 +148,7 @@
         },
         {
           "catalog_domain": "logit-loom-model-catalog-v1",
-          "catalog_sha256": "a04bb4eb9e8f87a88d2adf199edc1b40be17f7dd955d6ed047c87a57c74e5199",
+          "catalog_sha256": "e020915f46fe4f12471758d4f848093213f755a037affb5974b7b4e88fe27051",
           "profile_id": "minit2i-b16",
           "source_id": "flan-t5-large",
           "repository": "google/flan-t5-large",
@@ -170,7 +170,7 @@
       "verified_artifacts": [
         {
           "catalog_domain": "logit-loom-model-catalog-v1",
-          "catalog_sha256": "a04bb4eb9e8f87a88d2adf199edc1b40be17f7dd955d6ed047c87a57c74e5199",
+          "catalog_sha256": "e020915f46fe4f12471758d4f848093213f755a037affb5974b7b4e88fe27051",
           "profile_id": "krea-2-turbo",
           "source_id": "krea-2-turbo-q6-k",
           "repository": "realrebelai/KREA-2_GGUFs",
@@ -181,7 +181,7 @@
         },
         {
           "catalog_domain": "logit-loom-model-catalog-v1",
-          "catalog_sha256": "a04bb4eb9e8f87a88d2adf199edc1b40be17f7dd955d6ed047c87a57c74e5199",
+          "catalog_sha256": "e020915f46fe4f12471758d4f848093213f755a037affb5974b7b4e88fe27051",
           "profile_id": "krea-2-turbo",
           "source_id": "qwen3-vl-text-encoder",
           "repository": "Qwen/Qwen3-VL-4B-Instruct-GGUF",
@@ -192,7 +192,7 @@
         },
         {
           "catalog_domain": "logit-loom-model-catalog-v1",
-          "catalog_sha256": "a04bb4eb9e8f87a88d2adf199edc1b40be17f7dd955d6ed047c87a57c74e5199",
+          "catalog_sha256": "e020915f46fe4f12471758d4f848093213f755a037affb5974b7b4e88fe27051",
           "profile_id": "krea-2-turbo",
           "source_id": "wan-2.1-vae",
           "repository": "Comfy-Org/Wan_2.1_ComfyUI_repackaged",
@@ -214,7 +214,7 @@
       "verified_artifacts": [
         {
           "catalog_domain": "logit-loom-model-catalog-v1",
-          "catalog_sha256": "a04bb4eb9e8f87a88d2adf199edc1b40be17f7dd955d6ed047c87a57c74e5199",
+          "catalog_sha256": "e020915f46fe4f12471758d4f848093213f755a037affb5974b7b4e88fe27051",
           "profile_id": "z-image-turbo",
           "source_id": "z-image-turbo-q8-0",
           "repository": "leejet/Z-Image-Turbo-GGUF",
@@ -225,7 +225,7 @@
         },
         {
           "catalog_domain": "logit-loom-model-catalog-v1",
-          "catalog_sha256": "a04bb4eb9e8f87a88d2adf199edc1b40be17f7dd955d6ed047c87a57c74e5199",
+          "catalog_sha256": "e020915f46fe4f12471758d4f848093213f755a037affb5974b7b4e88fe27051",
           "profile_id": "z-image-turbo",
           "source_id": "qwen3-4b-instruct-text-encoder",
           "repository": "unsloth/Qwen3-4B-Instruct-2507-GGUF",
@@ -236,7 +236,7 @@
         },
         {
           "catalog_domain": "logit-loom-model-catalog-v1",
-          "catalog_sha256": "a04bb4eb9e8f87a88d2adf199edc1b40be17f7dd955d6ed047c87a57c74e5199",
+          "catalog_sha256": "e020915f46fe4f12471758d4f848093213f755a037affb5974b7b4e88fe27051",
           "profile_id": "z-image-turbo",
           "source_id": "z-image-vae",
           "repository": "Tongyi-MAI/Z-Image-Turbo",
@@ -244,6 +244,138 @@
           "artifact_path": "vae/diffusion_pytorch_model.safetensors",
           "bytes": 167666902,
           "sha256": "f5b59a26851551b67ae1fe58d32e76486e1e812def4696a4bea97f16604d40a3"
+        }
+      ],
+      "pending_artifacts": []
+    },
+    {
+      "profile_id": "qwen-image",
+      "method": "existing-local-artifacts",
+      "status": "verified",
+      "catalog_artifact_bytes": 26698695878,
+      "verified_artifact_bytes": 26698695878,
+      "measured_profile_storage_bytes": null,
+      "verified_artifacts": [
+        {
+          "catalog_domain": "logit-loom-model-catalog-v1",
+          "catalog_sha256": "e020915f46fe4f12471758d4f848093213f755a037affb5974b7b4e88fe27051",
+          "profile_id": "qwen-image",
+          "source_id": "qwen-image-q8-0",
+          "repository": "QuantStack/Qwen-Image-GGUF",
+          "revision": "257f261fa92593bed760aa6fa3f7921a49fea00f",
+          "artifact_path": "Qwen_Image-Q8_0.gguf",
+          "bytes": 21761817120,
+          "sha256": "43142b32778dc0568c27395abc6f8291ac53f1de0b98eed919712cf161f248de"
+        },
+        {
+          "catalog_domain": "logit-loom-model-catalog-v1",
+          "catalog_sha256": "e020915f46fe4f12471758d4f848093213f755a037affb5974b7b4e88fe27051",
+          "profile_id": "qwen-image",
+          "source_id": "qwen2.5-vl-7b-text-encoder",
+          "repository": "mradermacher/Qwen2.5-VL-7B-Instruct-GGUF",
+          "revision": "cfa2baa09946b211c107e6e104948987a64dd2c1",
+          "artifact_path": "Qwen2.5-VL-7B-Instruct.Q4_K_M.gguf",
+          "bytes": 4683072512,
+          "sha256": "0f00a930ba3108b6861ddadf74d8ebbd82e257c63eba728e62c3e8970f5eed94"
+        },
+        {
+          "catalog_domain": "logit-loom-model-catalog-v1",
+          "catalog_sha256": "e020915f46fe4f12471758d4f848093213f755a037affb5974b7b4e88fe27051",
+          "profile_id": "qwen-image",
+          "source_id": "qwen-image-vae",
+          "repository": "Comfy-Org/Qwen-Image_ComfyUI",
+          "revision": "1f12b17be14c89b026c51a91d67c32f84bb047bc",
+          "artifact_path": "split_files/vae/qwen_image_vae.safetensors",
+          "bytes": 253806246,
+          "sha256": "a70580f0213e67967ee9c95f05bb400e8fb08307e017a924bf3441223e023d1f"
+        }
+      ],
+      "pending_artifacts": []
+    },
+    {
+      "profile_id": "flux2-dev",
+      "method": "existing-local-artifacts",
+      "status": "verified",
+      "catalog_artifact_bytes": 34752550964,
+      "verified_artifact_bytes": 34752550964,
+      "measured_profile_storage_bytes": null,
+      "verified_artifacts": [
+        {
+          "catalog_domain": "logit-loom-model-catalog-v1",
+          "catalog_sha256": "e020915f46fe4f12471758d4f848093213f755a037affb5974b7b4e88fe27051",
+          "profile_id": "flux2-dev",
+          "source_id": "flux2-dev-q4-k-m",
+          "repository": "city96/FLUX.2-dev-gguf",
+          "revision": "ade5d688ddab0d9cf4a5b01bf4321e01c115020d",
+          "artifact_path": "flux2-dev-Q4_K_M.gguf",
+          "bytes": 20082414560,
+          "sha256": "fca680c7b221a713b5cf7db6cf6b33474875320ee61f4c585bc33fe391dab9a6"
+        },
+        {
+          "catalog_domain": "logit-loom-model-catalog-v1",
+          "catalog_sha256": "e020915f46fe4f12471758d4f848093213f755a037affb5974b7b4e88fe27051",
+          "profile_id": "flux2-dev",
+          "source_id": "mistral-small-3.2-24b-text-encoder",
+          "repository": "unsloth/Mistral-Small-3.2-24B-Instruct-2506-GGUF",
+          "revision": "b750ec2299225e492f1bd27cab88a0a595fa848f",
+          "artifact_path": "Mistral-Small-3.2-24B-Instruct-2506-Q4_K_M.gguf",
+          "bytes": 14333922848,
+          "sha256": "a3cc56310807ed0d145eaf9f018ccda9ae7ad8edb41ec870aa2454b0d4700b3c"
+        },
+        {
+          "catalog_domain": "logit-loom-model-catalog-v1",
+          "catalog_sha256": "e020915f46fe4f12471758d4f848093213f755a037affb5974b7b4e88fe27051",
+          "profile_id": "flux2-dev",
+          "source_id": "flux2-vae",
+          "repository": "Comfy-Org/flux2-dev",
+          "revision": "ed33133cd56476eac818c0943b6f9419b3e4a3a1",
+          "artifact_path": "split_files/vae/flux2-vae.safetensors",
+          "bytes": 336213556,
+          "sha256": "d64f3a68e1cc4f9f4e29b6e0da38a0204fe9a49f2d4053f0ec1fa1ca02f9c4b5"
+        }
+      ],
+      "pending_artifacts": []
+    },
+    {
+      "profile_id": "flux2-klein-4b",
+      "method": "existing-local-artifacts",
+      "status": "verified",
+      "catalog_artifact_bytes": 7134124308,
+      "verified_artifact_bytes": 7134124308,
+      "measured_profile_storage_bytes": null,
+      "verified_artifacts": [
+        {
+          "catalog_domain": "logit-loom-model-catalog-v1",
+          "catalog_sha256": "e020915f46fe4f12471758d4f848093213f755a037affb5974b7b4e88fe27051",
+          "profile_id": "flux2-klein-4b",
+          "source_id": "flux2-klein-4b-q8-0",
+          "repository": "leejet/FLUX.2-klein-4B-GGUF",
+          "revision": "3b1f5a9dc3abb32238b053aeb3d823c30afdacbd",
+          "artifact_path": "flux-2-klein-4b-Q8_0.gguf",
+          "bytes": 4300629440,
+          "sha256": "0bba6951258ec8f92d51114a8fa13e66828297bfff58a738f52729b3ef66fa28"
+        },
+        {
+          "catalog_domain": "logit-loom-model-catalog-v1",
+          "catalog_sha256": "e020915f46fe4f12471758d4f848093213f755a037affb5974b7b4e88fe27051",
+          "profile_id": "flux2-klein-4b",
+          "source_id": "qwen3-4b-text-encoder",
+          "repository": "unsloth/Qwen3-4B-GGUF",
+          "revision": "22c9fc8a8c7700b76a1789366280a6a5a1ad1120",
+          "artifact_path": "Qwen3-4B-Q4_K_M.gguf",
+          "bytes": 2497281312,
+          "sha256": "f6f851777709861056efcdad3af01da38b31223a3ba26e61a4f8bf3a2195813a"
+        },
+        {
+          "catalog_domain": "logit-loom-model-catalog-v1",
+          "catalog_sha256": "e020915f46fe4f12471758d4f848093213f755a037affb5974b7b4e88fe27051",
+          "profile_id": "flux2-klein-4b",
+          "source_id": "flux2-vae",
+          "repository": "Comfy-Org/flux2-dev",
+          "revision": "ed33133cd56476eac818c0943b6f9419b3e4a3a1",
+          "artifact_path": "split_files/vae/flux2-vae.safetensors",
+          "bytes": 336213556,
+          "sha256": "d64f3a68e1cc4f9f4e29b6e0da38a0204fe9a49f2d4053f0ec1fa1ca02f9c4b5"
         }
       ],
       "pending_artifacts": []

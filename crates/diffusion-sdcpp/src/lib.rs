@@ -20,7 +20,7 @@ pub use contract::{
     BoundaryControl, BoundaryReceipt, CompanionReceipt, ContinueControl,
     ControlledGenerationOutput, ControlledGenerationReceipt, DiffusionCheckpoint,
     GenerationMeasurements, GenerationOutput, GenerationReceipt, ImageExecutionBindings,
-    ImageOutputSink, ImageRequest, ImageRequestReceipt, MAX_BACKEND_LABEL_BYTES,
+    ImageOutputSink, ImageRequest, ImageRequestReceipt, LatentGeometry, MAX_BACKEND_LABEL_BYTES,
     MAX_CHECKPOINT_ENVELOPE_BYTES, MAX_CHECKPOINT_RECEIPT_BYTES, MAX_CHECKPOINT_STATE_BYTES,
     MAX_IMAGE_DIMENSION, MAX_PROMPT_BYTES, NativeRuntimeReceipt, NoopProgram, Profile,
     ProfileArtifacts, ProfileReceipt, SdcppOptions, StepProgram, StepReceipt,

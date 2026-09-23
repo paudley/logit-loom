@@ -1257,7 +1257,7 @@ impl Sdcpp {
     }
 
     fn require_vae_profile(&self) -> Result<()> {
-        if self.profile != Profile::Krea2Turbo {
+        if !self.profile.has_explicit_vae() {
             return Err(Error::Invalid(
                 "direct VAE operations require a profile with an explicit VAE".to_owned(),
             ));
@@ -2194,7 +2194,7 @@ fn verify_profile_artifacts(
                     .clone(),
             );
         }
-        ProfileArtifacts::ZImage { .. } | ProfileArtifacts::Krea2 { .. } => {
+        ProfileArtifacts::Transformer { .. } => {
             let vae = artifacts.vae().ok_or_else(|| {
                 Error::Incompatible(format!("{profile_id} artifacts carry no VAE"))
             })?;
@@ -2451,23 +2451,7 @@ fn validate_profile_tensor(
     request: &ImageRequest,
     tensor: &TensorSpec,
 ) -> Result<()> {
-    let expected = match profile {
-        Profile::MiniT2iB16 => {
-            vec![
-                u64::from(request.width()),
-                u64::from(request.height()),
-                3,
-                1,
-            ]
-        }
-        // Same 8x spatial compression and 16-channel latent as Krea.
-        Profile::Krea2Turbo | Profile::ZImageTurbo => vec![
-            u64::from(request.width() / 8),
-            u64::from(request.height() / 8),
-            16,
-            1,
-        ],
-    };
+    let expected = profile.state_shape(request.width(), request.height());
     if tensor.shape != expected {
         return Err(Error::Incompatible(format!(
             "{} state shape is {:?}; expected {expected:?}",

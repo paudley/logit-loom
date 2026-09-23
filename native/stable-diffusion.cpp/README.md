@@ -12,7 +12,8 @@ The companion ABI exposes:
 - exact ABI and upstream revision queries;
 - an optional process-wide Vulkan allocation ceiling enforced atomically
   before the embedded ggml allocator calls Vulkan;
-- explicit MiniT2I-B/16 and Krea 2 Turbo context construction;
+- explicit context construction for MiniT2I-B/16, Krea 2 Turbo, Z-Image Turbo,
+  Qwen-Image, FLUX.2-dev, and FLUX.2-klein-4B;
 - deterministic CPU random-state selection with explicit accelerator model
   and parameter backends;
 - exact conditioning tensors, including retained tokenizer ID tensors;
@@ -108,6 +109,8 @@ then
 [`logit-loom-vulkan-strix-halo-v14.patch`](logit-loom-vulkan-strix-halo-v14.patch),
 then
 [`logit-loom-vulkan-dispatch-bounds-v18.patch`](logit-loom-vulkan-dispatch-bounds-v18.patch),
+then
+[`logit-loom-vulkan-uma-prefer-host-v19.patch`](logit-loom-vulkan-uma-prefer-host-v19.patch),
 initializes only the required `ggml` submodule, and builds a shared library.
 Existing incompatible source changes are rejected. The script never runs from
 tests, CI, documentation, package builds, or `make check`.
@@ -160,6 +163,16 @@ request no descriptor set for a dispatch that still happens (the v17 revision
 of this patch did exactly that and aborted every matmul on Strix Halo).
 Results are bit-identical to an unchunked dispatch; no shape is narrowed or
 clamped.
+
+On a unified-memory device every device buffer is placed host-visible first
+(`logit-loom-vulkan-uma-prefer-host-v19.patch`), exactly what
+`GGML_VK_PREFER_HOST_MEMORY` selects. Upstream's UMA order asks first for the
+`DeviceLocal|HostVisible|HostCoherent` type, which RADV backs with the 1 GiB
+VRAM carve-out on Strix Halo; buffers that fit fill it, amdgpu page tables can
+then no longer be placed, and the kernel's `BO_VA -ENOMEM` path wedged the GPU
+on 2026-09-22. The patch has to be code: Brainstem passes workers no ambient
+environment. Buffers remain host-visible, so UMA mapping and borrowing paths
+are unchanged, and discrete GPUs are untouched.
 
 Image-to-image, inpaint, and outpaint strength may select a suffix of the
 declared Euler schedule. The companion reports those executed transitions at

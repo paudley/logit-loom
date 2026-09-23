@@ -20,6 +20,9 @@ use crate::{
 pub(crate) const PROFILE_MINIT2I: i32 = 1;
 pub(crate) const PROFILE_KREA2: i32 = 2;
 pub(crate) const PROFILE_ZIMAGE: i32 = 3;
+pub(crate) const PROFILE_QWEN_IMAGE: i32 = 4;
+pub(crate) const PROFILE_FLUX2_DEV: i32 = 5;
+pub(crate) const PROFILE_FLUX2_KLEIN: i32 = 6;
 
 pub(crate) const STATUS_OK: i32 = 0;
 pub(crate) const STATUS_STOPPED: i32 = 1;

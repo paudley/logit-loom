@@ -1,0 +1,22 @@
+diff --git src/ggml-vulkan/ggml-vulkan.cpp src/ggml-vulkan/ggml-vulkan.cpp
+index 6ffaf3b..e8c3930 100644
+--- src/ggml-vulkan/ggml-vulkan.cpp
++++ src/ggml-vulkan/ggml-vulkan.cpp
+@@ -5962,6 +5962,17 @@ static vk_device ggml_vk_get_device(size_t idx) {
+         device->subgroup_size = subgroup_props.subgroupSize;
+         device->subgroup_size_log2 = uint32_t(log2f(float(device->subgroup_size)));
+         device->uma = device->properties.deviceType == vk::PhysicalDeviceType::eIntegratedGpu;
++        // Logit Loom delta [GPU-CARVE-OUT-2026-09-22]: on UMA the
++        // DeviceLocal|HostVisible|HostCoherent type that the uma branch of
++        // ggml_vk_create_buffer_device asks for first is backed on RADV by the
++        // VRAM carve-out (1 GiB on Strix Halo). Buffers that fit fill it,
++        // amdgpu page tables, which can live only in VRAM, then cannot be
++        // placed, and the kernel's BO_VA -ENOMEM path wedges the GPU. UMA
++        // devices therefore take the GGML_VK_PREFER_HOST_MEMORY order:
++        // HostVisible|HostCoherent first (GTT on RADV), DeviceLocal as the
++        // fallback. The buffers stay host-visible, so every UMA borrowing and
++        // mapping path is unchanged. Discrete GPUs are untouched.
++        device->prefer_host_memory = device->prefer_host_memory || device->uma;
+         if (sm_builtins) {
+             device->shader_core_count = sm_props.shaderSMCount;
+         } else if (amd_shader_core_properties2) {

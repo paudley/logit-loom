@@ -133,6 +133,46 @@ pub struct KreaActivationSiteV1 {
     pub branches: Vec<KreaCfgBranchV1>,
 }
 
+/// Record that a loaded image model carries no activation mechanics.
+///
+/// A resident image job publishes activation evidence at a fixed position in
+/// its output sequence. For a model whose transformer has no native activation
+/// hooks this record occupies that position, so the absence is a stated,
+/// digest-bound fact about the loaded model rather than a gap in the sequence.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ActivationMechanicsAbsentV1 {
+    /// Catalog profile of the loaded model.
+    pub profile: String,
+    /// Exact model artifact identity.
+    pub model: Digest,
+    /// Exact backend build identity.
+    pub backend: Digest,
+}
+
+impl ActivationMechanicsAbsentV1 {
+    /// Validates the record and returns its exact identity.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an empty or unbounded profile identifier.
+    pub fn digest(&self) -> Result<Digest, CoreError> {
+        if self.profile.is_empty()
+            || self.profile.len() > 128
+            || !self
+                .profile
+                .bytes()
+                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+        {
+            return Err(CoreError::invalid(
+                "activation mechanics absence",
+                "profile must be a bounded lowercase identifier",
+            ));
+        }
+        Digest::of_serializable("activation-mechanics-absent-v1", self)
+    }
+}
+
 /// Exact topology discovered from one loaded Krea runtime.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
