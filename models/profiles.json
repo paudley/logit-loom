@@ -163,6 +163,59 @@
           ]
         }
       ]
+    },
+    {
+      "id": "z-image-turbo",
+      "display_name": "Z-Image Turbo",
+      "modality": "image",
+      "role": "advanced",
+      "integration_status": "first-class",
+      "acceptance_status": "pending",
+      "adapter_target": "diffusion",
+      "requires_accelerator": true,
+      "remote_code_policy": "forbidden",
+      "notes": "Bakeoff speed candidate. Same three-file shape as Krea 2 Turbo: diffusion GGUF, Qwen3-4B-Instruct GGUF text encoder, and its own VAE. Documented sampling is 8 steps at cfg 1.0.",
+      "sources": [
+        {
+          "id": "z-image-turbo-q8-0",
+          "repository": "leejet/Z-Image-Turbo-GGUF",
+          "revision": "c61c0e422dc8b541b7548cf33a4ef8302b0f8085",
+          "local_subdir": "diffusion",
+          "files": [
+            {
+              "path": "z_image_turbo-Q8_0.gguf",
+              "bytes": 6577440704,
+              "sha256": "df1c5baa86d1398c979495a6072dbcee79444fdb884a2445582ba0769c44e9a1"
+            }
+          ]
+        },
+        {
+          "id": "qwen3-4b-instruct-text-encoder",
+          "repository": "unsloth/Qwen3-4B-Instruct-2507-GGUF",
+          "revision": "a06e946bb6b655725eafa393f4a9745d460374c9",
+          "local_subdir": "text-encoder",
+          "files": [
+            {
+              "path": "Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
+              "bytes": 2497281120,
+              "sha256": "3605803b982cb64aead44f6c1b2ae36e3acdb41d8e46c8a94c6533bc4c67e597"
+            }
+          ]
+        },
+        {
+          "id": "z-image-vae",
+          "repository": "Tongyi-MAI/Z-Image-Turbo",
+          "revision": "f332072aa78be7aecdf3ee76d5c247082da564a6",
+          "local_subdir": "vae",
+          "files": [
+            {
+              "path": "vae/diffusion_pytorch_model.safetensors",
+              "bytes": 167666902,
+              "sha256": "f5b59a26851551b67ae1fe58d32e76486e1e812def4696a4bea97f16604d40a3"
+            }
+          ]
+        }
+      ]
     }
   ]
 }

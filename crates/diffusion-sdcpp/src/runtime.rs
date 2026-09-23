@@ -2194,6 +2194,45 @@ fn verify_profile_artifacts(
                     .clone(),
             );
         }
+        ProfileArtifacts::ZImage {
+            diffusion_model,
+            text_encoder,
+            vae,
+        } => {
+            receipts.push(
+                profile
+                    .verify_artifact(
+                        &catalog_sha256,
+                        "z-image-turbo-q8-0",
+                        "z_image_turbo-Q8_0.gguf",
+                        diffusion_model,
+                    )?
+                    .receipt()
+                    .clone(),
+            );
+            receipts.push(
+                profile
+                    .verify_artifact(
+                        &catalog_sha256,
+                        "qwen3-4b-instruct-text-encoder",
+                        "Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
+                        text_encoder,
+                    )?
+                    .receipt()
+                    .clone(),
+            );
+            receipts.push(
+                profile
+                    .verify_artifact(
+                        &catalog_sha256,
+                        "z-image-vae",
+                        "vae/diffusion_pytorch_model.safetensors",
+                        vae,
+                    )?
+                    .receipt()
+                    .clone(),
+            );
+        }
         ProfileArtifacts::Krea2 {
             diffusion_model,
             text_encoder,
@@ -2449,7 +2488,8 @@ fn validate_profile_tensor(
                 1,
             ]
         }
-        Profile::Krea2Turbo => vec![
+        // Same 8x spatial compression and 16-channel latent as Krea.
+        Profile::Krea2Turbo | Profile::ZImageTurbo => vec![
             u64::from(request.width() / 8),
             u64::from(request.height() / 8),
             16,

@@ -42,6 +42,8 @@ pub enum Profile {
     MiniT2iB16,
     /// Krea 2 Turbo with Qwen3-VL and Wan 2.1 VAE.
     Krea2Turbo,
+    /// Z-Image Turbo with Qwen3-4B-Instruct and its own VAE.
+    ZImageTurbo,
 }
 
 impl Profile {
@@ -50,6 +52,7 @@ impl Profile {
         match self {
             Self::MiniT2iB16 => "minit2i-b16",
             Self::Krea2Turbo => "krea-2-turbo",
+            Self::ZImageTurbo => "z-image-turbo",
         }
     }
 
@@ -57,13 +60,14 @@ impl Profile {
         match self {
             Self::MiniT2iB16 => crate::ffi::PROFILE_MINIT2I,
             Self::Krea2Turbo => crate::ffi::PROFILE_KREA2,
+            Self::ZImageTurbo => crate::ffi::PROFILE_ZIMAGE,
         }
     }
 
     pub(crate) fn validate_dimensions(self, width: u32, height: u32) -> Result<()> {
         let alignment = match self {
             Self::MiniT2iB16 => 16,
-            Self::Krea2Turbo => 64,
+            Self::Krea2Turbo | Self::ZImageTurbo => 64,
         };
         if width < alignment
             || height < alignment
@@ -82,7 +86,9 @@ impl Profile {
             Self::MiniT2iB16 => u64::from(width)
                 .checked_mul(u64::from(height))
                 .and_then(|pixels| pixels.checked_mul(3)),
-            Self::Krea2Turbo => u64::from(width / 8)
+            // Z-Image shares Krea's 8x spatial compression and 16-channel
+            // latent, so the state element count is computed the same way.
+            Self::Krea2Turbo | Self::ZImageTurbo => u64::from(width / 8)
                 .checked_mul(u64::from(height / 8))
                 .and_then(|pixels| pixels.checked_mul(16)),
         }
@@ -107,6 +113,15 @@ pub enum ProfileArtifacts {
         /// FLAN-T5-Large `model.safetensors`.
         text_encoder: PathBuf,
     },
+    /// Z-Image diffusion GGUF, Qwen3-4B-Instruct GGUF, and its own VAE.
+    ZImage {
+        /// `z_image_turbo-Q8_0.gguf`.
+        diffusion_model: PathBuf,
+        /// `Qwen3-4B-Instruct-2507-Q4_K_M.gguf`.
+        text_encoder: PathBuf,
+        /// Z-Image `vae/diffusion_pytorch_model.safetensors`.
+        vae: PathBuf,
+    },
     /// Krea diffusion GGUF, Qwen3-VL GGUF, and Wan VAE.
     Krea2 {
         /// `Krea-2-Turbo-Q6_K.gguf`.
@@ -124,6 +139,19 @@ impl ProfileArtifacts {
         Self::MiniT2i {
             diffusion_model: diffusion_model.into(),
             text_encoder: text_encoder.into(),
+        }
+    }
+
+    /// Creates the exact Z-Image Turbo component layout.
+    pub fn z_image(
+        diffusion_model: impl Into<PathBuf>,
+        text_encoder: impl Into<PathBuf>,
+        vae: impl Into<PathBuf>,
+    ) -> Self {
+        Self::ZImage {
+            diffusion_model: diffusion_model.into(),
+            text_encoder: text_encoder.into(),
+            vae: vae.into(),
         }
     }
 
@@ -145,6 +173,7 @@ impl ProfileArtifacts {
         match self {
             Self::MiniT2i { .. } => Profile::MiniT2iB16,
             Self::Krea2 { .. } => Profile::Krea2Turbo,
+            Self::ZImage { .. } => Profile::ZImageTurbo,
         }
     }
 
@@ -155,20 +184,25 @@ impl ProfileArtifacts {
             }
             | Self::Krea2 {
                 diffusion_model, ..
+            }
+            | Self::ZImage {
+                diffusion_model, ..
             } => diffusion_model,
         }
     }
 
     pub(crate) fn text_encoder(&self) -> &Path {
         match self {
-            Self::MiniT2i { text_encoder, .. } | Self::Krea2 { text_encoder, .. } => text_encoder,
+            Self::MiniT2i { text_encoder, .. }
+            | Self::Krea2 { text_encoder, .. }
+            | Self::ZImage { text_encoder, .. } => text_encoder,
         }
     }
 
     pub(crate) fn vae(&self) -> Option<&Path> {
         match self {
             Self::MiniT2i { .. } => None,
-            Self::Krea2 { vae, .. } => Some(vae),
+            Self::Krea2 { vae, .. } | Self::ZImage { vae, .. } => Some(vae),
         }
     }
 }

@@ -19,6 +19,7 @@ use crate::{
 
 pub(crate) const PROFILE_MINIT2I: i32 = 1;
 pub(crate) const PROFILE_KREA2: i32 = 2;
+pub(crate) const PROFILE_ZIMAGE: i32 = 3;
 
 pub(crate) const STATUS_OK: i32 = 0;
 pub(crate) const STATUS_STOPPED: i32 = 1;

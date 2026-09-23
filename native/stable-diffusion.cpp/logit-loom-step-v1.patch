@@ -13,6 +13,7 @@ index 890050a..1846b47 100644
 +enum sd_loom_profile_t {
 +    SD_LOOM_PROFILE_MINIT2I_B16 = 1,
 +    SD_LOOM_PROFILE_KREA2_TURBO = 2,
++    SD_LOOM_PROFILE_ZIMAGE_TURBO = 3,
 +};
 +
 +enum sd_loom_status_t {
@@ -303,6 +304,18 @@ index 0bddba2..6a8b17b 100644
 +            native_params.llm_path   = params->text_encoder_path;
 +            native_params.vae_path   = params->vae_path;
 +            native_params.vae_format = SD_VAE_FORMAT_WAN;
++            break;
++        case SD_LOOM_PROFILE_ZIMAGE_TURBO:
++            // Z-Image carries its own VAE geometry, and upstream's own
++            // invocation passes --vae with no format flag. Choosing nothing is
++            // the answer here: SD_VAE_FORMAT_AUTO lets the loader read the
++            // format out of the file rather than us asserting one.
++            if (!sd_loom_nonempty(params->vae_path)) {
++                return nullptr;
++            }
++            native_params.llm_path   = params->text_encoder_path;
++            native_params.vae_path   = params->vae_path;
++            native_params.vae_format = SD_VAE_FORMAT_AUTO;
 +            break;
 +        default:
 +            return nullptr;
