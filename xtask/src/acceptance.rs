@@ -130,10 +130,10 @@ pub(crate) fn check_reports(repository: &Path, catalog: &Catalog) -> Result<usiz
             .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
         let report = serde_json::from_slice::<AcceptanceReport>(&bytes)
             .map_err(|error| format!("{} is not a closed report: {error}", path.display()))?;
-        report
+        let current = report
             .validate(catalog)
             .map_err(|error| format!("{}: {error}", path.display()))?;
-        if report.status == "passed" {
+        if report.status == "passed" && current {
             passed_profiles.insert(report.profile_id.clone());
         }
     }
@@ -159,7 +159,11 @@ fn check_promoted_profiles(
 }
 
 impl AcceptanceReport {
-    fn validate(&self, catalog: &Catalog) -> Result<(), String> {
+    /// Validates a retained report and returns whether it was run on the
+    /// artifacts its profile catalogues today. A report is history: an
+    /// artifact since replaced leaves it valid, but it no longer backs the
+    /// profile's `passed` status.
+    fn validate(&self, catalog: &Catalog) -> Result<bool, String> {
         if self.schema_version != SCHEMA_VERSION || self.identity_domain != IDENTITY_DOMAIN {
             return invalid("schema version or identity domain differs");
         }
@@ -176,9 +180,9 @@ impl AcceptanceReport {
         // It is not compared with today's catalog: a retained run cannot be
         // re-recorded without re-running the model, so whole-file equality
         // made every unrelated catalog edit invalidate every run on record,
-        // leaving only falsification or deletion. The binding that matters is
-        // per artifact and is checked below: each artifact must still equal
-        // its profile's exact catalog entry, byte count and SHA-256 included.
+        // leaving only falsification or deletion. The same holds per artifact,
+        // so artifacts are compared with today's entries only to decide whether
+        // this run still backs the profile's `passed` status.
         digest("catalog_sha256", &self.catalog_sha256)?;
         let profile = catalog
             .find_profile(&self.profile_id)
@@ -193,8 +197,10 @@ impl AcceptanceReport {
             ));
         }
         let mut artifact_keys = HashSet::new();
+        let mut current = true;
         for artifact in &self.artifacts {
-            artifact.validate(profile)?;
+            artifact.validate()?;
+            current &= artifact.is_catalogued_in(profile);
             if !artifact_keys.insert((&artifact.source_id, &artifact.path)) {
                 return invalid("artifact source/path pairs must be unique");
             }
@@ -258,12 +264,12 @@ impl AcceptanceReport {
             "blocked" => return invalid("blocked reports require at least one blocker"),
             _ => unreachable!("status spelling was validated above"),
         }
-        Ok(())
+        Ok(current)
     }
 }
 
 impl Artifact {
-    fn validate(&self, profile: &logit_loom_models::Profile) -> Result<(), String> {
+    fn validate(&self) -> Result<(), String> {
         identifier("artifact source_id", &self.source_id)?;
         repository(&self.repository)?;
         hexadecimal("artifact revision", &self.revision, 40)?;
@@ -271,26 +277,25 @@ impl Artifact {
         if self.bytes == 0 {
             return invalid("artifact bytes must be positive");
         }
-        digest("artifact sha256", &self.sha256)?;
+        digest("artifact sha256", &self.sha256)
+    }
 
-        let source = profile
+    /// Whether this artifact is exactly one the profile catalogues today.
+    fn is_catalogued_in(&self, profile: &logit_loom_models::Profile) -> bool {
+        profile
             .sources()
             .iter()
-            .find(|source| source.id() == self.source_id)
-            .ok_or_else(|| format!("unknown artifact source_id {:?}", self.source_id))?;
-        let file = source
-            .files()
-            .iter()
-            .find(|file| file.path() == self.path)
-            .ok_or_else(|| format!("unknown artifact path {:?}", self.path))?;
-        if self.repository != source.repository()
-            || self.revision != source.revision()
-            || self.bytes != file.bytes()
-            || file.sha256() != Some(self.sha256.as_str())
-        {
-            return invalid("artifact metadata differs from the exact catalog entry");
-        }
-        Ok(())
+            .filter(|source| {
+                source.id() == self.source_id
+                    && source.repository() == self.repository
+                    && source.revision() == self.revision
+            })
+            .flat_map(logit_loom_models::Source::files)
+            .any(|file| {
+                file.path() == self.path
+                    && file.bytes() == self.bytes
+                    && file.sha256() == Some(self.sha256.as_str())
+            })
     }
 }
 
