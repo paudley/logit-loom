@@ -18,6 +18,7 @@ categories = ["algorithms", "api-bindings"]
 [dependencies]
 logit-loom-core.workspace = true
 thiserror.workspace = true
+wide.workspace = true
 
 [lints]
 workspace = true

@@ -10,6 +10,35 @@ include breaking API changes.
 
 ### Added
 
+- `ReasoningBudget`, a `LogitTransform` that bounds a reasoning block: after
+  `budget` admitted tokens inside it without the closing tag, every candidate
+  but the next token of a forced-close sequence is masked until that
+  sequence is complete. It ports llama.cpp's `common/reasoning-budget.cpp`
+  state machine (idle, counting, forcing, done, re-arming on a new block), so
+  `accept` alone mirrors the native sampler exactly for accounting. It starts
+  inside the block when told the prompt opened it. `ReasoningBudgetReport`
+  reads the forced-close count after the transform has moved into a
+  pipeline. The one divergence is that the native sampler's wait for UTF-8
+  completion is not modelled. `ReasoningStart` (`Outside`, `Inside`,
+  `Closing`) says where each call starts and restarts on reset. `Closing`
+  forces the close from the first token, for a caller that ends a thought
+  early, such as a loop correction. `in_block` and `force_close` (the port
+  of `common_reasoning_budget_force`) serve an accept-only mirror. A close
+  the caller forces is the caller's to record and is not counted in the
+  report.
+- `TokenDistribution::measure`, the raw next-token distribution one sampled
+  token came from: Shannon entropy, the sampled and top log-probabilities,
+  the top token, and the top-1 logit margin, all in nats, in two passes over
+  the vocabulary (eight-lane `wide` accumulation). Masked `-inf` logits carry
+  no mass; NaN, `+inf`, and fully masked rows are refused.
+- `Observer::wants_distribution` / `Observer::on_distribution` and
+  `ObserverSet::{wants_distribution, observe_distribution}`: an observer may
+  opt in to receive each admitted token's `TokenDistribution` immediately
+  before its `on_token`. Both methods have defaults, so existing observers are
+  unchanged. `Session::generate` and `Session::generate_v2` measure only while
+  some observer asks, on the row before any transform stage; selection is
+  unaffected.
+
 - `logit_loom_llamacpp::binding_compatibility_label()`, the compile-time
   native build label that `Runtime::identity` hashes, exposed as a free
   function so a downstream can derive its own implementation identity from

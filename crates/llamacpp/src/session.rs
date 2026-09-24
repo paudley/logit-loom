@@ -18,7 +18,7 @@ use logit_loom::{
     ActivationPhaseV1, ActivationTelemetryDispositionV1, CheckpointReceipt, ControlFlow, Digest,
     GenerationFinish, GenerationPlan, GenerationPlanV2, GenerationReceipt, ObservedToken,
     ObserverSet, Pipeline, PrefillFinish, PrefillMonitor, PrefillProgress, PrefillReceipt,
-    SteeringKind, TokenId,
+    SteeringKind, TokenDistribution, TokenId,
 };
 
 use crate::{
@@ -951,6 +951,10 @@ impl<'model> Session<'model> {
     /// decoded before `accept` and observer callbacks, so those callbacks see
     /// only causal admissions. An end-of-generation token is not decoded.
     ///
+    /// When an observer [asks](logit_loom::Observer::wants_distribution), each
+    /// admitted token is preceded by the [`TokenDistribution`] of the raw row
+    /// it was sampled from, measured before any transform stage.
+    ///
     /// # Errors
     ///
     /// Returns a plan, pipeline, observer, detokenization, sampling, capacity,
@@ -1057,6 +1061,9 @@ impl<'model> Session<'model> {
         if let Some(active) = observers.as_deref_mut() {
             active.begin(initial_position, plan.max_tokens)?;
         }
+        let measure = observers
+            .as_deref()
+            .is_some_and(ObserverSet::wants_distribution);
         let mut output_tokens = Vec::new();
         let mut output_bytes = Vec::new();
         let mut finish = GenerationFinish::TokenLimit;
@@ -1073,7 +1080,8 @@ impl<'model> Session<'model> {
                     "generation reached the configured context bound".to_owned(),
                 ));
             }
-            let token = self.sample_token(step, &mut sampler, pipeline.as_deref_mut())?;
+            let (token, distribution) =
+                self.sample_token(step, &mut sampler, pipeline.as_deref_mut(), measure)?;
             if self.model.is_end_of_generation(token) {
                 finish = GenerationFinish::EndOfGeneration { token };
                 break;
@@ -1093,17 +1101,17 @@ impl<'model> Session<'model> {
             output_tokens.push(token);
             output_bytes.extend_from_slice(&piece);
             extend_stop_window(plan, &mut stop_window, &piece);
-            let mut observer_stop = false;
             if let Some(active) = observers.as_deref_mut()
-                && active.observe(ObservedToken {
-                    token,
-                    piece: &piece,
-                    position: self.position,
-                })? == ControlFlow::Stop
+                && deliver_admission(
+                    active,
+                    distribution,
+                    ObservedToken {
+                        token,
+                        piece: &piece,
+                        position: self.position,
+                    },
+                )? == ControlFlow::Stop
             {
-                observer_stop = true;
-            }
-            if observer_stop {
                 finish = GenerationFinish::ObserverStop;
                 break;
             }
@@ -1149,19 +1157,25 @@ impl<'model> Session<'model> {
         })
     }
 
+    /// Samples one token, measuring its raw distribution when `measure` is set.
     fn sample_token(
         &mut self,
         step: u32,
         sampler: &mut LlamaSampler,
         pipeline: Option<&mut Pipeline>,
-    ) -> Result<TokenId, Error> {
+        measure: bool,
+    ) -> Result<(TokenId, Option<TokenDistribution>), Error> {
         let mut logits = catch_unwind(AssertUnwindSafe(|| self.context.get_logits().to_vec()))
             .map_err(|_| Error::Native("llama.cpp logits were unavailable".to_owned()))?;
+        // A pipeline rewrites the row in place; the measurement must see what
+        // the model produced, so only then is a raw copy kept.
+        let raw = (measure && pipeline.is_some()).then(|| logits.clone());
         if let Some(active) = pipeline {
             active.apply_to_vocabulary(step, &self.token_history, &mut logits)?;
         }
         let data = logits
-            .into_iter()
+            .iter()
+            .copied()
             .enumerate()
             .map(|(index, logit)| {
                 let token = i32::try_from(index).map_err(|_| {
@@ -1175,7 +1189,12 @@ impl<'model> Session<'model> {
         let selected = candidates
             .selected_token()
             .ok_or_else(|| Error::Native("native sampler did not select a token".to_owned()))?;
-        TokenId::new(selected.0).map_err(Error::from)
+        let token = TokenId::new(selected.0)?;
+        let distribution = measure
+            .then(|| TokenDistribution::measure(raw.as_deref().unwrap_or(&logits), token))
+            .transpose()
+            .map_err(|error| Error::Native(format!("raw distribution: {error}")))?;
+        Ok((token, distribution))
     }
 
     /// Captures opaque native state and exact causal lineage.
@@ -1552,6 +1571,19 @@ fn validate_stop_tail(plan: &GenerationPlan, tail: &[u8]) -> Result<(), Error> {
         ));
     }
     Ok(())
+}
+
+/// Delivers one admitted token to the observers, preceded by the raw
+/// distribution it was sampled from when one was measured.
+fn deliver_admission(
+    observers: &mut ObserverSet,
+    distribution: Option<TokenDistribution>,
+    token: ObservedToken<'_>,
+) -> Result<ControlFlow, Error> {
+    if let Some(distribution) = distribution {
+        observers.observe_distribution(distribution)?;
+    }
+    Ok(observers.observe(token)?)
 }
 
 fn extend_stop_window(plan: &GenerationPlan, window: &mut Vec<u8>, piece: &[u8]) {

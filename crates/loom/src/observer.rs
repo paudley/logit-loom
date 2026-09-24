@@ -12,7 +12,7 @@ use logit_loom_core::{
     PrefillProgress, PrefillReceipt, TokenId,
 };
 
-use crate::{ObserverError, PrefillObserverError};
+use crate::{ObserverError, PrefillObserverError, TokenDistribution};
 
 /// Maximum observers sharing one ordered fan-out.
 pub const MAX_OBSERVERS: usize = 16;
@@ -54,6 +54,27 @@ pub trait Observer {
     ///
     /// Returns an implementation-defined observation failure.
     fn on_token(&mut self, token: ObservedToken<'_>) -> Result<ControlFlow, ObserverError>;
+
+    /// Whether this observer wants [`Self::on_distribution`] before each token.
+    ///
+    /// Measuring a distribution is a full pass over the vocabulary, so a
+    /// backend computes one only while some observer in the set asks.
+    fn wants_distribution(&self) -> bool {
+        false
+    }
+
+    /// Receives the raw distribution the next observed token was sampled from.
+    ///
+    /// Delivered after the step's poll and immediately before the matching
+    /// [`Self::on_token`], and only for tokens that are admitted: an
+    /// end-of-generation selection produces neither call.
+    ///
+    /// # Errors
+    ///
+    /// Returns an implementation-defined observation failure.
+    fn on_distribution(&mut self, _distribution: TokenDistribution) -> Result<(), ObserverError> {
+        Ok(())
+    }
 }
 
 struct ObserverEntry {
@@ -297,6 +318,53 @@ impl ObserverSet {
             }
         }
         Ok(control)
+    }
+
+    /// Whether any observer asked for per-token distributions.
+    pub fn wants_distribution(&self) -> bool {
+        self.entries
+            .iter()
+            .any(|entry| entry.observer.wants_distribution())
+    }
+
+    /// Delivers the raw distribution of the token about to be observed.
+    ///
+    /// Only observers that asked receive it. A successful poll must precede
+    /// delivery, and [`Self::observe`] for the same token must follow; the
+    /// call itself changes no accounting.
+    ///
+    /// # Errors
+    ///
+    /// Returns a lifecycle or contained callback failure.
+    pub fn observe_distribution(
+        &mut self,
+        distribution: TokenDistribution,
+    ) -> Result<(), ObserverError> {
+        self.require_ready()?;
+        if self
+            .entries
+            .first()
+            .is_none_or(|first| first.receipt.polls <= first.receipt.observed_tokens)
+        {
+            self.failed = true;
+            return Err(ObserverError::new(
+                "poll every observer before delivering a distribution",
+            ));
+        }
+        for entry in &mut self.entries {
+            if !entry.observer.wants_distribution() {
+                continue;
+            }
+            let result = catch_unwind(AssertUnwindSafe(|| {
+                entry.observer.on_distribution(distribution)
+            }));
+            if let Some(failure) = observer_result(CallbackPhase::Observe, result) {
+                entry.receipt.failure = Some(failure.clone());
+                self.failed = true;
+                return Err(ObserverError::new(failure.message));
+            }
+        }
+        Ok(())
     }
 
     /// Returns current per-observer accounting in dispatch order.
@@ -764,6 +832,61 @@ mod tests {
         }
     }
 
+    /// Records distributions and the tokens that follow them, in order.
+    struct DistributionRecorder(std::rc::Rc<std::cell::RefCell<Vec<String>>>);
+
+    impl Observer for DistributionRecorder {
+        fn wants_distribution(&self) -> bool {
+            true
+        }
+
+        fn on_distribution(
+            &mut self,
+            distribution: TokenDistribution,
+        ) -> Result<(), ObserverError> {
+            self.0
+                .borrow_mut()
+                .push(format!("distribution {}", distribution.top_token.get()));
+            Ok(())
+        }
+
+        fn on_token(&mut self, token: ObservedToken<'_>) -> Result<ControlFlow, ObserverError> {
+            self.0
+                .borrow_mut()
+                .push(format!("token {}", token.token.get()));
+            Ok(ControlFlow::Continue)
+        }
+    }
+
+    struct DistributionPanics;
+
+    impl Observer for DistributionPanics {
+        fn wants_distribution(&self) -> bool {
+            true
+        }
+
+        fn on_distribution(
+            &mut self,
+            _distribution: TokenDistribution,
+        ) -> Result<(), ObserverError> {
+            panic!("distribution observer panic is contained")
+        }
+
+        fn on_token(&mut self, _token: ObservedToken<'_>) -> Result<ControlFlow, ObserverError> {
+            Ok(ControlFlow::Continue)
+        }
+    }
+
+    fn fixture_distribution(top: i32) -> TokenDistribution {
+        TokenDistribution {
+            entropy: 0.5,
+            sampled_log_probability: -0.1,
+            top_token: TokenId::new(top).expect("fixture token"),
+            top_log_probability: -0.1,
+            margin: 2.0,
+        }
+    }
+
     struct ChunkRecorder;
 
     impl PrefillObserver for ChunkRecorder {
@@ -1055,5 +1178,72 @@ mod tests {
         let failure = receipt.failure.as_ref().unwrap();
         assert!(failure.panicked);
         assert_eq!(failure.phase, CallbackPhase::Prefill);
+    }
+
+    #[test]
+    fn distributions_reach_only_observers_that_ask_and_precede_their_token() {
+        let log = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let mut set = ObserverSet::new([
+            (
+                Digest::of_bytes("test", b"plain"),
+                Box::new(Recorder(Vec::new())) as Box<dyn Observer>,
+            ),
+            (
+                Digest::of_bytes("test", b"distribution"),
+                Box::new(DistributionRecorder(log.clone())),
+            ),
+        ])
+        .expect("valid set");
+        assert!(set.wants_distribution());
+        set.begin(0, 2).expect("begin");
+        set.poll().expect("poll");
+        set.observe_distribution(fixture_distribution(7))
+            .expect("distribution after poll");
+        set.observe(ObservedToken {
+            token: TokenId::new(7).expect("token"),
+            piece: b"a",
+            position: 1,
+        })
+        .expect("observe");
+        assert_eq!(*log.borrow(), ["distribution 7", "token 7"]);
+        assert_eq!(
+            set.receipt(0).map(|receipt| receipt.observed_tokens),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn a_set_without_distribution_observers_does_not_ask() {
+        let set = ObserverSet::single(Digest::of_bytes("test", b"plain"), Recorder(Vec::new()));
+        assert!(!set.wants_distribution());
+    }
+
+    #[test]
+    fn distribution_delivery_requires_a_poll_for_the_step() {
+        let log = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let mut set = ObserverSet::single(
+            Digest::of_bytes("test", b"distribution"),
+            DistributionRecorder(log.clone()),
+        );
+        set.begin(0, 2).expect("begin");
+        assert!(set.observe_distribution(fixture_distribution(1)).is_err());
+        assert!(log.borrow().is_empty());
+    }
+
+    #[test]
+    fn distribution_observer_panic_is_retained_and_fails_the_set() {
+        let mut set = ObserverSet::single(Digest::of_bytes("test", b"panics"), DistributionPanics);
+        set.begin(0, 2).expect("begin");
+        set.poll().expect("poll");
+        assert!(set.observe_distribution(fixture_distribution(1)).is_err());
+        let failure = set
+            .receipt(0)
+            .and_then(|receipt| receipt.failure.clone())
+            .expect("contained failure");
+        assert!(failure.panicked);
+        assert!(
+            set.poll().is_err(),
+            "a failed set refuses reuse until begin"
+        );
     }
 }

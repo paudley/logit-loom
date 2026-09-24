@@ -37,6 +37,22 @@ impl ObserverError {
     }
 }
 
+/// Error returned when a logit row cannot be measured as a distribution.
+#[derive(Clone, Debug, PartialEq, Eq, Error)]
+#[error("{message}")]
+pub struct DistributionError {
+    message: String,
+}
+
+impl DistributionError {
+    /// Creates a distribution-measurement error.
+    pub fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+        }
+    }
+}
+
 /// Error returned by a prefill observer.
 #[derive(Clone, Debug, PartialEq, Eq, Error)]
 #[error("{message}")]
