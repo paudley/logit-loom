@@ -38,7 +38,7 @@ impl AcquisitionReport {
     /// # Errors
     ///
     /// Returns a parse or validation error when the packaged report is invalid
-    /// or no longer matches the packaged catalog.
+    /// or names artifacts the packaged catalog does not.
     pub fn embedded(catalog: &Catalog) -> Result<Self, AcquisitionReportError> {
         Self::from_slice(REPORT_BYTES, catalog)
     }
@@ -48,7 +48,7 @@ impl AcquisitionReport {
     /// # Errors
     ///
     /// Returns a parse or invariant error when the report is malformed,
-    /// incomplete, internally inconsistent, or bound to another catalog.
+    /// incomplete, or internally inconsistent.
     pub fn from_slice(bytes: &[u8], catalog: &Catalog) -> Result<Self, AcquisitionReportError> {
         if bytes.len() > MAX_REPORT_BYTES {
             return invalid("serialized acquisition report exceeds the input bound");
@@ -80,12 +80,6 @@ impl AcquisitionReport {
                 "identity_domain must be {ACQUISITION_REPORT_IDENTITY_DOMAIN:?}"
             ));
         }
-        let catalog_sha256 = catalog.packaged_sha256();
-        if self.catalog_sha256 != catalog_sha256 {
-            return invalid(format!(
-                "catalog_sha256 must match the packaged catalog {catalog_sha256}"
-            ));
-        }
         validate_timestamp(&self.recorded_at_utc)?;
         validate_version(&self.hf_cli_version)?;
         if self.filesystem_available_bytes == 0 {
@@ -105,12 +99,12 @@ impl AcquisitionReport {
                     acquisition.profile_id
                 ));
             }
-            validate_profile(acquisition, catalog, &catalog_sha256)?;
+            validate_profile(acquisition, catalog)?;
         }
         Ok(())
     }
 
-    /// Returns the catalog digest this report is bound to.
+    /// Returns the catalog digest recorded when the report was captured.
     pub fn catalog_sha256(&self) -> &str {
         &self.catalog_sha256
     }
@@ -249,7 +243,6 @@ pub enum AcquisitionReportError {
 fn validate_profile(
     acquisition: &ProfileAcquisition,
     catalog: &Catalog,
-    catalog_sha256: &str,
 ) -> Result<(), AcquisitionReportError> {
     let profile = catalog
         .find_profile(&acquisition.profile_id)
@@ -286,7 +279,7 @@ fn validate_profile(
                 acquisition.profile_id, receipt.source_id, receipt.artifact_path
             ));
         }
-        validate_receipt(acquisition, receipt, profile, catalog_sha256)?;
+        validate_receipt(acquisition, receipt, profile)?;
         verified_bytes = verified_bytes.checked_add(receipt.bytes).ok_or_else(|| {
             AcquisitionReportError::Invalid(format!(
                 "profile {:?} verified byte count overflows",
@@ -351,10 +344,8 @@ fn validate_receipt(
     acquisition: &ProfileAcquisition,
     receipt: &ArtifactReceipt,
     profile: &crate::Profile,
-    catalog_sha256: &str,
 ) -> Result<(), AcquisitionReportError> {
     if receipt.catalog_domain != crate::CATALOG_IDENTITY_DOMAIN
-        || receipt.catalog_sha256 != catalog_sha256
         || receipt.profile_id != acquisition.profile_id
     {
         return invalid(format!(
@@ -435,17 +426,5 @@ mod tests {
         let home_path_marker = ["/", "home", "/"].concat();
         assert!(!encoded.contains(&home_path_marker));
         assert!(!encoded.contains("model-store"));
-    }
-
-    #[test]
-    fn changed_catalog_digest_is_rejected() {
-        let catalog = Catalog::embedded().expect("catalog should parse");
-        let mut value =
-            serde_json::from_slice::<serde_json::Value>(super::REPORT_BYTES).expect("valid JSON");
-        value["catalog_sha256"] = serde_json::Value::String("0".repeat(64));
-        let bytes = serde_json::to_vec(&value).expect("JSON should serialize");
-        let error =
-            AcquisitionReport::from_slice(&bytes, &catalog).expect_err("digest must be checked");
-        assert!(error.to_string().contains("catalog_sha256"));
     }
 }

@@ -227,7 +227,7 @@
       "adapter_target": "diffusion",
       "requires_accelerator": true,
       "remote_code_policy": "forbidden",
-      "notes": "Bakeoff quality candidate. Diffusion GGUF, Qwen2.5-VL-7B-Instruct GGUF text encoder, and its own VAE. Upstream documents cfg 2.5 under the discrete-flow schedule at shift 3.",
+      "notes": "Bakeoff quality candidate. Diffusion GGUF, abliterated Qwen2.5-VL-7B-Instruct GGUF text encoder (huihui-ai abliteration, mradermacher quant; every Lillith model is abliterated), and its own VAE. Upstream documents cfg 2.5 under the discrete-flow schedule at shift 3.",
       "sources": [
         {
           "id": "qwen-image-q8-0",
@@ -243,15 +243,15 @@
           ]
         },
         {
-          "id": "qwen2.5-vl-7b-text-encoder",
-          "repository": "mradermacher/Qwen2.5-VL-7B-Instruct-GGUF",
-          "revision": "cfa2baa09946b211c107e6e104948987a64dd2c1",
+          "id": "qwen2.5-vl-7b-abliterated-text-encoder",
+          "repository": "mradermacher/Qwen2.5-VL-7B-Instruct-abliterated-GGUF",
+          "revision": "dbf78ed7f2020ee497ddaec61b88f153790eedb3",
           "local_subdir": "text-encoder",
           "files": [
             {
-              "path": "Qwen2.5-VL-7B-Instruct.Q4_K_M.gguf",
-              "bytes": 4683072512,
-              "sha256": "0f00a930ba3108b6861ddadf74d8ebbd82e257c63eba728e62c3e8970f5eed94"
+              "path": "Qwen2.5-VL-7B-Instruct-abliterated.Q4_K_M.gguf",
+              "bytes": 4683073952,
+              "sha256": "adc8b3a0478606fc1a5dd3b61bff9756f9f66ca9affd92e91ff4135e553621c9"
             }
           ]
         },

@@ -252,8 +252,8 @@
       "profile_id": "qwen-image",
       "method": "existing-local-artifacts",
       "status": "verified",
-      "catalog_artifact_bytes": 26698695878,
-      "verified_artifact_bytes": 26698695878,
+      "catalog_artifact_bytes": 26698697318,
+      "verified_artifact_bytes": 26698697318,
       "measured_profile_storage_bytes": null,
       "verified_artifacts": [
         {
@@ -271,12 +271,12 @@
           "catalog_domain": "logit-loom-model-catalog-v1",
           "catalog_sha256": "e020915f46fe4f12471758d4f848093213f755a037affb5974b7b4e88fe27051",
           "profile_id": "qwen-image",
-          "source_id": "qwen2.5-vl-7b-text-encoder",
-          "repository": "mradermacher/Qwen2.5-VL-7B-Instruct-GGUF",
-          "revision": "cfa2baa09946b211c107e6e104948987a64dd2c1",
-          "artifact_path": "Qwen2.5-VL-7B-Instruct.Q4_K_M.gguf",
-          "bytes": 4683072512,
-          "sha256": "0f00a930ba3108b6861ddadf74d8ebbd82e257c63eba728e62c3e8970f5eed94"
+          "source_id": "qwen2.5-vl-7b-abliterated-text-encoder",
+          "repository": "mradermacher/Qwen2.5-VL-7B-Instruct-abliterated-GGUF",
+          "revision": "dbf78ed7f2020ee497ddaec61b88f153790eedb3",
+          "artifact_path": "Qwen2.5-VL-7B-Instruct-abliterated.Q4_K_M.gguf",
+          "bytes": 4683073952,
+          "sha256": "adc8b3a0478606fc1a5dd3b61bff9756f9f66ca9affd92e91ff4135e553621c9"
         },
         {
           "catalog_domain": "logit-loom-model-catalog-v1",
