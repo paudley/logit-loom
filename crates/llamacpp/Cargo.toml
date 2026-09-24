@@ -33,6 +33,7 @@ webgpu = ["llama-cpp-4/webgpu"]
 [dependencies]
 blake3.workspace = true
 llama-cpp-4.workspace = true
+llama-cpp-sys-4.workspace = true
 logit-loom.workspace = true
 thiserror.workspace = true
 

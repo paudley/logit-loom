@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 #![doc = include_str!("../README.md")]
-#![forbid(unsafe_code)]
+// Unsafe code is confined to the private `native_stage` module; see SAFETY.md.
+#![deny(unsafe_code)]
 
 mod activation;
 mod error;
 mod mechanics;
 mod model;
+mod native_stage;
 mod sampler;
 mod session;
 mod speculation;
@@ -26,6 +28,7 @@ pub use model::{
     AuthorizedModelArtifact, DevicePolicy, MAX_TOKENIZATION_BYTES, Model, ModelOptions,
     PreverifiedModelArtifact, Runtime, Tokenization, binding_compatibility_label,
 };
+pub use native_stage::DistributionProbe;
 pub use session::{
     ContextCompatibility, ContextKind, FlashAttention, GenerationOutput, KvCacheType,
     PrefillOutput, Session, SessionOptions, StateSnapshot,

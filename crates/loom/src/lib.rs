@@ -10,7 +10,7 @@ mod observer;
 mod reasoning_budget;
 mod transform;
 
-pub use distribution::TokenDistribution;
+pub use distribution::{DistributionReport, DistributionSummary, TokenDistribution};
 pub use error::{
     DistributionError, ObserverError, PipelineError, PrefillObserverError, TransformError,
 };

@@ -14,6 +14,7 @@ It intentionally makes no model-quality or research-efficacy claims.
 | Callback error/panic containment | `Pipeline`, `ObserverSet`, `PrefillMonitor` | In-memory failure tests |
 | Exact byte token observation | `ObservedToken` | Non-UTF-8 fixture test and runnable example |
 | Reasoning-block token budget | `ReasoningBudget`, `ReasoningBudgetReport` | In-memory state-machine tests: natural close, forced sequence masking token by token, idle arming and re-arming, reset, and sparse-view refusal; model execution is opt-in |
+| Native read-only distribution probe | `DistributionProbe`, `DistributionSummary` | Model-free callback tests through `llama_sampler_init`: candidates unchanged, sorted and reordered views counted unmeasured, clones and stages share one record and release their contexts; summary window and collapse tests. Model execution is opt-in |
 | Raw next-token distribution observation | `TokenDistribution`, `Observer::on_distribution` | f64-reference entropy/log-probability tests (remainder lanes, masked rows, refusals) and in-memory delivery-order, poll-precondition, and panic-containment tests; `Session` measurement is opt-in model execution |
 | Cooperative cancellation | `CancellationToken`, observer control flow | Cross-thread signal test |
 | Native sampler translation | `GenerationPlan` and `GenerationPlanV2` through llama.cpp adapter | Model-free v1 identity preservation, lazy-trigger bounds/vocabulary checks, and type/API compilation against the pinned eager/lazy native grammar binding |

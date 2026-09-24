@@ -88,6 +88,93 @@ impl TokenDistribution {
     }
 }
 
+/// Running record of one generation's raw distributions, for telemetry.
+///
+/// Keeps one entropy per measured token (four bytes each) so the closing
+/// report can locate where the stream collapsed, and counts the tokens a
+/// backend could not measure rather than inventing values for them.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct DistributionSummary {
+    entropies: Vec<f32>,
+    surprisal_sum: f64,
+    steered: u32,
+    unmeasured: u32,
+}
+
+/// Closing figures of a [`DistributionSummary`], all in nats.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DistributionReport {
+    /// Sampled tokens with a measured distribution.
+    pub measured: u32,
+    /// Sampled tokens whose row could not be measured.
+    pub unmeasured: u32,
+    /// Mean entropy over measured tokens.
+    pub mean_entropy: f32,
+    /// Mean entropy over the trailing window.
+    pub tail_entropy: f32,
+    /// Lowest rolling-window mean entropy, or the overall mean when the
+    /// stream is shorter than one window.
+    pub min_window_entropy: f32,
+    /// Measured-token index where the rolling mean fell under the floor and
+    /// stayed under it to the end: the candidate onset of a collapse.
+    pub collapse_at: Option<u32>,
+    /// Tokens sampled away from the raw distribution's top choice.
+    pub steered: u32,
+    /// Mean negative log-probability of the sampled tokens.
+    pub mean_surprisal: f32,
+}
+
+impl DistributionSummary {
+    /// Records one measured token.
+    pub fn push(&mut self, distribution: TokenDistribution) {
+        self.entropies.push(distribution.entropy);
+        self.surprisal_sum -= f64::from(distribution.sampled_log_probability);
+        if distribution.sampled_log_probability < distribution.top_log_probability {
+            self.steered = self.steered.saturating_add(1);
+        }
+    }
+
+    /// Records one sampled token whose row could not be measured.
+    pub fn push_unmeasured(&mut self) {
+        self.unmeasured = self.unmeasured.saturating_add(1);
+    }
+
+    /// Closing report over rolling windows of `window` tokens, calling a
+    /// window under `floor` nats collapsed. `None` before anything was
+    /// measured.
+    #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
+    pub fn report(&self, window: usize, floor: f32) -> Option<DistributionReport> {
+        let count = self.entropies.len();
+        if count == 0 {
+            return None;
+        }
+        let window = window.clamp(1, count);
+        let mean = |values: &[f32]| {
+            (values.iter().map(|value| f64::from(*value)).sum::<f64>() / values.len() as f64) as f32
+        };
+        let rolling: Vec<f32> = self.entropies.windows(window).map(mean).collect();
+        let collapse_at = if rolling.last().is_some_and(|last| *last < floor) {
+            let start = rolling
+                .iter()
+                .rposition(|value| *value >= floor)
+                .map_or(0, |index| index + 1);
+            u32::try_from(start).ok()
+        } else {
+            None
+        };
+        Some(DistributionReport {
+            measured: u32::try_from(count).unwrap_or(u32::MAX),
+            unmeasured: self.unmeasured,
+            mean_entropy: mean(&self.entropies),
+            tail_entropy: mean(&self.entropies[count - window..]),
+            min_window_entropy: rolling.iter().copied().fold(f32::INFINITY, f32::min),
+            collapse_at,
+            steered: self.steered,
+            mean_surprisal: (self.surprisal_sum / count as f64) as f32,
+        })
+    }
+}
+
 /// Returns `(maximum, runner-up, argmax)`, refusing non-measurable rows.
 ///
 /// Branch-free eight-lane passes: the maximum (with a NaN sweep), the first
@@ -251,6 +338,49 @@ mod tests {
         assert!((f64::from(shape.sampled_log_probability) - sampled_log_probability).abs() < 1e-5);
         assert!(shape.sampled_log_probability < shape.top_log_probability);
         assert_eq!(shape.top_token, token(0));
+    }
+
+    fn shaped(entropy: f32, steered: bool) -> TokenDistribution {
+        TokenDistribution {
+            entropy,
+            sampled_log_probability: if steered { -2.0 } else { -0.5 },
+            top_token: token(0),
+            top_log_probability: -0.5,
+            margin: 1.0,
+        }
+    }
+
+    #[test]
+    fn summary_reports_means_steering_and_a_sustained_collapse() {
+        let mut summary = DistributionSummary::default();
+        assert!(summary.report(4, 0.1).is_none());
+        for index in 0..20 {
+            summary.push(shaped(if index < 12 { 2.0 } else { 0.01 }, index % 5 == 0));
+        }
+        summary.push_unmeasured();
+        let report = summary.report(4, 0.1).expect("measured");
+        assert_eq!(report.measured, 20);
+        assert_eq!(report.unmeasured, 1);
+        assert_eq!(report.steered, 4);
+        assert!((report.tail_entropy - 0.01).abs() < 1e-6);
+        assert!((report.min_window_entropy - 0.01).abs() < 1e-6);
+        // Windows 12.. are all collapsed; window 11 still holds 2.0.
+        assert_eq!(report.collapse_at, Some(12));
+        assert!((report.mean_surprisal - 0.8).abs() < 1e-5, "{report:?}");
+    }
+
+    #[test]
+    fn a_recovered_stream_reports_no_collapse() {
+        let mut summary = DistributionSummary::default();
+        for entropy in [2.0, 0.01, 0.01, 0.01, 0.01, 2.0, 2.0] {
+            summary.push(shaped(entropy, false));
+        }
+        assert_eq!(summary.report(2, 0.1).expect("measured").collapse_at, None);
+        // A stream shorter than the window reports over what it has.
+        let mut short = DistributionSummary::default();
+        short.push(shaped(1.0, false));
+        let report = short.report(64, 0.1).expect("measured");
+        assert!((report.min_window_entropy - 1.0).abs() < 1e-6);
     }
 
     #[test]

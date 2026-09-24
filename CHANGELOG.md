@@ -10,6 +10,18 @@ include breaking API changes.
 
 ### Added
 
+- `DistributionProbe` (logit-loom-llamacpp): a read-only native
+  `llama_sampler` that leads a chain the caller samples natively. It copies
+  the untouched candidate row in `apply` and measures it against the chosen
+  token in `accept`, never writing the candidates, so selection is
+  bit-identical. Rows it cannot measure (sorted or partial views) are
+  counted, not guessed. This is the adapter's only unsafe code, confined to
+  the private `native_stage` module; the crate root now denies rather than
+  forbids unsafe code, and `SAFETY.md` states the contract.
+- `DistributionSummary` and `DistributionReport`: a running record of
+  measured tokens, closing into mean, trailing-window and lowest
+  rolling-window entropy, the sustained-collapse onset, steered tokens, and
+  mean surprisal.
 - `ReasoningBudget`, a `LogitTransform` that bounds a reasoning block: after
   `budget` admitted tokens inside it without the closing tag, every candidate
   but the next token of a forced-close sequence is masked until that
