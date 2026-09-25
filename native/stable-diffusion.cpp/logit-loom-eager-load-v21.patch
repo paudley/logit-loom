@@ -1,0 +1,14 @@
+--- src/stable-diffusion.cpp
++++ src/stable-diffusion.cpp
+@@ -3802,6 +3802,11 @@
+     native_params.rng_type             = CPU_RNG;
+     native_params.sampler_rng_type     = CPU_RNG;
+     native_params.lora_apply_mode      = LORA_APPLY_AT_RUNTIME;
++    // The artifact paths are /proc/self/fd descriptors the caller closes once
++    // this context exists, so every parameter must be resident before return.
++    // Lazily loaded, a module's first use re-opened a closed descriptor and its
++    // compute came back empty (conditioner.hpp: hidden_states.empty()).
++    native_params.eager_load           = true;
+ 
+     switch (params->profile) {
+         case SD_LOOM_PROFILE_MINIT2I_B16:

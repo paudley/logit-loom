@@ -99,6 +99,8 @@ then
 [`logit-loom-krea-reference-guard-v16.patch`](logit-loom-krea-reference-guard-v16.patch),
 then
 [`logit-loom-vae-tiling-v20.patch`](logit-loom-vae-tiling-v20.patch),
+then
+[`logit-loom-eager-load-v21.patch`](logit-loom-eager-load-v21.patch),
 and finally the exact ggml-submodule
 [`logit-loom-vulkan-budget-v8.patch`](logit-loom-vulkan-budget-v8.patch),
 [`logit-loom-vulkan-errors-v10.patch`](logit-loom-vulkan-errors-v10.patch), and
@@ -186,6 +188,14 @@ the companion never enables; its 256-cell retry tile would in any case cover
 the whole 128x128 latent. Tiling is unconditional for this VAE, so an image
 never depends on whether an allocation failed. The Wan VAE of Krea 2 Turbo and
 Qwen-Image is not `AutoEncoderKL` and decodes exactly as before.
+
+A companion context loads every model parameter before it returns
+(`logit-loom-eager-load-v21.patch`). The artifact paths it is given are
+`/proc/self/fd` descriptors that the caller may close once the context exists,
+so a lazily loaded module reopened a closed descriptor on first use and its
+compute came back empty. With every parameter resident at creation, a caller
+can also disable `enable_mmap` and hold no host mapping of the weights after
+load.
 
 Image-to-image, inpaint, and outpaint strength may select a suffix of the
 declared Euler schedule. The companion reports those executed transitions at
