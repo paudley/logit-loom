@@ -1,8 +1,8 @@
 diff --git include/stable-diffusion.h include/stable-diffusion.h
-index 6159fff..72432fa 100644
+index a69e0d0..753b3f4 100644
 --- include/stable-diffusion.h
 +++ include/stable-diffusion.h
-@@ -426,6 +426,7 @@ typedef bool (*sd_graph_eval_callback_t)(struct ggml_tensor* t, bool ask, void*
+@@ -475,6 +475,7 @@ typedef bool (*sd_graph_eval_callback_t)(struct ggml_tensor* t, bool ask, void*
  #define SD_LOOM_IMAGE_ABI_VERSION 2
  #define SD_LOOM_PROGRAM_ABI_VERSION 3
  #define SD_LOOM_MODEL_BLOCK_ABI_VERSION 4
@@ -10,7 +10,7 @@ index 6159fff..72432fa 100644
  
  enum sd_loom_profile_t {
      SD_LOOM_PROFILE_MINIT2I_B16 = 1,
-@@ -681,6 +682,43 @@ typedef struct {
+@@ -734,6 +735,43 @@ typedef struct {
      size_t model_block_operator_count;
  } sd_loom_program_image_params_v4_t;
  
@@ -54,7 +54,7 @@ index 6159fff..72432fa 100644
  typedef int32_t (*sd_loom_value_read_cb_v3_t)(const uint8_t* bytes,
                                                size_t byte_count,
                                                void* data);
-@@ -909,6 +947,20 @@ SD_API int32_t sd_loom_program_generate_image_v4(
+@@ -978,6 +1016,20 @@ SD_API int32_t sd_loom_program_generate_image_v4(
      sd_loom_value_handle_v3_t* snapshot_values,
      size_t snapshot_capacity,
      sd_loom_program_image_result_v3_t* result_out);
@@ -76,10 +76,10 @@ index 6159fff..72432fa 100644
                                             sd_loom_value_handle_v3_t value,
                                             sd_loom_value_descriptor_v3_t* descriptor_out);
 diff --git src/model/diffusion/krea2.hpp src/model/diffusion/krea2.hpp
-index 252ea3a..91d5782 100644
+index cdfd266..fe0404a 100644
 --- src/model/diffusion/krea2.hpp
 +++ src/model/diffusion/krea2.hpp
-@@ -669,6 +669,17 @@ namespace Krea2 {
+@@ -684,6 +684,17 @@ namespace Krea2 {
                      [i](const ModelBlockControl& candidate) {
                          return candidate.block == i;
                      });
@@ -98,10 +98,10 @@ index 252ea3a..91d5782 100644
                      control->residual_scale == 0.f) {
                      sd::ggml_graph_cut::mark_graph_cut(hidden_states, "krea2.blocks." + std::to_string(i), "hidden_states");
 diff --git src/model/diffusion/model.hpp src/model/diffusion/model.hpp
-index 8342e22..249c9fe 100644
+index 2e4a963..841b778 100644
 --- src/model/diffusion/model.hpp
 +++ src/model/diffusion/model.hpp
-@@ -50,9 +50,17 @@ struct SkipLayerDiffusionExtra {
+@@ -57,9 +57,17 @@ struct SkipLayerDiffusionExtra {
      const std::vector<int>* skip_layers = nullptr;
  };
  
@@ -121,49 +121,73 @@ index 8342e22..249c9fe 100644
  };
  
  struct ModelBlockDiffusionExtra {
-diff --git src/stable-diffusion.cpp src/stable-diffusion.cpp
-index 9051749..2e5ebcf 100644
---- src/stable-diffusion.cpp
-+++ src/stable-diffusion.cpp
-@@ -207,6 +207,11 @@ struct sd_loom_scheduled_model_block_v4_t {
+diff --git src/pipeline/diffusion_engine.cpp src/pipeline/diffusion_engine.cpp
+index eb65b4d..aa0ed58 100644
+--- src/pipeline/diffusion_engine.cpp
++++ src/pipeline/diffusion_engine.cpp
+@@ -2492,11 +2492,24 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
+         std::vector<ModelBlockControl> active_model_block_controls;
+         if (step > 0 && !loom_model_block_controls.empty()) {
+             uint32_t model_step = static_cast<uint32_t>(step - 1);
+-            for (const auto& control : loom_model_block_controls) {
++            for (auto& control : loom_model_block_controls) {
+                 if (control.selects(model_step)) {
++                    if (control.application_index !=
++                        std::numeric_limits<size_t>::max()) {
++                        size_t word  = static_cast<size_t>(model_step / 64);
++                        uint32_t bit = model_step % 64;
++                        if (word < control.selected_transitions.size()) {
++                            control.selected_transitions[word] |=
++                                uint64_t{1} << bit;
++                        }
++                    }
+                     active_model_block_controls.push_back({
+                         static_cast<int>(control.block),
+                         control.residual_scale,
++                        control.application_index ==
++                                std::numeric_limits<size_t>::max()
++                            ? nullptr
++                            : &control.application,
+                     });
+                 }
+             }
+diff --git src/pipeline/diffusion_engine.h src/pipeline/diffusion_engine.h
+index 9203a3f..de772e5 100644
+--- src/pipeline/diffusion_engine.h
++++ src/pipeline/diffusion_engine.h
+@@ -5,6 +5,7 @@
+ #include <atomic>
+ #include <cmath>
+ #include <functional>
++#include <limits>
+ #include <list>
+ #include <map>
+ #include <memory>
+@@ -19,6 +20,7 @@
+ #include "core/tensor.hpp"
+ #include "core/util.h"
+ #include "model/adapter/lora.hpp"
++#include "model/diffusion/model.hpp"
+ #include "model_builders.h"
+ #include "model_manager.h"
+ #include "stable-diffusion.h"
+@@ -51,6 +53,11 @@ struct sd_loom_scheduled_model_block_v4_t {
      float residual_scale = 1.f;
-     bool all_steps = false;
+     bool all_steps       = false;
      std::vector<uint32_t> steps;
-+    size_t application_index = std::numeric_limits<size_t>::max();
-+    uint32_t operator_index = 0;
++    size_t application_index     = std::numeric_limits<size_t>::max();
++    uint32_t operator_index      = 0;
 +    uint32_t loaded_model_blocks = 0;
 +    std::vector<uint64_t> selected_transitions;
 +    ModelBlockApplicationCounter application;
  
      bool selects(uint32_t step) const {
          return all_steps || std::binary_search(steps.begin(), steps.end(), step);
-@@ -2541,11 +2546,24 @@ public:
-             std::vector<ModelBlockControl> active_model_block_controls;
-             if (step > 0 && !loom_model_block_controls.empty()) {
-                 uint32_t model_step = static_cast<uint32_t>(step - 1);
--                for (const auto& control : loom_model_block_controls) {
-+                for (auto& control : loom_model_block_controls) {
-                     if (control.selects(model_step)) {
-+                        if (control.application_index !=
-+                            std::numeric_limits<size_t>::max()) {
-+                            size_t word = static_cast<size_t>(model_step / 64);
-+                            uint32_t bit = model_step % 64;
-+                            if (word < control.selected_transitions.size()) {
-+                                control.selected_transitions[word] |=
-+                                    uint64_t{1} << bit;
-+                            }
-+                        }
-                         active_model_block_controls.push_back({
-                             static_cast<int>(control.block),
-                             control.residual_scale,
-+                            control.application_index ==
-+                                    std::numeric_limits<size_t>::max()
-+                                ? nullptr
-+                                : &control.application,
-                         });
-                     }
-                 }
-@@ -7509,6 +7527,224 @@ int32_t sd_loom_program_generate_image_v4(
+diff --git src/stable-diffusion.cpp src/stable-diffusion.cpp
+index 9c9a6c1..bc76900 100644
+--- src/stable-diffusion.cpp
++++ src/stable-diffusion.cpp
+@@ -2626,6 +2626,222 @@ int32_t sd_loom_program_generate_image_v4(
      }
  }
  
@@ -277,11 +301,9 @@ index 9051749..2e5ebcf 100644
 +    std::vector<sd_loom_scheduled_model_block_v4_t> scheduled;
 +    try {
 +        scheduled.reserve(params->model_block_operator_count);
-+        auto krea = std::dynamic_pointer_cast<Krea2::Krea2Runner>(
-+            program->context->sd->diffusion_model);
-+        int64_t model_block_count = krea == nullptr ? 0 : krea->model_block_count();
-+        if (krea == nullptr ||
-+            model_block_count <= 0 ||
++        const auto& diffusion = program->context->sd->diffusion_model;
++        int64_t model_block_count = diffusion == nullptr ? 0 : diffusion->model_block_count();
++        if (model_block_count <= 0 ||
 +            model_block_count >
 +                static_cast<int64_t>(std::numeric_limits<uint32_t>::max())) {
 +            return SD_LOOM_STATUS_UNSUPPORTED;

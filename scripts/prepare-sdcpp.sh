@@ -4,7 +4,7 @@
 set -euo pipefail
 
 upstream_url="https://github.com/leejet/stable-diffusion.cpp.git"
-upstream_commit="ea4e566ccffa10f853ecc3f29e74b1820bc91beb"
+upstream_commit="2988060a4338a5dcd94721c964a8e87003c1ac8b"
 
 usage() {
     echo "usage: $0 --source DIR --build DIR --backend vulkan|hip|cuda|metal" >&2
@@ -54,6 +54,9 @@ patch_files=(
     "${repo_root}/native/stable-diffusion.cpp/logit-loom-krea-reference-guard-v16.patch"
     "${repo_root}/native/stable-diffusion.cpp/logit-loom-vae-tiling-v20.patch"
     "${repo_root}/native/stable-diffusion.cpp/logit-loom-eager-load-v21.patch"
+    "${repo_root}/native/stable-diffusion.cpp/logit-loom-upstream-parity-v23.patch"
+    "${repo_root}/native/stable-diffusion.cpp/logit-loom-sealed-sources-v23.patch"
+    "${repo_root}/native/stable-diffusion.cpp/logit-loom-igpu-capacity-v23.patch"
 )
 ggml_patches=(
     "${repo_root}/native/stable-diffusion.cpp/logit-loom-vulkan-budget-v8.patch"
@@ -65,7 +68,7 @@ ggml_patches=(
     "${repo_root}/native/stable-diffusion.cpp/logit-loom-vulkan-dispatch-bounds-v18.patch"
     "${repo_root}/native/stable-diffusion.cpp/logit-loom-vulkan-uma-prefer-host-v19.patch"
 )
-ggml_commit="eced84c86f8b012c752c016f7fe789adea168e1e"
+ggml_commit="d25b121ce1d6ae0c7e62ad080460d9fc1e46dd93"
 source_dir="$(realpath -m -- "${source_dir}")"
 build_dir="$(realpath -m -- "${build_dir}")"
 

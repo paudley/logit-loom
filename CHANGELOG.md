@@ -8,6 +8,16 @@ include breaking API changes.
 
 ## [Unreleased]
 
+### Changed
+
+- The stable-diffusion.cpp companion is rebuilt on upstream
+  `2988060a4338a5dcd94721c964a8e87003c1ac8b` (ggml `d25b121c`) instead of
+  `ea4e566c` (ggml `eced84c8`). Every patch is ported; the companion ABI
+  header is unchanged. Three patches are new: `upstream-parity-v23`,
+  `sealed-sources-v23` and `igpu-capacity-v23` (a backport of upstream
+  PR #2124). The adapter now requires the new upstream commit, and the Krea
+  activation implementation digest changes with the ported v6 patch bytes.
+
 ### Added
 
 - `DistributionProbe` (logit-loom-llamacpp): a read-only native

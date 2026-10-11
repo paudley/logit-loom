@@ -7,7 +7,7 @@ the narrowly scoped descriptor/slice/callback operations in `src/runtime.rs`.
 The safe public adapter relies on all of the following conditions:
 
 1. The loaded library exports companion ABI version 2 and reports exact
-   upstream commit `ea4e566ccffa10f853ecc3f29e74b1820bc91beb`.
+   upstream commit `2988060a4338a5dcd94721c964a8e87003c1ac8b`.
 2. Resolved symbols retain the C signatures declared in
    `native/stable-diffusion.cpp/logit-loom-step-v1.patch` and
    `native/stable-diffusion.cpp/logit-loom-image-v2.patch`, plus the program

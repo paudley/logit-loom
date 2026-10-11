@@ -1,8 +1,8 @@
 diff --git include/stable-diffusion.h include/stable-diffusion.h
-index e36f89b..6159fff 100644
+index 008103d..a69e0d0 100644
 --- include/stable-diffusion.h
 +++ include/stable-diffusion.h
-@@ -425,6 +425,7 @@ typedef bool (*sd_graph_eval_callback_t)(struct ggml_tensor* t, bool ask, void*
+@@ -474,6 +474,7 @@ typedef bool (*sd_graph_eval_callback_t)(struct ggml_tensor* t, bool ask, void*
  #define SD_LOOM_ABI_VERSION 1
  #define SD_LOOM_IMAGE_ABI_VERSION 2
  #define SD_LOOM_PROGRAM_ABI_VERSION 3
@@ -10,7 +10,7 @@ index e36f89b..6159fff 100644
  
  enum sd_loom_profile_t {
      SD_LOOM_PROFILE_MINIT2I_B16 = 1,
-@@ -650,6 +651,36 @@ typedef struct {
+@@ -703,6 +704,36 @@ typedef struct {
      size_t snapshot_count;
  } sd_loom_program_image_result_v3_t;
  
@@ -47,7 +47,7 @@ index e36f89b..6159fff 100644
  typedef int32_t (*sd_loom_value_read_cb_v3_t)(const uint8_t* bytes,
                                                size_t byte_count,
                                                void* data);
-@@ -868,6 +899,16 @@ SD_API int32_t sd_loom_program_generate_image_v3(
+@@ -937,6 +968,16 @@ SD_API int32_t sd_loom_program_generate_image_v3(
      sd_loom_value_handle_v3_t* snapshot_values,
      size_t snapshot_capacity,
      sd_loom_program_image_result_v3_t* result_out);
@@ -65,10 +65,10 @@ index e36f89b..6159fff 100644
                                             sd_loom_value_handle_v3_t value,
                                             sd_loom_value_descriptor_v3_t* descriptor_out);
 diff --git src/model/diffusion/krea2.hpp src/model/diffusion/krea2.hpp
-index 9121069..252ea3a 100644
+index e58df41..cdfd266 100644
 --- src/model/diffusion/krea2.hpp
 +++ src/model/diffusion/krea2.hpp
-@@ -616,7 +616,8 @@ namespace Krea2 {
+@@ -631,7 +631,8 @@ namespace Krea2 {
                               ggml_tensor* context,
                               ggml_tensor* pe,
                               std::vector<ggml_tensor*> ref_latents = {},
@@ -78,7 +78,7 @@ index 9121069..252ea3a 100644
              int64_t W = x->ne[0];
              int64_t H = x->ne[1];
              int64_t N = x->ne[3];
-@@ -662,8 +663,29 @@ namespace Krea2 {
+@@ -677,8 +678,29 @@ namespace Krea2 {
              auto hidden_states = ggml_concat(ctx->ggml_ctx, txt, img, 1);
              int64_t ref_start  = hidden_states->ne[1] - ref_len;
              for (int i = 0; i < config.layers; ++i) {
@@ -109,18 +109,18 @@ index 9121069..252ea3a 100644
                  sd::ggml_graph_cut::mark_graph_cut(hidden_states, "krea2.blocks." + std::to_string(i), "hidden_states");
              }
  
-@@ -712,6 +734,10 @@ namespace Krea2 {
+@@ -732,6 +754,10 @@ namespace Krea2 {
              return "krea2";
          }
  
-+        int64_t model_block_count() const {
++        int64_t model_block_count() const override {
 +            return config.layers;
 +        }
 +
          void get_param_tensors(std::map<std::string, ggml_tensor*>& tensors, const std::string& prefix) override {
              model.get_param_tensors(tensors, prefix);
          }
-@@ -720,7 +746,8 @@ namespace Krea2 {
+@@ -740,7 +766,8 @@ namespace Krea2 {
                                   const sd::Tensor<float>& timesteps_tensor,
                                   const sd::Tensor<float>& context_tensor,
                                   const std::vector<sd::Tensor<float>>& ref_latents_tensor = {},
@@ -130,7 +130,7 @@ index 9121069..252ea3a 100644
              ggml_cgraph* gf        = new_graph_custom(KREA2_GRAPH_SIZE);
              ggml_tensor* x         = make_input(x_tensor);
              ggml_tensor* timesteps = make_input(timesteps_tensor);
-@@ -748,7 +775,14 @@ namespace Krea2 {
+@@ -768,7 +795,14 @@ namespace Krea2 {
              set_backend_tensor_data(pe, pe_vec.data());
  
              auto runner_ctx  = get_context();
@@ -146,7 +146,7 @@ index 9121069..252ea3a 100644
              ggml_build_forward_expand(gf, out);
              return gf;
          }
-@@ -758,9 +792,15 @@ namespace Krea2 {
+@@ -778,9 +812,15 @@ namespace Krea2 {
                                    const sd::Tensor<float>& timesteps,
                                    const sd::Tensor<float>& context,
                                    const std::vector<sd::Tensor<float>>& ref_latents = {},
@@ -162,9 +162,9 @@ index 9121069..252ea3a 100644
 +                                   ref_image_params,
 +                                   block_controls);
              };
-             return restore_trailing_singleton_dims(GGMLRunner::compute<float>(get_graph, n_threads, false, false, false), x.dim());
+             return restore_trailing_singleton_dims(GGMLRunner::compute(get_graph, n_threads, false), x.dim());
          }
-@@ -770,12 +810,17 @@ namespace Krea2 {
+@@ -790,12 +830,17 @@ namespace Krea2 {
              GGML_ASSERT(diffusion_params.x != nullptr);
              GGML_ASSERT(diffusion_params.timesteps != nullptr);
              static const std::vector<sd::Tensor<float>> empty_ref_latents;
@@ -184,10 +184,10 @@ index 9121069..252ea3a 100644
      };
  }  // namespace Krea2
 diff --git src/model/diffusion/model.hpp src/model/diffusion/model.hpp
-index d8ee3d2..8342e22 100644
+index 957d575..2e4a963 100644
 --- src/model/diffusion/model.hpp
 +++ src/model/diffusion/model.hpp
-@@ -50,6 +50,15 @@ struct SkipLayerDiffusionExtra {
+@@ -57,6 +57,15 @@ struct SkipLayerDiffusionExtra {
      const std::vector<int>* skip_layers = nullptr;
  };
  
@@ -203,26 +203,82 @@ index d8ee3d2..8342e22 100644
  struct FluxDiffusionExtra {
      const sd::Tensor<float>* guidance   = nullptr;
      const std::vector<int>* skip_layers = nullptr;
-@@ -97,6 +106,7 @@ struct HunyuanVideoDiffusionExtra {
+@@ -148,6 +157,7 @@ struct MingImageDiffusionExtra {
  using DiffusionExtraParams = std::variant<std::monostate,
                                            UNetDiffusionExtra,
                                            SkipLayerDiffusionExtra,
 +                                          ModelBlockDiffusionExtra,
                                            FluxDiffusionExtra,
                                            AnimaDiffusionExtra,
-                                           WanDiffusionExtra,
-diff --git src/stable-diffusion.cpp src/stable-diffusion.cpp
-index fb08469..788b6a9 100644
---- src/stable-diffusion.cpp
-+++ src/stable-diffusion.cpp
-@@ -202,6 +202,17 @@ struct has_set_runtime_backends<T,
- static_assert(std::atomic<sd_cancel_mode_t>::is_always_lock_free,
-               "sd_cancel_mode_t must be lock-free");
+                                           QwenImage21DiffusionExtra,
+@@ -204,6 +214,12 @@ public:
+     virtual sd::Tensor<float> compute(int n_threads,
+                                       const DiffusionParams& diffusion_params) = 0;
+ 
++    // Logit Loom: number of addressable transformer blocks for model-block
++    // operators; zero when the model exposes none.
++    virtual int64_t model_block_count() const {
++        return 0;
++    }
++
+     void get_param_tensors(std::map<std::string, ggml_tensor*>& tensors) {
+         get_param_tensors(tensors, prefix);
+     }
+diff --git src/pipeline/diffusion_engine.cpp src/pipeline/diffusion_engine.cpp
+index b3fe22c..eb65b4d 100644
+--- src/pipeline/diffusion_engine.cpp
++++ src/pipeline/diffusion_engine.cpp
+@@ -2489,6 +2489,18 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
+         step_guidance_input.step          = step;
+         step_guidance_input.schedule_size = sigmas.size();
+         bool is_skiplayer_step            = skip_layer_guidance.is_enabled_for_step(step_guidance_input);
++        std::vector<ModelBlockControl> active_model_block_controls;
++        if (step > 0 && !loom_model_block_controls.empty()) {
++            uint32_t model_step = static_cast<uint32_t>(step - 1);
++            for (const auto& control : loom_model_block_controls) {
++                if (control.selects(model_step)) {
++                    active_model_block_controls.push_back({
++                        static_cast<int>(control.block),
++                        control.residual_scale,
++                    });
++                }
++            }
++        }
+ 
+         compute_sample_controls(control_image,
+                                 noised_input,
+@@ -2531,6 +2543,11 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
+                                                             local_skip_layers};
+             } else if (version == VERSION_QWEN_IMAGE_2_1) {
+                 diffusion_params.extra = QwenImage21DiffusionExtra{&condition.c_token_types};
++            } else if (version == VERSION_KREA2) {
++                diffusion_params.extra = ModelBlockDiffusionExtra{
++                    active_model_block_controls.empty()
++                        ? nullptr
++                        : &active_model_block_controls};
+             } else if (sd_version_is_anima(version)) {
+                 diffusion_params.extra = AnimaDiffusionExtra{condition.c_t5_ids.empty() ? nullptr : &condition.c_t5_ids,
+                                                              condition.c_t5_weights.empty() ? nullptr : &condition.c_t5_weights};
+diff --git src/pipeline/diffusion_engine.h src/pipeline/diffusion_engine.h
+index e60064c..9203a3f 100644
+--- src/pipeline/diffusion_engine.h
++++ src/pipeline/diffusion_engine.h
+@@ -1,6 +1,7 @@
+ #ifndef __SD_PIPELINE_DIFFUSION_ENGINE_H__
+ #define __SD_PIPELINE_DIFFUSION_ENGINE_H__
+ 
++#include <algorithm>
+ #include <atomic>
+ #include <cmath>
+ #include <functional>
+@@ -45,6 +46,17 @@ static inline bool sd_version_supports_ref_latent_img_cfg(SDVersion version) {
+            sd_version_is_boogu_image(version);
+ }
  
 +struct sd_loom_scheduled_model_block_v4_t {
-+    uint32_t block = 0;
++    uint32_t block       = 0;
 +    float residual_scale = 1.f;
-+    bool all_steps = false;
++    bool all_steps       = false;
 +    std::vector<uint32_t> steps;
 +
 +    bool selects(uint32_t step) const {
@@ -233,46 +289,19 @@ index fb08469..788b6a9 100644
  class StableDiffusionGGML {
  public:
      SDBackendManager backend_manager;
-@@ -221,6 +232,7 @@ public:
-     int32_t loom_step_status                  = SD_LOOM_STATUS_OK;
-     uint64_t loom_program_generation          = 0;
-     bool loom_program_active                  = false;
+@@ -64,6 +76,7 @@ public:
+     int32_t loom_step_status                           = SD_LOOM_STATUS_OK;
+     uint64_t loom_program_generation                   = 0;
+     bool loom_program_active                           = false;
 +    std::vector<sd_loom_scheduled_model_block_v4_t> loom_model_block_controls;
      int n_threads                    = -1;
-     float default_flow_shift         = INFINITY;
- 
-@@ -2526,6 +2538,18 @@ public:
-             step_guidance_input.step          = step;
-             step_guidance_input.schedule_size = sigmas.size();
-             bool is_skiplayer_step            = skip_layer_guidance.is_enabled_for_step(step_guidance_input);
-+            std::vector<ModelBlockControl> active_model_block_controls;
-+            if (step > 0 && !loom_model_block_controls.empty()) {
-+                uint32_t model_step = static_cast<uint32_t>(step - 1);
-+                for (const auto& control : loom_model_block_controls) {
-+                    if (control.selects(model_step)) {
-+                        active_model_block_controls.push_back({
-+                            static_cast<int>(control.block),
-+                            control.residual_scale,
-+                        });
-+                    }
-+                }
-+            }
- 
-             compute_sample_controls(control_image,
-                                     noised_input,
-@@ -2558,6 +2582,11 @@ public:
-                 } else if (sd_version_is_flux(version) || sd_version_is_flux2(version) || sd_version_is_longcat(version) || sd_version_is_sefi_image(version)) {
-                     diffusion_params.extra = FluxDiffusionExtra{&guidance_tensor,
-                                                                 local_skip_layers};
-+                } else if (version == VERSION_KREA2) {
-+                    diffusion_params.extra = ModelBlockDiffusionExtra{
-+                        active_model_block_controls.empty()
-+                            ? nullptr
-+                            : &active_model_block_controls};
-                 } else if (sd_version_is_anima(version)) {
-                     diffusion_params.extra = AnimaDiffusionExtra{condition.c_t5_ids.empty() ? nullptr : &condition.c_t5_ids,
-                                                                  condition.c_t5_weights.empty() ? nullptr : &condition.c_t5_weights};
-@@ -7334,6 +7363,152 @@ int32_t sd_loom_program_generate_image_v3(
+     std::unique_ptr<sd::ParallelExecutor> tensor_executor;
+     float default_flow_shift = INFINITY;
+diff --git src/stable-diffusion.cpp src/stable-diffusion.cpp
+index dea68ec..9c9a6c1 100644
+--- src/stable-diffusion.cpp
++++ src/stable-diffusion.cpp
+@@ -2482,6 +2482,150 @@ int32_t sd_loom_program_generate_image_v3(
      }
  }
  
@@ -350,11 +379,9 @@ index fb08469..788b6a9 100644
 +    std::vector<sd_loom_scheduled_model_block_v4_t> scheduled;
 +    try {
 +        scheduled.reserve(params->model_block_operator_count);
-+        auto krea = std::dynamic_pointer_cast<Krea2::Krea2Runner>(
-+            program->context->sd->diffusion_model);
-+        int64_t model_block_count = krea == nullptr ? 0 : krea->model_block_count();
-+        if (params->model_block_operator_count > 0 &&
-+            (krea == nullptr || model_block_count <= 0)) {
++        const auto& diffusion = program->context->sd->diffusion_model;
++        int64_t model_block_count = diffusion == nullptr ? 0 : diffusion->model_block_count();
++        if (params->model_block_operator_count > 0 && model_block_count <= 0) {
 +            return SD_LOOM_STATUS_UNSUPPORTED;
 +        }
 +        for (size_t index = 0;
