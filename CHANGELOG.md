@@ -17,6 +17,10 @@ include breaking API changes.
   `sealed-sources-v23` and `igpu-capacity-v23` (a backport of upstream
   PR #2124). The adapter now requires the new upstream commit, and the Krea
   activation implementation digest changes with the ported v6 patch bytes.
+  Both upstream trees are vendored as plain-file exports under
+  `native/stable-diffusion.cpp/upstream/`; `scripts/prepare-sdcpp.sh` no
+  longer clones, checks out, or initializes a submodule, and refuses a
+  vendored tree whose SHA-256 identity differs.
 
 ### Added
 

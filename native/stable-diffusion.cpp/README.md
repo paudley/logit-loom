@@ -4,13 +4,14 @@
 
 This directory contains a narrow source patch for
 `leejet/stable-diffusion.cpp@2988060a4338a5dcd94721c964a8e87003c1ac8b`
-(2026-10-11) and its `ggml` submodule at
-`leejet/ggml@d25b121ce1d6ae0c7e62ad080460d9fc1e46dd93`. Every patch was
+(2026-10-11) and its `ggml` at
+`leejet/ggml@d25b121ce1d6ae0c7e62ad080460d9fc1e46dd93`, both vendored as
+plain files under [`upstream/`](upstream/README.md). Every patch was
 ported from the `ea4e566ccffa10f853ecc3f29e74b1820bc91beb` stack (ggml
 `eced84c86f8b012c752c016f7fe789adea168e1e`); none became redundant, and one
 hunk was dropped (see "Port to 2988060a" below).
 That upstream project is MIT licensed. The patch is maintained under Logit
-Loom's `MIT OR Apache-2.0` terms and does not vendor upstream source.
+Loom's `MIT OR Apache-2.0` terms and vendors upstream source only unmodified, under `upstream/`.
 
 The companion ABI exposes:
 
@@ -84,8 +85,8 @@ scripts/prepare-sdcpp.sh \
   --backend vulkan
 ```
 
-If the source path does not exist, the script clones the upstream repository.
-It checks out the exact revision, applies
+The script verifies the vendored trees' identities, copies them to the
+source path (replacing only a source directory it created earlier), applies
 [`logit-loom-step-v1.patch`](logit-loom-step-v1.patch) followed by
 [`logit-loom-image-v2.patch`](logit-loom-image-v2.patch) and
 [`logit-loom-program-v3.patch`](logit-loom-program-v3.patch), then the
@@ -111,7 +112,7 @@ then
 [`logit-loom-sealed-sources-v23.patch`](logit-loom-sealed-sources-v23.patch),
 and
 [`logit-loom-igpu-capacity-v23.patch`](logit-loom-igpu-capacity-v23.patch),
-and finally the exact ggml-submodule
+and finally the exact ggml
 [`logit-loom-vulkan-budget-v8.patch`](logit-loom-vulkan-budget-v8.patch),
 [`logit-loom-vulkan-errors-v10.patch`](logit-loom-vulkan-errors-v10.patch), and
 [`logit-loom-vulkan-strix-halo-v11.patch`](logit-loom-vulkan-strix-halo-v11.patch),
@@ -125,8 +126,8 @@ then
 [`logit-loom-vulkan-dispatch-bounds-v18.patch`](logit-loom-vulkan-dispatch-bounds-v18.patch),
 then
 [`logit-loom-vulkan-uma-prefer-host-v19.patch`](logit-loom-vulkan-uma-prefer-host-v19.patch),
-initializes only the required `ggml` submodule, and builds a shared library.
-Existing incompatible source changes are rejected. The script never runs from
+the ggml patches to the copied `ggml/`, and builds a shared library. A tree
+whose identity differs, or a patch that does not apply, fails the build. The script never runs from
 tests, CI, documentation, package builds, or `make check`.
 
 Select `vulkan`, `hip`, `cuda`, or `metal` according to the deployment. The
@@ -256,9 +257,6 @@ version is unchanged; only the reported upstream commit differs.
   diagnostics in `ggml-vulkan-buffers.cpp`, and the dispatch-bound push
   constants in `ggml-vulkan-push-constants.h`. Upstream has none of the Strix
   Halo, UMA, ceiling or dispatch-bound changes.
-
-`leejet/ggml@d25b121` is not signed, so on a host whose Git hooks refuse
-unsigned `HEAD` targets, `git submodule update` cannot check it out.
 
 The reviewed decision and boundary are in
 [`docs/adr/0001-stable-diffusion-runtime.md`](../../docs/adr/0001-stable-diffusion-runtime.md).
