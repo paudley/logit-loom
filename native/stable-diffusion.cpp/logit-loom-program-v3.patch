@@ -1,8 +1,8 @@
 diff --git include/stable-diffusion.h include/stable-diffusion.h
-index b813989..008103d 100644
+index ceba246..e36f89b 100644
 --- include/stable-diffusion.h
 +++ include/stable-diffusion.h
-@@ -473,6 +473,7 @@ typedef bool (*sd_graph_eval_callback_t)(struct ggml_tensor* t, bool ask, void*
+@@ -424,6 +424,7 @@ typedef bool (*sd_graph_eval_callback_t)(struct ggml_tensor* t, bool ask, void*
  // patch and is not part of upstream stable-diffusion.cpp.
  #define SD_LOOM_ABI_VERSION 1
  #define SD_LOOM_IMAGE_ABI_VERSION 2
@@ -10,7 +10,7 @@ index b813989..008103d 100644
  
  enum sd_loom_profile_t {
      SD_LOOM_PROFILE_MINIT2I_B16 = 1,
-@@ -612,6 +613,100 @@ typedef struct {
+@@ -559,6 +560,100 @@ typedef struct {
      size_t rank;
  } sd_loom_tensor_view_v2_t;
  
@@ -110,8 +110,8 @@ index b813989..008103d 100644
 +
  SD_API void sd_set_log_callback(sd_log_cb_t sd_log_cb, void* data);
  SD_API void sd_set_progress_callback(sd_progress_cb_t cb, void* data);
- // In each sampling pass, a positive interval previews every Nth denoiser step, while a
-@@ -798,6 +893,67 @@ SD_API int32_t sd_loom_vae_decode_v2(sd_ctx_t* sd_ctx,
+ SD_API void sd_set_preview_callback(sd_preview_cb_t cb, enum preview_t mode, int interval, bool denoised, bool noisy, void* data);
+@@ -729,6 +824,67 @@ SD_API int32_t sd_loom_vae_decode_v2(sd_ctx_t* sd_ctx,
                                      sd_image_t** image_out);
  SD_API void sd_loom_free_tensor_v2(sd_loom_owned_tensor_v2_t* tensor);
  SD_API int32_t sd_loom_clear_session_v2(sd_ctx_t* sd_ctx);
@@ -179,41 +179,41 @@ index b813989..008103d 100644
  
  // List available ggml backend devices, one `name<TAB>description` per line.
  // The names are the device names accepted by the --backend / --params-backend
-diff --git src/pipeline/diffusion_engine.h src/pipeline/diffusion_engine.h
-index 4c4dbbb..e60064c 100644
---- src/pipeline/diffusion_engine.h
-+++ src/pipeline/diffusion_engine.h
-@@ -62,6 +62,8 @@ public:
-     sd_loom_step_cb_v1_t loom_step_callback            = nullptr;
-     void* loom_step_callback_data                      = nullptr;
-     int32_t loom_step_status                           = SD_LOOM_STATUS_OK;
-+    uint64_t loom_program_generation                   = 0;
-+    bool loom_program_active                           = false;
-     int n_threads                    = -1;
-     std::unique_ptr<sd::ParallelExecutor> tensor_executor;
-     float default_flow_shift = INFINITY;
 diff --git src/stable-diffusion.cpp src/stable-diffusion.cpp
-index d74b220..dea68ec 100644
+index 5a5d12a..fb08469 100644
 --- src/stable-diffusion.cpp
 +++ src/stable-diffusion.cpp
-@@ -5,9 +5,16 @@
+@@ -1,12 +1,20 @@
+ #include <algorithm>
  #include <cmath>
++#include <cstring>
  #include <cstdlib>
- #include <cstring>
 +#include <limits>
 +#include <new>
- #include <string>
-+#include <unordered_set>
+ #include <set>
++#include <string>
+ #include <type_traits>
+ #include <unordered_set>
+ #include <utility>
  #include <vector>
  
 +#define STBI_WRITE_NO_STDIO
 +#define STB_IMAGE_WRITE_IMPLEMENTATION
 +#include "stb_image_write.h"
 +
- #include "core/ggml_extend.h"
- #include "core/util.h"
- #include "pipeline/diffusion_engine.h"
-@@ -1354,6 +1361,1259 @@ int32_t sd_loom_clear_session_v2(sd_ctx_t* sd_ctx) {
+ #include "core/ggml_extend.hpp"
+ #include "core/ggml_graph_cut.h"
+ #include "core/layer_split_partition.h"
+@@ -211,6 +219,8 @@ public:
+     sd_loom_step_cb_v1_t loom_step_callback = nullptr;
+     void* loom_step_callback_data            = nullptr;
+     int32_t loom_step_status                  = SD_LOOM_STATUS_OK;
++    uint64_t loom_program_generation          = 0;
++    bool loom_program_active                  = false;
+     int n_threads                    = -1;
+     float default_flow_shift         = INFINITY;
+ 
+@@ -6201,6 +6211,1261 @@ int32_t sd_loom_clear_session_v2(sd_ctx_t* sd_ctx) {
      }
  }
  
@@ -1023,9 +1023,11 @@ index d74b220..dea68ec 100644
 +                                  ? "|high_noise|" + lora->path
 +                                  : lora->path;
 +    bool matched = false;
-+    for (auto& entry : state->program->context->sd->runtime_lora_models) {
-+        if (sd_loom_runtime_lora_applied_v2(entry, expected_id)) {
-+            entry.model->multiplier = selected->scale;
++    for (const auto& model : state->program->context->sd->runtime_lora_models) {
++        if (model != nullptr &&
++            model->lora_id == expected_id &&
++            !model->applied_lora_tensors.empty()) {
++            model->multiplier = selected->scale;
 +            matched = true;
 +        }
 +    }
@@ -1452,10 +1454,10 @@ index d74b220..dea68ec 100644
 +    int32_t status = SD_LOOM_STATUS_NATIVE_ERROR;
 +    try {
 +        sd_loom_reset_callbacks(context);
-+        status = sd_loom_clear_loras(context) ? SD_LOOM_STATUS_OK
-+                                              : SD_LOOM_STATUS_NATIVE_ERROR;
++        context->sd->apply_loras(nullptr, 0);
 +        context->sd->reset_cancel_flag();
-+        if (status == SD_LOOM_STATUS_OK && clear_model_session) {
++        status = SD_LOOM_STATUS_OK;
++        if (clear_model_session) {
 +            status = sd_loom_clear_session_v2(context);
 +        }
 +    } catch (...) {
@@ -1470,6 +1472,6 @@ index d74b220..dea68ec 100644
 +    return status;
 +}
 +
- SD_API bool generate_video(sd_ctx_t* sd_ctx,
-                            const sd_vid_gen_params_t* sd_vid_gen_params,
-                            sd_image_t** frames_out,
+ static std::optional<ImageGenerationLatents> prepare_video_generation_latents(sd_ctx_t* sd_ctx,
+                                                                               const sd_vid_gen_params_t* sd_vid_gen_params,
+                                                                               GenerationRequest* request) {

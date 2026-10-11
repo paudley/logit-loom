@@ -168,7 +168,7 @@ The image adapter dynamically loads companion ABI version `2` and requires
 whole-image extension version `3`, resident-program extension version `3`,
 model-block extension version `4`, application-evidence extension version `5`,
 and Krea activation extension version `6`, built from
-`stable-diffusion.cpp@2988060a4338a5dcd94721c964a8e87003c1ac8b`. The safe
+`stable-diffusion.cpp@ea4e566ccffa10f853ecc3f29e74b1820bc91beb`. The safe
 Rust adapter contract is version `9`. The exact ABIs, extensions, commit,
 required symbol set, and shared-library bytes are checked before model context
 creation. A library carrying only the earlier step-v1 symbols is incompatible

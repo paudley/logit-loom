@@ -2,7 +2,3 @@
 
 # Native patch payloads retain upstream-significant whitespace byte-for-byte.
 crates/diffusion-sdcpp/assets/*.patch -whitespace
-
-# Vendored upstream trees are stored byte-for-byte: their identity is a
-# per-file SHA-256 of the archive export, CRLF files included.
-native/stable-diffusion.cpp/upstream/** -text -whitespace

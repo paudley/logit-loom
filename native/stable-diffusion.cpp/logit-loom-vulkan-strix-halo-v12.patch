@@ -1,8 +1,7 @@
 diff --git src/ggml-vulkan/ggml-vulkan.cpp src/ggml-vulkan/ggml-vulkan.cpp
-index 61d76b55..70ca70ad 100644
 --- src/ggml-vulkan/ggml-vulkan.cpp
 +++ src/ggml-vulkan/ggml-vulkan.cpp
-@@ -4019,6 +4019,16 @@ vk_device ggml_vk_get_device(size_t idx) {
+@@ -5793,6 +5793,16 @@ static vk_device ggml_vk_get_device(size_t idx) {
          device->vendor_id = device->properties.vendorID;
          device->driver_id = driver_props.driverID;
  

@@ -1,8 +1,7 @@
-diff --git src/ggml-vulkan/ggml-vulkan-push-constants.h src/ggml-vulkan/ggml-vulkan-push-constants.h
-index 8cd99d3f..dac86dd2 100644
---- src/ggml-vulkan/ggml-vulkan-push-constants.h
-+++ src/ggml-vulkan/ggml-vulkan-push-constants.h
-@@ -12,6 +12,10 @@ struct vk_mat_mat_push_constants {
+diff --git src/ggml-vulkan/ggml-vulkan.cpp src/ggml-vulkan/ggml-vulkan.cpp
+--- src/ggml-vulkan/ggml-vulkan.cpp
++++ src/ggml-vulkan/ggml-vulkan.cpp
+@@ -1138,6 +1138,10 @@
      uint32_t base_work_group_z; uint32_t num_batches;
      uint32_t k_split;
      uint32_t ne02; uint32_t ne12; uint32_t broadcast2; uint32_t broadcast3;
@@ -13,11 +12,7 @@ index 8cd99d3f..dac86dd2 100644
      uint32_t padded_N;
  };
  
-diff --git src/ggml-vulkan/ggml-vulkan.cpp src/ggml-vulkan/ggml-vulkan.cpp
-index 558ea45e..affa4256 100644
---- src/ggml-vulkan/ggml-vulkan.cpp
-+++ src/ggml-vulkan/ggml-vulkan.cpp
-@@ -3006,7 +3006,7 @@ void ggml_vk_load_shaders(vk_device& device, vk_pipeline requested) {
+@@ -5050,7 +5054,7 @@
      ggml_vk_create_pipeline(device, device->pipeline_get_rows_f32[GGML_TYPE_NVFP4],   "get_rows_nvfp4_f32",   get_rows_nvfp4_f32_len,   get_rows_nvfp4_f32_data,   "main", 3, sizeof(vk_op_binary_push_constants), {1024, 1, 1}, {}, 1);
      ggml_vk_create_pipeline(device, device->pipeline_get_rows_back_f32, "get_rows_back_f32", get_rows_back_f32_len, get_rows_back_f32_data, "main", 3, sizeof(vk_op_binary_push_constants), {256, 1, 1}, {}, 1, true);
  
@@ -25,9 +20,9 @@ index 558ea45e..affa4256 100644
 +    ggml_vk_create_pipeline(device, device->pipeline_matmul_split_k_reduce, "split_k_reduce", split_k_reduce_len, split_k_reduce_data, "main", 2, 3 * sizeof(uint32_t), {256 * 4, 1, 1}, {}, 1);
      ggml_vk_create_pipeline(device, device->pipeline_flash_attn_split_k_reduce, "fa_split_k_reduce", fa_split_k_reduce_len, fa_split_k_reduce_data, "main", 3, sizeof(vk_op_flash_attn_split_k_reduce_push_constants), {1, device->subgroup_size, 1}, {device->subgroup_size}, 1, true);
  
-     if (device->vendor_id == VK_VENDOR_ID_INTEL && (device->architecture == INTEL_XE2 || (device->architecture == INTEL_XE1 && device->coopmat_support && device->uma))) {
-@@ -5753,6 +5753,15 @@ static uint32_t ggml_vk_guess_split_k(ggml_backend_vk_context * ctx, uint32_t m,
-     return split_k;
+     for (auto &it : device->pipeline_fa_mask_opt) {
+@@ -8259,6 +8263,15 @@
+     return ggml_vk_guess_matmul_pipeline(ctx, mmp, m, n, true, src0_type, src1_type)->align;
  }
  
 +// Number of dispatches needed to cover `total` work-groups on one axis when a
@@ -39,10 +34,10 @@ index 558ea45e..affa4256 100644
 +    return (total + limit - 1) / limit;
 +}
 +
- void ggml_vk_matmul(
+ static void ggml_vk_matmul(
          ggml_backend_vk_context * ctx, vk_context& subctx, vk_pipeline& pipeline,
          vk_subbuffer&& a, vk_subbuffer&& b, vk_subbuffer&& d, vk_subbuffer&& split_k_buffer,
-@@ -5761,44 +5770,85 @@ void ggml_vk_matmul(
+@@ -8267,44 +8280,85 @@
          uint32_t split_k, uint32_t batch, uint32_t ne02, uint32_t ne12, uint32_t broadcast2, uint32_t broadcast3,
          uint32_t padded_n) {
          VK_LOG_DEBUG("ggml_vk_matmul(a: (" << a.buffer->buffer << ", " << a.offset << ", " << a.size << "), b: (" << b.buffer->buffer << ", " << b.offset << ", " << b.size << "), d: (" << d.buffer->buffer << ", " << d.offset << ", " << d.size << "), split_k: (" << (split_k_buffer.buffer != nullptr ? split_k_buffer.buffer->buffer : VK_NULL_HANDLE) << ", " << split_k_buffer.offset << ", " << split_k_buffer.size << "), m: " << m << ", n: " << n << ", k: " << k << ", stride_a: " << stride_a << ", stride_b: " << stride_b << ", stride_d: " << stride_d << ", batch_stride_a: " << batch_stride_a << ", batch_stride_b: " << batch_stride_b << ", batch_stride_d: " << batch_stride_d << ", split_k: " << split_k << ", batch: " << batch << ", ne02: " << ne02 << ", ne12: " << ne12 << ", broadcast2: " << broadcast2 << ", broadcast3: " << broadcast3 << ", padded_n: " << padded_n << ")");
@@ -72,19 +67,12 @@ index 558ea45e..affa4256 100644
 +    const uint64_t chunks_z = ggml_vk_dispatch_chunks(wg_z_total, max_wg_z);
 +    const uint64_t chunks = chunks_x * chunks_y * chunks_z;
 +    GGML_ASSERT(chunks >= 1 && chunks <= UINT32_MAX);
- 
--        uint32_t base_work_group_z = 0;
--        while (base_work_group_z < batch) {
--            uint32_t groups_z = std::min(batch - base_work_group_z, ctx->device->properties.limits.maxComputeWorkGroupCount[2]);
--
--            const vk_mat_mat_push_constants pc = { m, n, k, stride_a, stride_b, stride_d, batch_stride_a, batch_stride_b, batch_stride_d, base_work_group_z, batch, k, ne02, ne12, broadcast2, broadcast3, padded_n };
--            ggml_vk_dispatch_pipeline(ctx, subctx, pipeline, { a, b, d }, pc, { m, n, groups_z });
--            base_work_group_z += groups_z;
++
 +    uint32_t k_split = k;
 +    if (split_k > 1) {
 +        if (ctx->prealloc_split_k_need_sync) {
 +            ggml_vk_sync_buffers(ctx, subctx);
-         }
++        }
 +
 +        GGML_ASSERT(batch_stride_d == m * n);
 +
@@ -102,7 +90,14 @@ index 558ea45e..affa4256 100644
 +            const uint32_t groups_y = (uint32_t)std::min(wg_y_total - base_work_group_y, max_wg_y);
 +            for (uint64_t base_work_group_x = 0; base_work_group_x < wg_x_total; base_work_group_x += max_wg_x) {
 +                const uint32_t groups_x = (uint32_t)std::min(wg_x_total - base_work_group_x, max_wg_x);
-+
+ 
+-        uint32_t base_work_group_z = 0;
+-        while (base_work_group_z < batch) {
+-            uint32_t groups_z = std::min(batch - base_work_group_z, ctx->device->properties.limits.maxComputeWorkGroupCount[2]);
+-
+-            const vk_mat_mat_push_constants pc = { m, n, k, stride_a, stride_b, stride_d, batch_stride_a, batch_stride_b, batch_stride_d, base_work_group_z, batch, k, ne02, ne12, broadcast2, broadcast3, padded_n };
+-            ggml_vk_dispatch_pipeline(ctx, subctx, pipeline, { a, b, d }, pc, { m, n, groups_z });
+-            base_work_group_z += groups_z;
 +                const vk_mat_mat_push_constants pc = { m, n, k, stride_a, stride_b, stride_d, batch_stride_a, batch_stride_b, batch_stride_d, (uint32_t)base_work_group_z, batch, k_split, ne02, ne12, broadcast2, broadcast3, (uint32_t)base_work_group_x, (uint32_t)base_work_group_y, padded_n };
 +                if (split_k == 1) {
 +                    ggml_vk_dispatch_pipeline(ctx, subctx, pipeline, { a, b, d }, pc, { groups_x * tile_m, groups_y * tile_n, groups_z });
@@ -111,11 +106,8 @@ index 558ea45e..affa4256 100644
 +                }
 +                dispatched++;
 +            }
-+        }
-+    }
-+    GGML_ASSERT(dispatched == chunks);
-+    if (split_k == 1) {
-         return;
+         }
+-        return;
      }
 -
 -    if (ctx->prealloc_split_k_need_sync) {
@@ -138,7 +130,10 @@ index 558ea45e..affa4256 100644
 -        // Make sure enough workgroups get assigned for split k to work
 -        ggml_vk_dispatch_pipeline(ctx, subctx, pipeline, { a, b, split_k_buffer }, pc1, { (CEIL_DIV(m, pipeline->wg_denoms[0]) * pipeline->wg_denoms[0]) * split_k, n, groups_z });
 -        base_work_group_z += groups_z;
--    }
++    GGML_ASSERT(dispatched == chunks);
++    if (split_k == 1) {
++        return;
+     }
      ggml_vk_sync_buffers(ctx, subctx);
 -    const std::array<uint32_t, 2> pc2 = { (uint32_t)(m * n * batch), split_k };
 -    ggml_vk_dispatch_pipeline(ctx, subctx, ctx->device->pipeline_matmul_split_k_reduce, { split_k_buffer, d }, pc2, { m * n * batch, 1, 1 });
@@ -162,7 +157,6 @@ index 558ea45e..affa4256 100644
  }
  
 diff --git src/ggml-vulkan/vulkan-shaders/mul_mat_split_k_reduce.comp src/ggml-vulkan/vulkan-shaders/mul_mat_split_k_reduce.comp
-index 4c64fd47..33189632 100644
 --- src/ggml-vulkan/vulkan-shaders/mul_mat_split_k_reduce.comp
 +++ src/ggml-vulkan/vulkan-shaders/mul_mat_split_k_reduce.comp
 @@ -12,11 +12,14 @@ layout (binding = 1) writeonly buffer D4 {vec4 data_d4[];};
@@ -182,10 +176,9 @@ index 4c64fd47..33189632 100644
      if (idx >= p.ne) {
          return;
 diff --git src/ggml-vulkan/vulkan-shaders/mul_mm.comp src/ggml-vulkan/vulkan-shaders/mul_mm.comp
-index 11098ee7..6c5ed786 100644
 --- src/ggml-vulkan/vulkan-shaders/mul_mm.comp
 +++ src/ggml-vulkan/vulkan-shaders/mul_mm.comp
-@@ -155,6 +155,8 @@ layout (push_constant) uniform parameter
+@@ -96,6 +96,8 @@ layout (push_constant) uniform parameter
      uint ne12;
      uint broadcast2;
      uint broadcast3;
@@ -194,8 +187,8 @@ index 11098ee7..6c5ed786 100644
  #endif
  } p;
  
-@@ -208,7 +210,11 @@ shared ACC_TYPE coopmat_stage[TM * TN * NUM_WARPS];
- #endif
+@@ -137,7 +139,11 @@ shared ACC_TYPE coopmat_stage[TM * TN * NUM_WARPS];
+ #include "mul_mm_funcs.glsl"
  
  void main() {
 +#ifdef MUL_MAT_ID
@@ -206,7 +199,7 @@ index 11098ee7..6c5ed786 100644
  
  #ifdef MUL_MAT_ID
      const uint expert_idx = gl_WorkGroupID.z;
-@@ -233,8 +239,13 @@ void main() {
+@@ -162,8 +168,13 @@ void main() {
  #endif
  
      const uint blocks_m = (p.M + BM - 1) / BM;
@@ -223,19 +216,18 @@ index 11098ee7..6c5ed786 100644
      const uint WNITER = (WM * WN) / (WARP * TM * TN * WMITER);
      const uint WSUBM = WM / WMITER;
 diff --git src/ggml-vulkan/vulkan-shaders/mul_mm_cm2.comp src/ggml-vulkan/vulkan-shaders/mul_mm_cm2.comp
-index 9b59e8bc..b67b1307 100644
 --- src/ggml-vulkan/vulkan-shaders/mul_mm_cm2.comp
 +++ src/ggml-vulkan/vulkan-shaders/mul_mm_cm2.comp
-@@ -91,6 +91,8 @@ layout (push_constant) uniform parameter
+@@ -64,6 +64,8 @@ layout (push_constant) uniform parameter
      uint ne12;
      uint broadcast2;
      uint broadcast3;
 +    uint base_work_group_x;
 +    uint base_work_group_y;
+ #endif
      // N dimension for the B matrix can be >= p.N
      uint padded_N;
- #endif
-@@ -328,7 +330,11 @@ void load_row_ids_hoisted(uint expert_idx, uint ic) {
+@@ -229,7 +231,11 @@ void load_row_ids(uint expert_idx, bool nei0_is_pow2, uint ic) {
  
  void main() {
      const uint tid = gl_LocalInvocationIndex;
@@ -247,7 +239,7 @@ index 9b59e8bc..b67b1307 100644
  
  #ifdef MUL_MAT_ID
      const uint expert_idx = gl_WorkGroupID.z;
-@@ -361,8 +367,13 @@ void main() {
+@@ -262,8 +268,13 @@ void main() {
  #endif
  
      const uint blocks_m = (p.M + BM - 1) / BM;
@@ -262,12 +254,11 @@ index 9b59e8bc..b67b1307 100644
 +    const uint ik = wg_x / blocks_m;
  
  #ifdef MUL_MAT_ID
-     if (p.hoist_row_ids != 0) {
+     if (bitCount(p.nei0) == 1) {
 diff --git src/ggml-vulkan/vulkan-shaders/mul_mmq.comp src/ggml-vulkan/vulkan-shaders/mul_mmq.comp
-index 67908e70..a552897a 100644
 --- src/ggml-vulkan/vulkan-shaders/mul_mmq.comp
 +++ src/ggml-vulkan/vulkan-shaders/mul_mmq.comp
-@@ -68,6 +68,8 @@ layout (push_constant) uniform parameter
+@@ -64,6 +64,8 @@ layout (push_constant) uniform parameter
      uint ne12;
      uint broadcast2;
      uint broadcast3;
@@ -276,7 +267,7 @@ index 67908e70..a552897a 100644
  #endif
  } p;
  
-@@ -111,7 +113,11 @@ block_b_cache cache_b;
+@@ -107,7 +109,11 @@ block_b_cache cache_b;
  #include "mul_mmq_funcs.glsl"
  
  void main() {
@@ -288,7 +279,7 @@ index 67908e70..a552897a 100644
  
  #ifdef MUL_MAT_ID
      const uint expert_idx = gl_WorkGroupID.z;
-@@ -136,8 +142,13 @@ void main() {
+@@ -132,8 +138,13 @@ void main() {
  #endif
  
      const uint blocks_m = (p.M + BM - 1) / BM;

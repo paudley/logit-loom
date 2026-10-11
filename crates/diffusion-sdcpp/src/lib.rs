@@ -70,4 +70,4 @@ pub const KREA_ACTIVATION_ABI_VERSION: u32 = 6;
 /// Version of the safe Rust execution contract layered over the companion.
 pub const ADAPTER_CONTRACT_VERSION: u32 = 9;
 /// Exact stable-diffusion.cpp revision required by this adapter.
-pub const UPSTREAM_COMMIT: &str = "2988060a4338a5dcd94721c964a8e87003c1ac8b";
+pub const UPSTREAM_COMMIT: &str = "ea4e566ccffa10f853ecc3f29e74b1820bc91beb";

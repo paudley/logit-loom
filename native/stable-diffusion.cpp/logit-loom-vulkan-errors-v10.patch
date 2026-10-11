@@ -1,8 +1,8 @@
-diff --git src/ggml-vulkan/ggml-vulkan-buffers.cpp src/ggml-vulkan/ggml-vulkan-buffers.cpp
-index 78cc1069..60a78051 100644
---- src/ggml-vulkan/ggml-vulkan-buffers.cpp
-+++ src/ggml-vulkan/ggml-vulkan-buffers.cpp
-@@ -119,6 +119,13 @@ static vk_buffer ggml_vk_create_buffer(vk_device& device, size_t size, const std
+diff --git src/ggml-vulkan/ggml-vulkan.cpp src/ggml-vulkan/ggml-vulkan.cpp
+index a0f6163..38794de 100644
+--- src/ggml-vulkan/ggml-vulkan.cpp
++++ src/ggml-vulkan/ggml-vulkan.cpp
+@@ -3112,6 +3112,13 @@ static vk_buffer ggml_vk_create_buffer(vk_device& device, size_t size, const std
              import_info.setPNext(&mem_flags_info);
              buf->device_memory = device->device.allocateMemory({ size, memory_type_idx, &import_info });
          } catch (const vk::SystemError& e) {
@@ -16,7 +16,7 @@ index 78cc1069..60a78051 100644
              ggml_vk_logit_loom_release(size);
          }
          if (buf->device_memory) {
-@@ -148,6 +155,14 @@ static vk_buffer ggml_vk_create_buffer(vk_device& device, size_t size, const std
+@@ -3142,6 +3149,14 @@ static vk_buffer ggml_vk_create_buffer(vk_device& device, size_t size, const std
                      done = true;
                      break;
                  } catch (const vk::SystemError& e) {
@@ -31,11 +31,7 @@ index 78cc1069..60a78051 100644
                      // loop and retry
                      // during last attempt throw the exception
                      if (it + 1 == req_flags_list.end() && mtype_it + 1 == memory_type_indices.end()) {
-diff --git src/ggml-vulkan/ggml-vulkan.cpp src/ggml-vulkan/ggml-vulkan.cpp
-index a6f90364..f889b775 100644
---- src/ggml-vulkan/ggml-vulkan.cpp
-+++ src/ggml-vulkan/ggml-vulkan.cpp
-@@ -13029,6 +13029,12 @@ ggml_backend_buffer_t ggml_backend_vk_buffer_type_alloc_buffer(ggml_backend_buff
+@@ -15268,5 +15283,11 @@ static ggml_backend_buffer_t ggml_backend_vk_buffer_type_alloc_buffer(ggml_backe
      try {
          dev_buffer = ggml_vk_create_buffer_device(ctx->device, size);
      } catch (const vk::SystemError& e) {
@@ -47,4 +43,3 @@ index a6f90364..f889b775 100644
 +                       e.what());
          return nullptr;
      }
- 

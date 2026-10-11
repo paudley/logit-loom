@@ -3,12 +3,8 @@
 
 set -euo pipefail
 
-# The upstream sources are vendored as plain files under
-# native/stable-diffusion.cpp/upstream/ (see its README.md): no clone, no
-# checkout, no submodule. Each tree is pinned by the SHA-256 of its sorted
-# per-file sha256sum listing; the build refuses a tree that differs.
-upstream_commit="2988060a4338a5dcd94721c964a8e87003c1ac8b"
-upstream_tree_sha256="04e2de27a19f4924314d3ee48e23634fb4fd96e353a5769e76b85e262ac93a3f"
+upstream_url="https://github.com/leejet/stable-diffusion.cpp.git"
+upstream_commit="ea4e566ccffa10f853ecc3f29e74b1820bc91beb"
 
 usage() {
     echo "usage: $0 --source DIR --build DIR --backend vulkan|hip|cuda|metal" >&2
@@ -58,9 +54,6 @@ patch_files=(
     "${repo_root}/native/stable-diffusion.cpp/logit-loom-krea-reference-guard-v16.patch"
     "${repo_root}/native/stable-diffusion.cpp/logit-loom-vae-tiling-v20.patch"
     "${repo_root}/native/stable-diffusion.cpp/logit-loom-eager-load-v21.patch"
-    "${repo_root}/native/stable-diffusion.cpp/logit-loom-upstream-parity-v23.patch"
-    "${repo_root}/native/stable-diffusion.cpp/logit-loom-sealed-sources-v23.patch"
-    "${repo_root}/native/stable-diffusion.cpp/logit-loom-igpu-capacity-v23.patch"
 )
 ggml_patches=(
     "${repo_root}/native/stable-diffusion.cpp/logit-loom-vulkan-budget-v8.patch"
@@ -72,9 +65,7 @@ ggml_patches=(
     "${repo_root}/native/stable-diffusion.cpp/logit-loom-vulkan-dispatch-bounds-v18.patch"
     "${repo_root}/native/stable-diffusion.cpp/logit-loom-vulkan-uma-prefer-host-v19.patch"
 )
-ggml_commit="d25b121ce1d6ae0c7e62ad080460d9fc1e46dd93"
-ggml_tree_sha256="0612d476324262787f1bf0eef37959cda29df93643a004805808be1333202549"
-vendored_root="${repo_root}/native/stable-diffusion.cpp/upstream/stable-diffusion.cpp"
+ggml_commit="eced84c86f8b012c752c016f7fe789adea168e1e"
 source_dir="$(realpath -m -- "${source_dir}")"
 build_dir="$(realpath -m -- "${build_dir}")"
 
@@ -114,76 +105,74 @@ case "${backend}" in
         ;;
 esac
 
-# SHA-256 over the sorted sha256sum listing of every regular file below $1,
-# skipping the nested ggml tree when $2 is "without-ggml".
-tree_sha256() {
-    local root="$1"
-    local scope="$2"
-    (
-        cd -- "${root}"
-        if [[ "${scope}" == "without-ggml" ]]; then
-            find . -path ./ggml -prune -o -type f -print0
-        else
-            find . -type f -print0
-        fi | LC_ALL=C sort -z | xargs -0 sha256sum
-    ) | sha256sum | cut -d' ' -f1
-}
-
-require_tree() {
-    local label="$1"
-    local root="$2"
-    local scope="$3"
-    local expected="$4"
-    local observed
-    if [[ ! -d "${root}" ]] || [[ -n "$(find "${root}" -type l -print -quit)" ]]; then
-        echo "${label} tree is absent or contains a symbolic link: ${root}" >&2
-        exit 1
-    fi
-    observed="$(tree_sha256 "${root}" "${scope}")"
-    if [[ "${observed}" != "${expected}" ]]; then
-        echo "${label} tree identity differs: expected ${expected}, observed ${observed}" >&2
-        exit 1
-    fi
-}
-
-require_tree "vendored stable-diffusion.cpp ${upstream_commit}" "${vendored_root}" without-ggml "${upstream_tree_sha256}"
-require_tree "vendored ggml ${ggml_commit}" "${vendored_root}/ggml" all "${ggml_tree_sha256}"
-
-# The source directory is rebuilt from the vendored trees on every run, so it
-# never carries state from an earlier build. Only a directory this script
-# created (marked) is ever removed.
-marker=".logit-loom-sdcpp-source"
-if [[ -e "${source_dir}" ]]; then
-    if [[ ! -f "${source_dir}/${marker}" ]]; then
-        echo "refusing to replace a native source directory this script did not create: ${source_dir}" >&2
-        exit 1
-    fi
-    rm -rf -- "${source_dir}"
+created_checkout=false
+if [[ ! -e "${source_dir}" ]]; then
+    mkdir -p -- "$(dirname -- "${source_dir}")"
+    git clone --filter=blob:none --no-checkout "${upstream_url}" "${source_dir}"
+    created_checkout=true
 fi
-mkdir -p -- "$(dirname -- "${source_dir}")"
-# Outside any Git work tree, so git apply works on plain files and CMake's
-# revision queries find no repository: the build reads nothing but these files.
-if git -C "$(dirname -- "${source_dir}")" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    echo "native source must be outside every Git work tree: ${source_dir}" >&2
+if [[ ! -d "${source_dir}/.git" ]]; then
+    echo "native source is not a Git checkout: ${source_dir}" >&2
     exit 1
 fi
-cp -R --preserve=mode -- "${vendored_root}" "${source_dir}"
-require_tree "copied stable-diffusion.cpp" "${source_dir}" without-ggml "${upstream_tree_sha256}"
-require_tree "copied ggml" "${source_dir}/ggml" all "${ggml_tree_sha256}"
 
-for patch_file in "${patch_files[@]}"; do
-    if ! (cd -- "${source_dir}" && git apply -p0 --whitespace=nowarn "${patch_file}"); then
-        echo "vendored stable-diffusion.cpp does not accept $(basename -- "${patch_file}")" >&2
+actual_commit="$(git -C "${source_dir}" rev-parse HEAD)"
+if [[ "${actual_commit}" != "${upstream_commit}" ]]; then
+    if [[ "${created_checkout}" == false ]] &&
+        [[ -n "$(git -C "${source_dir}" status --porcelain)" ]]; then
+        echo "refusing to change a dirty native checkout at ${actual_commit}" >&2
+        exit 1
+    fi
+    git -C "${source_dir}" fetch origin "${upstream_commit}"
+    git -C "${source_dir}" checkout --detach "${upstream_commit}"
+fi
+
+applied_prefix=0
+for ((index=${#patch_files[@]} - 1; index >= 0; index--)); do
+    patch_file="${patch_files[index]}"
+    if git -C "${source_dir}" apply -p0 --whitespace=nowarn --reverse --check "${patch_file}"; then
+        applied_prefix=$((index + 1))
+        break
+    fi
+done
+
+for ((index=0; index<${#patch_files[@]}; index++)); do
+    patch_file="${patch_files[index]}"
+    if ((index < applied_prefix)); then
+        echo "Logit Loom companion patch is already applied: $(basename -- "${patch_file}")"
+    elif git -C "${source_dir}" apply -p0 --whitespace=nowarn --check "${patch_file}"; then
+        git -C "${source_dir}" apply -p0 --whitespace=nowarn "${patch_file}"
+    else
+        echo "native checkout has changes incompatible with $(basename -- "${patch_file}")" >&2
         exit 1
     fi
 done
-for ggml_patch in "${ggml_patches[@]}"; do
-    if ! (cd -- "${source_dir}/ggml" && git apply -p0 --whitespace=nowarn "${ggml_patch}"); then
-        echo "vendored ggml does not accept $(basename -- "${ggml_patch}")" >&2
-        exit 1
-    fi
+
+git -C "${source_dir}" submodule update --init --depth 1 ggml
+actual_ggml_commit="$(git -C "${source_dir}/ggml" rev-parse HEAD)"
+if [[ "${actual_ggml_commit}" != "${ggml_commit}" ]]; then
+    echo "stable-diffusion.cpp selected unexpected ggml revision: ${actual_ggml_commit}" >&2
+    exit 1
+fi
+applied_ggml_prefix=0
+for ((index=${#ggml_patches[@]} - 1; index >= 0; index--)); do
+	ggml_patch="${ggml_patches[index]}"
+	if git -C "${source_dir}/ggml" apply -p0 --whitespace=nowarn --reverse --check "${ggml_patch}"; then
+		applied_ggml_prefix=$((index + 1))
+		break
+	fi
 done
-touch -- "${source_dir}/${marker}"
+for ((index=0; index<${#ggml_patches[@]}; index++)); do
+	ggml_patch="${ggml_patches[index]}"
+	if ((index < applied_ggml_prefix)); then
+		echo "Logit Loom ggml patch is already applied: $(basename -- "${ggml_patch}")"
+	elif git -C "${source_dir}/ggml" apply -p0 --whitespace=nowarn --check "${ggml_patch}"; then
+		git -C "${source_dir}/ggml" apply -p0 --whitespace=nowarn "${ggml_patch}"
+	else
+		echo "native ggml checkout has changes incompatible with $(basename -- "${ggml_patch}")" >&2
+		exit 1
+	fi
+done
 mkdir -p -- "${build_dir}"
 
 cmake \

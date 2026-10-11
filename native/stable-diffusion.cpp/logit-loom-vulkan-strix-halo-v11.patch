@@ -1,11 +1,11 @@
 diff --git src/ggml-vulkan/ggml-vulkan.cpp src/ggml-vulkan/ggml-vulkan.cpp
-index f889b775..61d76b55 100644
+index 38794de..90a7f18 100644
 --- src/ggml-vulkan/ggml-vulkan.cpp
 +++ src/ggml-vulkan/ggml-vulkan.cpp
-@@ -1321,6 +1321,15 @@ static vk_fa_tuning_params get_fa_tuning_params_coopmat2(const vk_device& device
+@@ -3486,6 +3486,15 @@ static vk_fa_tuning_params get_fa_tuning_params_coopmat2(const vk_device& device
  }
  
- vk_fa_tuning_params get_fa_tuning_params(const vk_device& device, uint32_t hsk, uint32_t hsv, uint32_t n_rows, uint32_t n_kv, ggml_type k_type, ggml_type v_type, bool f32acc) {
+ static vk_fa_tuning_params get_fa_tuning_params(const vk_device& device, uint32_t hsk, uint32_t hsv, uint32_t n_rows, uint32_t n_kv, ggml_type k_type, ggml_type v_type, bool f32acc) {
 +    // RADV currently exposes cooperative-matrix flash attention on Strix Halo,
 +    // but that path can lose the device while the scalar flash-attention path
 +    // remains valid. Keep cooperative matrices enabled for other operations and

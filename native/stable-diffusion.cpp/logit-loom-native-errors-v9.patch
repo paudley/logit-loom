@@ -1,8 +1,62 @@
+Submodule ggml contains modified content
+diff --git src/core/util.cpp src/core/util.cpp
+index ff53c65..5e09dba 100644
+--- src/core/util.cpp
++++ src/core/util.cpp
+@@ -594,28 +594,32 @@ std::string trim(const std::string& s) {
+ static sd_log_cb_t sd_log_cb = nullptr;
+ void* sd_log_cb_data         = nullptr;
+ 
+-#define LOG_BUFFER_SIZE 4096
+-
+ void log_printf(sd_log_level_t level, const char* file, int line, const char* format, ...) {
+     va_list args;
+     va_start(args, format);
++    va_list measured_args;
++    va_copy(measured_args, args);
++    int required = vsnprintf(nullptr, 0, format, measured_args);
++    va_end(measured_args);
+ 
+-    static char log_buffer[LOG_BUFFER_SIZE + 1];
+-    int written = snprintf(log_buffer, LOG_BUFFER_SIZE, "%s:%-4d - ", sd_basename(file).c_str(), line);
+-
+-    if (written >= 0 && written < LOG_BUFFER_SIZE) {
+-        vsnprintf(log_buffer + written, LOG_BUFFER_SIZE - written, format, args);
++    std::string message;
++    if (required >= 0) {
++        std::vector<char> buffer(static_cast<size_t>(required) + 1);
++        vsnprintf(buffer.data(), buffer.size(), format, args);
++        message.assign(buffer.data(), static_cast<size_t>(required));
++    } else {
++        message = "native logger could not format this complete message; format string: ";
++        message += format == nullptr ? "<null>" : format;
+     }
+-    size_t len = strlen(log_buffer);
+-    if (log_buffer[len - 1] != '\n') {
+-        strncat(log_buffer, "\n", LOG_BUFFER_SIZE - len);
+-    }
+-
+-    if (sd_log_cb) {
+-        sd_log_cb(level, log_buffer, sd_log_cb_data);
+-    }
+-
+     va_end(args);
++
++    std::string output = sd_basename(file) + ":" + std::to_string(line) + " - " + message;
++    if (output.empty() || output.back() != '\n') {
++        output.push_back('\n');
++    }
++    if (sd_log_cb) {
++        sd_log_cb(level, output.c_str(), sd_log_cb_data);
++    }
+ }
+ 
+ void sd_set_log_callback(sd_log_cb_t cb, void* data) {
 diff --git src/model/diffusion/krea2.hpp src/model/diffusion/krea2.hpp
-index 99fdb78..57cc167 100644
+index 0628e3c..9e8c53b 100644
 --- src/model/diffusion/krea2.hpp
 +++ src/model/diffusion/krea2.hpp
-@@ -666,7 +666,11 @@ namespace Krea2 {
+@@ -651,7 +651,11 @@ namespace Krea2 {
                  return tensor;
              }
              if (tensor->type != GGML_TYPE_F32 || tensor->ne[2] != 1 || tensor->ne[3] != 1) {
@@ -15,7 +69,7 @@ index 99fdb78..57cc167 100644
                  return tensor;
              }
  
-@@ -686,7 +690,10 @@ namespace Krea2 {
+@@ -671,7 +675,10 @@ namespace Krea2 {
                                                 reference_start,
                                                 reference_length);
                  if (selected == nullptr) {
@@ -27,7 +81,7 @@ index 99fdb78..57cc167 100644
                      return tensor;
                  }
                  captures[capture.capture_index] = selected;
-@@ -694,7 +701,8 @@ namespace Krea2 {
+@@ -679,7 +686,8 @@ namespace Krea2 {
                      uint64_t bytes = static_cast<uint64_t>(ggml_nbytes(selected));
                      if (snapshot_device_bytes >
                          std::numeric_limits<uint64_t>::max() - bytes) {
@@ -37,7 +91,7 @@ index 99fdb78..57cc167 100644
                          return tensor;
                      }
                      snapshot_device_bytes += bytes;
-@@ -712,7 +720,10 @@ namespace Krea2 {
+@@ -697,7 +705,10 @@ namespace Krea2 {
              if (request_->resident_device_bytes > request_->maximum_device_bytes ||
                  snapshot_device_bytes >
                      request_->maximum_device_bytes - request_->resident_device_bytes) {
@@ -49,7 +103,7 @@ index 99fdb78..57cc167 100644
                  return tensor;
              }
              request_->peak_device_bytes = std::max(
-@@ -734,7 +745,10 @@ namespace Krea2 {
+@@ -719,7 +730,10 @@ namespace Krea2 {
                                               reference_start,
                                               reference_length);
                  if (before == nullptr) {
@@ -61,7 +115,7 @@ index 99fdb78..57cc167 100644
                      return tensor;
                  }
                  ggml_tensor* source = nullptr;
-@@ -748,13 +762,22 @@ namespace Krea2 {
+@@ -733,13 +747,22 @@ namespace Krea2 {
                  }
                  if (source == nullptr || source->type != GGML_TYPE_F32 ||
                      source->ne[0] != before->ne[0]) {
@@ -86,7 +140,7 @@ index 99fdb78..57cc167 100644
                      return tensor;
                  }
                  current = splice(current,
-@@ -767,12 +790,16 @@ namespace Krea2 {
+@@ -752,12 +775,16 @@ namespace Krea2 {
                                   reference_start,
                                   reference_length);
                  if (current == nullptr) {
@@ -105,7 +159,7 @@ index 99fdb78..57cc167 100644
                          return tensor;
                      }
                      ++request_->applications;
-@@ -1628,7 +1655,16 @@ namespace Krea2 {
+@@ -1601,7 +1628,16 @@ namespace Krea2 {
              for (const auto& event : activation_events) {
                  if (event.tensor == nullptr || event.tensor->buffer == nullptr ||
                      event.tensor->type != GGML_TYPE_F32) {
@@ -123,7 +177,7 @@ index 99fdb78..57cc167 100644
                      continue;
                  }
                  size_t bytes = ggml_nbytes(event.tensor);
-@@ -1637,7 +1673,7 @@ namespace Krea2 {
+@@ -1610,7 +1646,7 @@ namespace Krea2 {
                  for (const auto& retained : before_values) {
                      if (retained_host_bytes >
                          std::numeric_limits<uint64_t>::max() - retained.second.size()) {
@@ -132,7 +186,7 @@ index 99fdb78..57cc167 100644
                          break;
                      }
                      retained_host_bytes += retained.second.size();
-@@ -1648,7 +1684,12 @@ namespace Krea2 {
+@@ -1621,7 +1657,12 @@ namespace Krea2 {
                      retained_host_bytes > request.maximum_host_bytes ||
                      event_bytes >
                          (request.maximum_host_bytes - retained_host_bytes) / copies) {
@@ -146,7 +200,7 @@ index 99fdb78..57cc167 100644
                      continue;
                  }
                  request.peak_host_bytes = std::max(
-@@ -1659,7 +1700,10 @@ namespace Krea2 {
+@@ -1632,7 +1673,10 @@ namespace Krea2 {
                  if (std::any_of(values.begin(), values.end(), [](float value) {
                          return !std::isfinite(value);
                      })) {
@@ -158,7 +212,7 @@ index 99fdb78..57cc167 100644
                      continue;
                  }
                  if (event.kind == KREA_ACTIVATION_APPLICATION_BEFORE_EVENT) {
-@@ -1685,7 +1729,9 @@ namespace Krea2 {
+@@ -1658,7 +1702,9 @@ namespace Krea2 {
                  }
              }
              if (!before_values.empty()) {
@@ -170,10 +224,10 @@ index 99fdb78..57cc167 100644
          }
      };
 diff --git src/model/diffusion/model.hpp src/model/diffusion/model.hpp
-index c899ec5..05f8a1e 100644
+index a16c3d6..6cba91b 100644
 --- src/model/diffusion/model.hpp
 +++ src/model/diffusion/model.hpp
-@@ -184,6 +184,7 @@ struct KreaActivationRequest {
+@@ -177,6 +177,7 @@ struct KreaActivationRequest {
      void* callback_data                  = nullptr;
      bool callback_failed                 = false;
      bool execution_failed                = false;
@@ -181,7 +235,7 @@ index c899ec5..05f8a1e 100644
      uint64_t maximum_host_bytes          = 0;
      uint64_t maximum_device_bytes        = 0;
      uint64_t maximum_applications        = 0;
-@@ -191,6 +192,13 @@ struct KreaActivationRequest {
+@@ -184,6 +185,13 @@ struct KreaActivationRequest {
      uint64_t peak_host_bytes             = 0;
      uint64_t peak_device_bytes           = 0;
      uint64_t applications                = 0;
@@ -196,18 +250,18 @@ index c899ec5..05f8a1e 100644
  
  struct KreaActivationSiteTopology {
 diff --git src/stable-diffusion.cpp src/stable-diffusion.cpp
-index fe26137..2e2ce34 100644
+index 3d1b648..8485c8d 100644
 --- src/stable-diffusion.cpp
 +++ src/stable-diffusion.cpp
-@@ -5,6 +5,7 @@
+@@ -2,6 +2,7 @@
  #include <cmath>
- #include <cstdlib>
  #include <cstring>
+ #include <cstdlib>
 +#include <exception>
  #include <limits>
  #include <new>
  #include <set>
-@@ -942,9 +943,15 @@ int32_t sd_loom_generate_image_v1(sd_ctx_t* sd_ctx,
+@@ -5884,9 +5885,15 @@ int32_t sd_loom_generate_image_v1(sd_ctx_t* sd_ctx,
          return status;
      }
      if (!generated || images == nullptr || image_count != 1) {
@@ -223,9 +277,9 @@ index fe26137..2e2ce34 100644
          return SD_LOOM_STATUS_NATIVE_ERROR;
      }
  
-@@ -1214,10 +1221,24 @@ int32_t sd_loom_generate_image_v2(sd_ctx_t* sd_ctx,
-             status = SD_LOOM_STATUS_NATIVE_ERROR;
+@@ -6136,10 +6143,24 @@ int32_t sd_loom_generate_image_v2(sd_ctx_t* sd_ctx,
          }
+         sd_ctx->sd->apply_loras(nullptr, 0);
      } catch (...) {
 +        try {
 +            throw;
@@ -236,7 +290,7 @@ index fe26137..2e2ce34 100644
 +        }
          status = SD_LOOM_STATUS_NATIVE_ERROR;
          try {
-             sd_loom_clear_loras(sd_ctx);
+             sd_ctx->sd->apply_loras(nullptr, 0);
          } catch (...) {
 +            try {
 +                throw;
@@ -248,7 +302,7 @@ index fe26137..2e2ce34 100644
          }
      }
      sd_loom_reset_callbacks(sd_ctx);
-@@ -1234,6 +1255,7 @@ int32_t sd_loom_generate_image_v2(sd_ctx_t* sd_ctx,
+@@ -6155,6 +6176,7 @@ int32_t sd_loom_generate_image_v2(sd_ctx_t* sd_ctx,
          if (images != nullptr) {
              free_sd_images(images, image_count);
          }
@@ -256,7 +310,7 @@ index fe26137..2e2ce34 100644
          return SD_LOOM_STATUS_NATIVE_ERROR;
      }
  
-@@ -1280,17 +1302,20 @@ int32_t sd_loom_vae_encode_v2(sd_ctx_t* sd_ctx,
+@@ -6197,17 +6219,20 @@ int32_t sd_loom_vae_encode_v2(sd_ctx_t* sd_ctx,
          auto pixels = sd_image_to_tensor(sd_loom_native_image_v2(*image));
          auto latent = sd_ctx->sd->encode_first_stage(pixels);
          if (latent.empty() || latent.shape().empty() || latent.shape().size() > 8) {
@@ -277,7 +331,7 @@ index fe26137..2e2ce34 100644
              return SD_LOOM_STATUS_NATIVE_ERROR;
          }
          result->abi_version   = SD_LOOM_IMAGE_ABI_VERSION;
-@@ -1300,6 +1325,7 @@ int32_t sd_loom_vae_encode_v2(sd_ctx_t* sd_ctx,
+@@ -6217,6 +6242,7 @@ int32_t sd_loom_vae_encode_v2(sd_ctx_t* sd_ctx,
          result->shape         = static_cast<int64_t*>(malloc(result->rank * sizeof(int64_t)));
          if (result->data == nullptr || result->shape == nullptr) {
              sd_loom_free_owned_tensor_v2(result);
@@ -285,7 +339,7 @@ index fe26137..2e2ce34 100644
              return SD_LOOM_STATUS_NATIVE_ERROR;
          }
          std::memcpy(result->data, latent.data(), result->element_count * sizeof(float));
-@@ -1307,6 +1333,14 @@ int32_t sd_loom_vae_encode_v2(sd_ctx_t* sd_ctx,
+@@ -6224,6 +6250,14 @@ int32_t sd_loom_vae_encode_v2(sd_ctx_t* sd_ctx,
          *tensor_out = result;
          return SD_LOOM_STATUS_OK;
      } catch (...) {
@@ -300,7 +354,7 @@ index fe26137..2e2ce34 100644
          return SD_LOOM_STATUS_NATIVE_ERROR;
      }
  }
-@@ -1360,20 +1394,31 @@ int32_t sd_loom_vae_decode_v2(sd_ctx_t* sd_ctx,
+@@ -6273,20 +6307,31 @@ int32_t sd_loom_vae_decode_v2(sd_ctx_t* sd_ctx,
          sd::Tensor<float> latent(std::move(shape), std::move(data));
          auto decoded = sd_ctx->sd->decode_first_stage(latent);
          if (decoded.empty()) {
@@ -332,7 +386,7 @@ index fe26137..2e2ce34 100644
          return SD_LOOM_STATUS_NATIVE_ERROR;
      }
  }
-@@ -1394,10 +1439,19 @@ int32_t sd_loom_clear_session_v2(sd_ctx_t* sd_ctx) {
+@@ -6305,10 +6350,19 @@ int32_t sd_loom_clear_session_v2(sd_ctx_t* sd_ctx) {
              (sd_ctx->sd->version == VERSION_KREA2 &&
               sd_ctx->sd->diffusion_model != nullptr &&
               !sd_ctx->sd->diffusion_model->krea_activation_clear())) {
@@ -352,7 +406,7 @@ index fe26137..2e2ce34 100644
          return SD_LOOM_STATUS_NATIVE_ERROR;
      }
  }
-@@ -1502,6 +1556,14 @@ static int32_t sd_loom_add_value_v3(sd_loom_program_v3_t* program,
+@@ -6413,6 +6467,14 @@ static int32_t sd_loom_add_value_v3(sd_loom_program_v3_t* program,
      try {
          program->values.push_back(std::move(value));
      } catch (...) {
@@ -367,7 +421,7 @@ index fe26137..2e2ce34 100644
          return SD_LOOM_STATUS_NATIVE_ERROR;
      }
      program->live_bytes += bytes;
-@@ -1580,12 +1642,21 @@ int32_t sd_loom_program_begin_v3(sd_ctx_t* sd_ctx,
+@@ -6491,12 +6553,21 @@ int32_t sd_loom_program_begin_v3(sd_ctx_t* sd_ctx,
      try {
          auto* program = new (std::nothrow) sd_loom_program_v3_t();
          if (program == nullptr) {
@@ -389,7 +443,7 @@ index fe26137..2e2ce34 100644
              return SD_LOOM_STATUS_NATIVE_ERROR;
          }
          sd_ctx->sd->loom_program_generation += 1;
-@@ -1597,6 +1668,14 @@ int32_t sd_loom_program_begin_v3(sd_ctx_t* sd_ctx,
+@@ -6508,6 +6579,14 @@ int32_t sd_loom_program_begin_v3(sd_ctx_t* sd_ctx,
          *program_out = program;
          return SD_LOOM_STATUS_OK;
      } catch (...) {
@@ -404,7 +458,7 @@ index fe26137..2e2ce34 100644
          return SD_LOOM_STATUS_NATIVE_ERROR;
      }
  }
-@@ -1614,6 +1693,14 @@ int32_t sd_loom_program_import_bytes_v3(sd_loom_program_v3_t* program,
+@@ -6525,6 +6604,14 @@ int32_t sd_loom_program_import_bytes_v3(sd_loom_program_v3_t* program,
          value.bytes.assign(bytes, bytes + byte_count);
          return sd_loom_add_value_v3(program, std::move(value), value_out);
      } catch (...) {
@@ -419,7 +473,7 @@ index fe26137..2e2ce34 100644
          return SD_LOOM_STATUS_NATIVE_ERROR;
      }
  }
-@@ -1634,6 +1721,14 @@ int32_t sd_loom_program_import_image_v3(sd_loom_program_v3_t* program,
+@@ -6545,6 +6632,14 @@ int32_t sd_loom_program_import_image_v3(sd_loom_program_v3_t* program,
          value.channels = image->channels;
          return sd_loom_add_value_v3(program, std::move(value), value_out);
      } catch (...) {
@@ -434,7 +488,7 @@ index fe26137..2e2ce34 100644
          return SD_LOOM_STATUS_NATIVE_ERROR;
      }
  }
-@@ -1654,6 +1749,14 @@ int32_t sd_loom_program_import_tensor_v3(sd_loom_program_v3_t* program,
+@@ -6565,6 +6660,14 @@ int32_t sd_loom_program_import_tensor_v3(sd_loom_program_v3_t* program,
          value.shape.assign(tensor->shape, tensor->shape + tensor->rank);
          return sd_loom_add_value_v3(program, std::move(value), value_out);
      } catch (...) {
@@ -449,7 +503,7 @@ index fe26137..2e2ce34 100644
          return SD_LOOM_STATUS_NATIVE_ERROR;
      }
  }
-@@ -1672,6 +1775,14 @@ int32_t sd_loom_program_import_lora_v3(sd_loom_program_v3_t* program,
+@@ -6583,6 +6686,14 @@ int32_t sd_loom_program_import_lora_v3(sd_loom_program_v3_t* program,
          value.is_high_noise = is_high_noise;
          return sd_loom_add_value_v3(program, std::move(value), value_out);
      } catch (...) {
@@ -464,7 +518,7 @@ index fe26137..2e2ce34 100644
          return SD_LOOM_STATUS_NATIVE_ERROR;
      }
  }
-@@ -1720,6 +1831,14 @@ int32_t sd_loom_program_mask_blend_v3(sd_loom_program_v3_t* program,
+@@ -6631,6 +6742,14 @@ int32_t sd_loom_program_mask_blend_v3(sd_loom_program_v3_t* program,
          }
          return sd_loom_add_value_v3(program, std::move(value), value_out);
      } catch (...) {
@@ -479,7 +533,7 @@ index fe26137..2e2ce34 100644
          return SD_LOOM_STATUS_NATIVE_ERROR;
      }
  }
-@@ -1809,6 +1928,7 @@ static int32_t sd_loom_add_output_image_v3(
+@@ -6720,6 +6839,7 @@ static int32_t sd_loom_add_output_image_v3(
      }
      size_t pixels = static_cast<size_t>(image->width) * image->height;
      if (pixels > SIZE_MAX / output_channels) {
@@ -487,7 +541,7 @@ index fe26137..2e2ce34 100644
          return SD_LOOM_STATUS_NATIVE_ERROR;
      }
      try {
-@@ -1853,6 +1973,7 @@ static int32_t sd_loom_add_output_image_v3(
+@@ -6764,6 +6884,7 @@ static int32_t sd_loom_add_output_image_v3(
              if (encoded != nullptr) {
                  STBIW_FREE(encoded);
              }
@@ -495,7 +549,7 @@ index fe26137..2e2ce34 100644
              return SD_LOOM_STATUS_NATIVE_ERROR;
          }
          if (static_cast<uint64_t>(encoded_bytes) > maximum_output_bytes) {
-@@ -1862,12 +1983,27 @@ static int32_t sd_loom_add_output_image_v3(
+@@ -6773,12 +6894,27 @@ static int32_t sd_loom_add_output_image_v3(
          try {
              value.bytes.assign(encoded, encoded + encoded_bytes);
          } catch (...) {
@@ -523,7 +577,7 @@ index fe26137..2e2ce34 100644
          return SD_LOOM_STATUS_NATIVE_ERROR;
      }
  }
-@@ -1888,6 +2024,7 @@ int32_t sd_loom_program_vae_encode_v3(sd_loom_program_v3_t* program,
+@@ -6799,6 +6935,7 @@ int32_t sd_loom_program_vae_encode_v3(sd_loom_program_v3_t* program,
          return status;
      }
      if (encoded == nullptr) {
@@ -531,7 +585,7 @@ index fe26137..2e2ce34 100644
          return SD_LOOM_STATUS_NATIVE_ERROR;
      }
      try {
-@@ -1898,7 +2035,15 @@ int32_t sd_loom_program_vae_encode_v3(sd_loom_program_v3_t* program,
+@@ -6809,7 +6946,15 @@ int32_t sd_loom_program_vae_encode_v3(sd_loom_program_v3_t* program,
          sd_loom_free_tensor_v2(encoded);
          return sd_loom_add_value_v3(program, std::move(value), value_out);
      } catch (...) {
@@ -547,7 +601,7 @@ index fe26137..2e2ce34 100644
          return SD_LOOM_STATUS_NATIVE_ERROR;
      }
  }
-@@ -1945,6 +2090,7 @@ int32_t sd_loom_program_vae_decode_v3(sd_loom_program_v3_t* program,
+@@ -6856,6 +7001,7 @@ int32_t sd_loom_program_vae_decode_v3(sd_loom_program_v3_t* program,
          if (image != nullptr) {
              free_sd_images(image, 1);
          }
@@ -555,7 +609,7 @@ index fe26137..2e2ce34 100644
          return SD_LOOM_STATUS_NATIVE_ERROR;
      }
      int32_t output_status = sd_loom_add_output_image_v3(program,
-@@ -2044,6 +2190,13 @@ static bool sd_loom_text_value_v3(const sd_loom_program_v3_t* program,
+@@ -6955,6 +7101,13 @@ static bool sd_loom_text_value_v3(const sd_loom_program_v3_t* program,
                           value->bytes.size());
          return true;
      } catch (...) {
@@ -569,7 +623,7 @@ index fe26137..2e2ce34 100644
          return false;
      }
  }
-@@ -2175,6 +2328,7 @@ static int32_t sd_loom_add_step_state_v3(sd_loom_program_step_state_v3_t* state,
+@@ -7086,6 +7239,7 @@ static int32_t sd_loom_add_step_state_v3(sd_loom_program_step_state_v3_t* state,
          step->shape == nullptr ||
          step->rank == 0 ||
          step->rank > 8) {
@@ -577,7 +631,7 @@ index fe26137..2e2ce34 100644
          return SD_LOOM_STATUS_NATIVE_ERROR;
      }
      sd_loom_value_v3_t value;
-@@ -2270,6 +2424,13 @@ static int32_t sd_loom_program_step_callback_v3(const sd_loom_step_v1_t* step,
+@@ -7183,6 +7337,13 @@ static int32_t sd_loom_program_step_callback_v3(const sd_loom_step_v1_t* step,
          }
          return SD_LOOM_CALLBACK_CONTINUE;
      } catch (...) {
@@ -591,7 +645,7 @@ index fe26137..2e2ce34 100644
          state->failure_status = SD_LOOM_STATUS_NATIVE_ERROR;
          return SD_LOOM_CALLBACK_ERROR;
      }
-@@ -2415,6 +2576,14 @@ int32_t sd_loom_program_generate_image_v3(
+@@ -7328,6 +7489,14 @@ int32_t sd_loom_program_generate_image_v3(
              expected_lora_boundaries += params->loras[lora].point_count - 1;
          }
      } catch (...) {
@@ -606,7 +660,7 @@ index fe26137..2e2ce34 100644
          return SD_LOOM_STATUS_NATIVE_ERROR;
      }
  
-@@ -2499,6 +2668,18 @@ int32_t sd_loom_program_generate_image_v3(
+@@ -7412,6 +7581,18 @@ int32_t sd_loom_program_generate_image_v3(
                                                       params->maximum_output_bytes,
                                                       &primary);
          } else if (status == SD_LOOM_STATUS_OK) {
@@ -625,7 +679,7 @@ index fe26137..2e2ce34 100644
              status = SD_LOOM_STATUS_NATIVE_ERROR;
          }
  
-@@ -2509,6 +2690,7 @@ int32_t sd_loom_program_generate_image_v3(
+@@ -7422,6 +7603,7 @@ int32_t sd_loom_program_generate_image_v3(
              if (!sd_loom_rollback_generation_v3(program,
                                                   &callback_state,
                                                   &primary)) {
@@ -633,7 +687,7 @@ index fe26137..2e2ce34 100644
                  return SD_LOOM_STATUS_NATIVE_ERROR;
              }
              return status;
-@@ -2522,6 +2704,14 @@ int32_t sd_loom_program_generate_image_v3(
+@@ -7435,6 +7617,14 @@ int32_t sd_loom_program_generate_image_v3(
          }
          return SD_LOOM_STATUS_OK;
      } catch (...) {
@@ -648,7 +702,7 @@ index fe26137..2e2ce34 100644
          return SD_LOOM_STATUS_NATIVE_ERROR;
      }
  }
-@@ -2665,7 +2855,15 @@ int32_t sd_loom_program_generate_image_v4(
+@@ -7580,7 +7770,15 @@ int32_t sd_loom_program_generate_image_v4(
                                                    snapshot_capacity,
                                                    result_out);
      } catch (...) {
@@ -664,7 +718,7 @@ index fe26137..2e2ce34 100644
          return SD_LOOM_STATUS_NATIVE_ERROR;
      }
  }
-@@ -2853,6 +3051,7 @@ int32_t sd_loom_program_generate_image_v5(
+@@ -7770,6 +7968,7 @@ int32_t sd_loom_program_generate_image_v5(
                  control.selected_transitions.size() !=
                      transition_words_per_operator) {
                  program->context->sd->loom_model_block_controls.clear();
@@ -672,7 +726,7 @@ index fe26137..2e2ce34 100644
                  return SD_LOOM_STATUS_NATIVE_ERROR;
              }
              application_results[control.application_index] = {
-@@ -2881,7 +3080,15 @@ int32_t sd_loom_program_generate_image_v5(
+@@ -7798,7 +7997,15 @@ int32_t sd_loom_program_generate_image_v5(
              program->context->sd->loom_model_block_controls.empty() ? 1 : 0;
          return status;
      } catch (...) {
@@ -688,7 +742,7 @@ index fe26137..2e2ce34 100644
          return SD_LOOM_STATUS_NATIVE_ERROR;
      }
  }
-@@ -2954,6 +3161,14 @@ int32_t sd_loom_krea_topology_v6(
+@@ -7871,6 +8078,14 @@ int32_t sd_loom_krea_topology_v6(
          }
          return SD_LOOM_STATUS_OK;
      } catch (...) {
@@ -703,7 +757,7 @@ index fe26137..2e2ce34 100644
          return SD_LOOM_STATUS_NATIVE_ERROR;
      }
  }
-@@ -2987,6 +3202,14 @@ int32_t sd_loom_krea_import_input_v6(
+@@ -7904,6 +8119,14 @@ int32_t sd_loom_krea_import_input_v6(
          sd_loom_krea_description_v6(description, description_out);
          return SD_LOOM_STATUS_OK;
      } catch (...) {
@@ -718,7 +772,7 @@ index fe26137..2e2ce34 100644
          return SD_LOOM_STATUS_NATIVE_ERROR;
      }
  }
-@@ -3013,6 +3236,14 @@ int32_t sd_loom_krea_describe_input_v6(
+@@ -7930,6 +8153,14 @@ int32_t sd_loom_krea_describe_input_v6(
          sd_loom_krea_description_v6(description, description_out);
          return SD_LOOM_STATUS_OK;
      } catch (...) {
@@ -733,7 +787,7 @@ index fe26137..2e2ce34 100644
          return SD_LOOM_STATUS_NATIVE_ERROR;
      }
  }
-@@ -3031,6 +3262,14 @@ int32_t sd_loom_krea_release_input_v6(
+@@ -7948,6 +8179,14 @@ int32_t sd_loom_krea_release_input_v6(
                     ? SD_LOOM_STATUS_OK
                     : SD_LOOM_STATUS_INVALID_ARGUMENT;
      } catch (...) {
@@ -748,7 +802,7 @@ index fe26137..2e2ce34 100644
          return SD_LOOM_STATUS_NATIVE_ERROR;
      }
  }
-@@ -3046,6 +3285,14 @@ int32_t sd_loom_krea_clear_inputs_v6(sd_ctx_t* sd_ctx) {
+@@ -7963,6 +8202,14 @@ int32_t sd_loom_krea_clear_inputs_v6(sd_ctx_t* sd_ctx) {
                     ? SD_LOOM_STATUS_OK
                     : SD_LOOM_STATUS_UNSUPPORTED;
      } catch (...) {
@@ -763,7 +817,7 @@ index fe26137..2e2ce34 100644
          return SD_LOOM_STATUS_NATIVE_ERROR;
      }
  }
-@@ -3516,6 +3763,13 @@ int32_t sd_loom_program_generate_image_v6(
+@@ -8433,6 +8680,13 @@ int32_t sd_loom_program_generate_image_v6(
          result_out->peak_host_bytes = request.peak_host_bytes;
          result_out->peak_device_bytes = request.peak_device_bytes;
          if (!cleaned || request.execution_failed) {
@@ -777,7 +831,7 @@ index fe26137..2e2ce34 100644
              return SD_LOOM_STATUS_NATIVE_ERROR;
          }
          if (request.callback_failed) {
-@@ -3523,10 +3777,18 @@ int32_t sd_loom_program_generate_image_v6(
+@@ -8440,10 +8694,18 @@ int32_t sd_loom_program_generate_image_v6(
          }
          return status;
      } catch (...) {
@@ -796,7 +850,7 @@ index fe26137..2e2ce34 100644
          return SD_LOOM_STATUS_NATIVE_ERROR;
      }
  }
-@@ -3581,6 +3843,7 @@ int32_t sd_loom_program_read_v3(const sd_loom_program_v3_t* program,
+@@ -8498,6 +8760,7 @@ int32_t sd_loom_program_read_v3(const sd_loom_program_v3_t* program,
      }
      uint64_t bytes = value->data_bytes();
      if (bytes == 0 || bytes > SIZE_MAX) {
@@ -804,7 +858,7 @@ index fe26137..2e2ce34 100644
          return SD_LOOM_STATUS_NATIVE_ERROR;
      }
      int32_t status = callback(sd_loom_value_bytes_v3(*value),
-@@ -3620,6 +3883,7 @@ int32_t sd_loom_program_release_v3(sd_loom_program_v3_t* program,
+@@ -8537,6 +8800,7 @@ int32_t sd_loom_program_release_v3(sd_loom_program_v3_t* program,
      }
      uint64_t bytes = value->resident_bytes();
      if (bytes > program->live_bytes) {
@@ -812,7 +866,7 @@ index fe26137..2e2ce34 100644
          return SD_LOOM_STATUS_NATIVE_ERROR;
      }
      program->live_bytes -= bytes;
-@@ -3652,6 +3916,13 @@ int32_t sd_loom_program_finish_v3(sd_loom_program_v3_t* program,
+@@ -8569,6 +8833,13 @@ int32_t sd_loom_program_finish_v3(sd_loom_program_v3_t* program,
              status = sd_loom_clear_session_v2(context);
          }
      } catch (...) {

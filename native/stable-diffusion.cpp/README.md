@@ -3,15 +3,9 @@
 # stable-diffusion.cpp companion ABI
 
 This directory contains a narrow source patch for
-`leejet/stable-diffusion.cpp@2988060a4338a5dcd94721c964a8e87003c1ac8b`
-(2026-10-11) and its `ggml` at
-`leejet/ggml@d25b121ce1d6ae0c7e62ad080460d9fc1e46dd93`, both vendored as
-plain files under [`upstream/`](upstream/README.md). Every patch was
-ported from the `ea4e566ccffa10f853ecc3f29e74b1820bc91beb` stack (ggml
-`eced84c86f8b012c752c016f7fe789adea168e1e`); none became redundant, and one
-hunk was dropped (see "Port to 2988060a" below).
+`leejet/stable-diffusion.cpp@ea4e566ccffa10f853ecc3f29e74b1820bc91beb`.
 That upstream project is MIT licensed. The patch is maintained under Logit
-Loom's `MIT OR Apache-2.0` terms and vendors upstream source only unmodified, under `upstream/`.
+Loom's `MIT OR Apache-2.0` terms and does not vendor upstream source.
 
 The companion ABI exposes:
 
@@ -85,8 +79,8 @@ scripts/prepare-sdcpp.sh \
   --backend vulkan
 ```
 
-The script verifies the vendored trees' identities, copies them to the
-source path (replacing only a source directory it created earlier), applies
+If the source path does not exist, the script clones the upstream repository.
+It checks out the exact revision, applies
 [`logit-loom-step-v1.patch`](logit-loom-step-v1.patch) followed by
 [`logit-loom-image-v2.patch`](logit-loom-image-v2.patch) and
 [`logit-loom-program-v3.patch`](logit-loom-program-v3.patch), then the
@@ -107,12 +101,7 @@ then
 [`logit-loom-vae-tiling-v20.patch`](logit-loom-vae-tiling-v20.patch),
 then
 [`logit-loom-eager-load-v21.patch`](logit-loom-eager-load-v21.patch),
-then
-[`logit-loom-upstream-parity-v23.patch`](logit-loom-upstream-parity-v23.patch),
-[`logit-loom-sealed-sources-v23.patch`](logit-loom-sealed-sources-v23.patch),
-and
-[`logit-loom-igpu-capacity-v23.patch`](logit-loom-igpu-capacity-v23.patch),
-and finally the exact ggml
+and finally the exact ggml-submodule
 [`logit-loom-vulkan-budget-v8.patch`](logit-loom-vulkan-budget-v8.patch),
 [`logit-loom-vulkan-errors-v10.patch`](logit-loom-vulkan-errors-v10.patch), and
 [`logit-loom-vulkan-strix-halo-v11.patch`](logit-loom-vulkan-strix-halo-v11.patch),
@@ -126,8 +115,8 @@ then
 [`logit-loom-vulkan-dispatch-bounds-v18.patch`](logit-loom-vulkan-dispatch-bounds-v18.patch),
 then
 [`logit-loom-vulkan-uma-prefer-host-v19.patch`](logit-loom-vulkan-uma-prefer-host-v19.patch),
-the ggml patches to the copied `ggml/`, and builds a shared library. A tree
-whose identity differs, or a patch that does not apply, fails the build. The script never runs from
+initializes only the required `ggml` submodule, and builds a shared library.
+Existing incompatible source changes are rejected. The script never runs from
 tests, CI, documentation, package builds, or `make check`.
 
 Select `vulkan`, `hip`, `cuda`, or `metal` according to the deployment. The
@@ -191,12 +180,13 @@ are unchanged, and discrete GPUs are untouched.
 
 Every image decode through an `AutoEncoderKL` VAE (the FLUX-lineage VAEs of
 Z-Image Turbo, FLUX.2-dev and FLUX.2-klein-4B) uses upstream's default spatial
-tiling: 256 px (32 latent cells) per tile with 0.5 overlap
+tiling: 32 latent cells per tile with 0.5 overlap
 (`logit-loom-vae-tiling-v20.patch`). A full-frame 1024x1024 decode needs one
 Vulkan buffer above the device's ~4 GiB `maxBufferSize`, so it can never
-allocate, and upstream's tiling retry chooses its tiles from the failed
-allocation. Tiling is unconditional for this VAE, so an image never depends
-on whether an allocation failed. The Wan VAE of Krea 2 Turbo and
+allocate, and upstream's tiling retry is reachable only with `auto_fit`, which
+the companion never enables; its 256-cell retry tile would in any case cover
+the whole 128x128 latent. Tiling is unconditional for this VAE, so an image
+never depends on whether an allocation failed. The Wan VAE of Krea 2 Turbo and
 Qwen-Image is not `AutoEncoderKL` and decodes exactly as before.
 
 A companion context loads every model parameter before it returns
@@ -213,50 +203,6 @@ their original global indices and preserves the original total, including for
 checkpoint continuation, scheduled LoRA boundaries, model-block operators,
 and Krea activation mechanics. Rust validates the exact initial index and
 reports observed and expected indices and totals on any mismatch.
-
-## Port to 2988060a
-
-Upstream moved the generation pipeline out of `src/stable-diffusion.cpp`
-(`14eddb3`), unified runner lifecycles and weight residency (`462d675`,
-`6b47fec`), and split the ggml Vulkan backend into several files. The port
-keeps the companion ABI header byte-identical, so every ABI and extension
-version is unchanged; only the reported upstream commit differs.
-
-- The C API stays in `src/stable-diffusion.cpp`; condition reporting and the
-  Krea reference guard moved to `src/pipeline/image.cpp`, and the sampling
-  hooks to `src/pipeline/diffusion_engine.cpp`. Direct VAE calls run under
-  upstream's `ExecutionScope`, and request-local `LoRA` detachment under its
-  `ContextOperation`; a detachment failure is now a native error.
-- `LoRA` attestation reads upstream's per-module `RuntimeLora` entries.
-- The model-block extensions use a virtual `model_block_count()` instead of a
-  `Krea2Runner` cast. Krea activation events are read through upstream's
-  `read_outputs` hook while the graph's buffers are still allocated.
-- Upstream now skips a zero-length Euler step without evaluating the model;
-  the step callback still observes it, so every schedule index is reported.
-- The `native-errors-v9` logger hunk is dropped: upstream `b8248a8` (#2002)
-  formats log messages without the 4 KiB truncation it fixed.
-- `vae-tiling-v20` is kept although upstream `b68d586`, `97d932b` and
-  `ce95c09` added a tiling retry without `auto_fit`: that retry's tiles depend
-  on which allocation failed. The default tile is now specified in image
-  pixels (256 px, 32 latent cells for an 8x VAE).
-- `upstream-parity-v23` holds four new upstream defaults at the old
-  companion's behavior: `auto_fit` off, monolithic graphs
-  (`disable_segmented_compute`), no batched CFG forward, and no conditioning
-  cache.
-- `sealed-sources-v23` stops a companion context from re-stamping, refreshing
-  or demoting to disk residency the `/proc/self/fd` model sources it was given:
-  upstream checks every model file's size and mtime before each execution
-  and can reload evicted weights from their paths, and those descriptors are
-  closed once the context exists.
-- `igpu-capacity-v23` backports upstream PR #2124 (open, head
-  `cdc66779`, issue #2022): a wrapped Vulkan free-memory report on an
-  integrated GPU falls back to tracked residency instead of reporting zero.
-- The eight ggml patches are ported to the split backend: the allocation
-  ceiling's counter and helpers live in `ggml-vulkan-types.h` as C++17 inline
-  definitions shared by every backend translation unit, allocation and its
-  diagnostics in `ggml-vulkan-buffers.cpp`, and the dispatch-bound push
-  constants in `ggml-vulkan-push-constants.h`. Upstream has none of the Strix
-  Halo, UMA, ceiling or dispatch-bound changes.
 
 The reviewed decision and boundary are in
 [`docs/adr/0001-stable-diffusion-runtime.md`](../../docs/adr/0001-stable-diffusion-runtime.md).

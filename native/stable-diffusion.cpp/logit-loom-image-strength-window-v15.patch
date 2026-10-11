@@ -1,56 +1,7 @@
-diff --git src/pipeline/diffusion_engine.cpp src/pipeline/diffusion_engine.cpp
-index df8aa51..6c815d9 100644
---- src/pipeline/diffusion_engine.cpp
-+++ src/pipeline/diffusion_engine.cpp
-@@ -2491,7 +2491,7 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
-         bool is_skiplayer_step            = skip_layer_guidance.is_enabled_for_step(step_guidance_input);
-         std::vector<ModelBlockControl> active_model_block_controls;
-         if (step > 0 && !loom_model_block_controls.empty()) {
--            uint32_t model_step = static_cast<uint32_t>(step - 1);
-+            uint32_t model_step = loom_step_index_offset + static_cast<uint32_t>(step - 1);
-             for (auto& control : loom_model_block_controls) {
-                 if (control.selects(model_step)) {
-                     if (control.application_index !=
-@@ -2563,7 +2563,9 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
-                         ? nullptr
-                         : &active_model_block_controls,
-                     loom_krea_activation,
--                    step > 0 ? static_cast<uint32_t>(step - 1) : 0,
-+                    step > 0
-+                        ? loom_step_index_offset + static_cast<uint32_t>(step - 1)
-+                        : loom_step_index_offset,
-                     activation_branch};
-             } else if (sd_version_is_anima(version)) {
-                 diffusion_params.extra = AnimaDiffusionExtra{condition.c_t5_ids.empty() ? nullptr : &condition.c_t5_ids,
-@@ -2884,7 +2886,9 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
-                                      &loom_step_status,
-                                      loom_resume_state,
-                                      loom_resume_state_len,
--                                     loom_resume_next_step);
-+                                     loom_resume_next_step,
-+                                     loom_step_index_offset,
-+                                     loom_step_count);
-     if (x0_opt.empty()) {
-         LOG_ERROR("Diffusion model sampling failed");
-         if (control_net) {
-diff --git src/pipeline/diffusion_engine.h src/pipeline/diffusion_engine.h
-index e230b79..6d8ff74 100644
---- src/pipeline/diffusion_engine.h
-+++ src/pipeline/diffusion_engine.h
-@@ -84,6 +84,8 @@ public:
-     const float* loom_resume_state                     = nullptr;
-     size_t loom_resume_state_len                       = 0;
-     uint32_t loom_resume_next_step                     = 0;
-+    uint32_t loom_step_index_offset                    = 0;
-+    uint32_t loom_step_count                           = 0;
-     uint64_t loom_program_generation                   = 0;
-     bool loom_program_active                           = false;
-     std::vector<sd_loom_scheduled_model_block_v4_t> loom_model_block_controls;
 diff --git src/runtime/denoiser.hpp src/runtime/denoiser.hpp
-index 6a66560..b853c98 100644
 --- src/runtime/denoiser.hpp
 +++ src/runtime/denoiser.hpp
-@@ -1824,11 +1824,22 @@ static sd::Tensor<float> sample_euler(denoise_cb_t model,
+@@ -1564,11 +1564,22 @@ static sd::Tensor<float> sample_euler(denoise_cb_t model,
                                        int32_t* step_callback_status,
                                        const float* resume_state,
                                        size_t resume_state_len,
@@ -75,7 +26,7 @@ index 6a66560..b853c98 100644
              resume_state_len != static_cast<size_t>(x.numel()) ||
              std::any_of(resume_state,
                          resume_state + resume_state_len,
-@@ -1836,12 +1847,13 @@ static sd::Tensor<float> sample_euler(denoise_cb_t model,
+@@ -1576,12 +1587,13 @@ static sd::Tensor<float> sample_euler(denoise_cb_t model,
              *step_callback_status = SD_LOOM_STATUS_CALLBACK_ERROR;
              return {};
          }
@@ -89,8 +40,8 @@ index 6a66560..b853c98 100644
 +    for (int i = static_cast<int>(local_resume_next_step); i < steps; i++) {
          auto step_started = std::chrono::steady_clock::now();
          float sigma       = sigmas[i];
-         // Upstream skips a zero-length step without evaluating the model; x is
-@@ -1863,8 +1875,8 @@ static sd::Tensor<float> sample_euler(denoise_cb_t model,
+         auto denoised_opt = model(x, sigma, i + 1);
+@@ -1598,8 +1610,8 @@ static sd::Tensor<float> sample_euler(denoise_cb_t model,
                      .count();
              sd_loom_step_v1_t step = {
                  SD_LOOM_ABI_VERSION,
@@ -101,7 +52,7 @@ index 6a66560..b853c98 100644
                  sigma,
                  sigmas[i + 1],
                  x.data(),
-@@ -3114,7 +3126,9 @@ static sd::Tensor<float> sample_k_diffusion(sample_method_t method,
+@@ -2728,7 +2740,9 @@ static sd::Tensor<float> sample_k_diffusion(sample_method_t method,
                                              int32_t* step_callback_status,
                                              const float* resume_state,
                                              size_t resume_state_len,
@@ -112,7 +63,7 @@ index 6a66560..b853c98 100644
      if (step_callback != nullptr && method != EULER_SAMPLE_METHOD) {
          *step_callback_status = SD_LOOM_STATUS_UNSUPPORTED;
          return {};
-@@ -3140,7 +3154,9 @@ static sd::Tensor<float> sample_k_diffusion(sample_method_t method,
+@@ -2751,7 +2765,9 @@ static sd::Tensor<float> sample_k_diffusion(sample_method_t method,
                                  step_callback_status,
                                  resume_state,
                                  resume_state_len,
@@ -124,10 +75,49 @@ index 6a66560..b853c98 100644
              return sample_heun(model, std::move(x), sigmas);
          case DPM2_SAMPLE_METHOD:
 diff --git src/stable-diffusion.cpp src/stable-diffusion.cpp
-index 2e2ce34..d0969d1 100644
 --- src/stable-diffusion.cpp
 +++ src/stable-diffusion.cpp
-@@ -920,6 +920,9 @@ int32_t sd_loom_generate_image_v1(sd_ctx_t* sd_ctx,
+@@ -239,6 +239,8 @@ public:
+     const float* loom_resume_state            = nullptr;
+     size_t loom_resume_state_len              = 0;
+     uint32_t loom_resume_next_step            = 0;
++    uint32_t loom_step_index_offset           = 0;
++    uint32_t loom_step_count                  = 0;
+     uint64_t loom_program_generation          = 0;
+     bool loom_program_active                  = false;
+     std::vector<sd_loom_scheduled_model_block_v4_t> loom_model_block_controls;
+@@ -2550,7 +2552,7 @@ public:
+             bool is_skiplayer_step            = skip_layer_guidance.is_enabled_for_step(step_guidance_input);
+             std::vector<ModelBlockControl> active_model_block_controls;
+             if (step > 0 && !loom_model_block_controls.empty()) {
+-                uint32_t model_step = static_cast<uint32_t>(step - 1);
++                uint32_t model_step = loom_step_index_offset + static_cast<uint32_t>(step - 1);
+                 for (auto& control : loom_model_block_controls) {
+                     if (control.selects(model_step)) {
+                         if (control.application_index !=
+@@ -2612,7 +2614,9 @@ public:
+                             ? nullptr
+                             : &active_model_block_controls,
+                         loom_krea_activation,
+-                        step > 0 ? static_cast<uint32_t>(step - 1) : 0,
++                        step > 0
++                            ? loom_step_index_offset + static_cast<uint32_t>(step - 1)
++                            : loom_step_index_offset,
+                         activation_branch};
+                 } else if (sd_version_is_anima(version)) {
+                     diffusion_params.extra = AnimaDiffusionExtra{condition.c_t5_ids.empty() ? nullptr : &condition.c_t5_ids,
+@@ -2782,7 +2786,9 @@ public:
+                                          &loom_step_status,
+                                          loom_resume_state,
+                                          loom_resume_state_len,
+-                                         loom_resume_next_step);
++                                         loom_resume_next_step,
++                                         loom_step_index_offset,
++                                         loom_step_count);
+         if (x0_opt.empty()) {
+             LOG_ERROR("Diffusion model sampling failed");
+             if (control_net) {
+@@ -5862,6 +5868,9 @@ int32_t sd_loom_generate_image_v1(sd_ctx_t* sd_ctx,
      sd_ctx->sd->loom_resume_state       = params->resume_state;
      sd_ctx->sd->loom_resume_state_len   = params->resume_state_len;
      sd_ctx->sd->loom_resume_next_step   = params->resume_next_step;
@@ -137,7 +127,7 @@ index 2e2ce34..d0969d1 100644
  
      sd_image_t* images = nullptr;
      int image_count    = 0;
-@@ -934,6 +937,8 @@ int32_t sd_loom_generate_image_v1(sd_ctx_t* sd_ctx,
+@@ -5876,6 +5885,8 @@ int32_t sd_loom_generate_image_v1(sd_ctx_t* sd_ctx,
      sd_ctx->sd->loom_resume_state       = nullptr;
      sd_ctx->sd->loom_resume_state_len   = 0;
      sd_ctx->sd->loom_resume_next_step   = 0;
@@ -146,7 +136,7 @@ index 2e2ce34..d0969d1 100644
  
      if (status == SD_LOOM_STATUS_CALLBACK_ERROR ||
          status == SD_LOOM_STATUS_UNSUPPORTED) {
-@@ -1054,6 +1059,18 @@ static bool sd_loom_loras_applied_v2(sd_ctx_t* sd_ctx,
+@@ -5989,6 +6000,18 @@ static bool sd_loom_loras_applied_v2(sd_ctx_t* sd_ctx,
      return true;
  }
  
@@ -162,10 +152,10 @@ index 2e2ce34..d0969d1 100644
 +    return static_cast<uint32_t>(steps - encoded_steps - 1);
 +}
 +
- // Detaches every runtime LoRA outside generation. Upstream's apply_loras ends
- // runners and rewrites the model manager's LoRA sources, so it runs under the
- // context's single-owner operation guard.
-@@ -1074,6 +1091,8 @@ static void sd_loom_reset_callbacks(sd_ctx_t* sd_ctx) {
+ static void sd_loom_reset_callbacks(sd_ctx_t* sd_ctx) {
+     sd_ctx->sd->loom_condition_callback      = nullptr;
+     sd_ctx->sd->loom_condition_callback_data = nullptr;
+@@ -5998,6 +6021,8 @@ static void sd_loom_reset_callbacks(sd_ctx_t* sd_ctx) {
      sd_ctx->sd->loom_resume_state            = nullptr;
      sd_ctx->sd->loom_resume_state_len        = 0;
      sd_ctx->sd->loom_resume_next_step        = 0;
@@ -174,7 +164,7 @@ index 2e2ce34..d0969d1 100644
  }
  
  int32_t sd_loom_generate_image_v2(sd_ctx_t* sd_ctx,
-@@ -1204,6 +1223,12 @@ int32_t sd_loom_generate_image_v2(sd_ctx_t* sd_ctx,
+@@ -6128,6 +6153,12 @@ int32_t sd_loom_generate_image_v2(sd_ctx_t* sd_ctx,
      sd_ctx->sd->loom_resume_state            = params->resume_state;
      sd_ctx->sd->loom_resume_state_len        = params->resume_state_len;
      sd_ctx->sd->loom_resume_next_step        = params->resume_next_step;

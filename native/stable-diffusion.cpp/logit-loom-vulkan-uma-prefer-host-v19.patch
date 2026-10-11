@@ -1,8 +1,8 @@
 diff --git src/ggml-vulkan/ggml-vulkan.cpp src/ggml-vulkan/ggml-vulkan.cpp
-index affa4256..b2bff92f 100644
+index 6ffaf3b..e8c3930 100644
 --- src/ggml-vulkan/ggml-vulkan.cpp
 +++ src/ggml-vulkan/ggml-vulkan.cpp
-@@ -4084,6 +4084,17 @@ vk_device ggml_vk_get_device(size_t idx) {
+@@ -5962,6 +5962,17 @@ static vk_device ggml_vk_get_device(size_t idx) {
          device->subgroup_size = subgroup_props.subgroupSize;
          device->subgroup_size_log2 = uint32_t(log2f(float(device->subgroup_size)));
          device->uma = device->properties.deviceType == vk::PhysicalDeviceType::eIntegratedGpu;

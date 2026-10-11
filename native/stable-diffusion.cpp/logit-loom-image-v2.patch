@@ -1,8 +1,6 @@
-diff --git include/stable-diffusion.h include/stable-diffusion.h
-index dc21f32..b813989 100644
 --- include/stable-diffusion.h
 +++ include/stable-diffusion.h
-@@ -472,6 +472,7 @@ typedef bool (*sd_graph_eval_callback_t)(struct ggml_tensor* t, bool ask, void*
+@@ -423,6 +423,7 @@
  // Logit Loom companion ABI. This surface is maintained by the Logit Loom
  // patch and is not part of upstream stable-diffusion.cpp.
  #define SD_LOOM_ABI_VERSION 1
@@ -10,7 +8,7 @@ index dc21f32..b813989 100644
  
  enum sd_loom_profile_t {
      SD_LOOM_PROFILE_MINIT2I_B16 = 1,
-@@ -554,6 +555,63 @@ typedef struct {
+@@ -501,6 +502,63 @@
  
  typedef int32_t (*sd_loom_condition_cb_v1_t)(const sd_loom_condition_tensor_v1_t* tensor, void* data);
  
@@ -73,8 +71,8 @@ index dc21f32..b813989 100644
 +
  SD_API void sd_set_log_callback(sd_log_cb_t sd_log_cb, void* data);
  SD_API void sd_set_progress_callback(sd_progress_cb_t cb, void* data);
- // In each sampling pass, a positive interval previews every Nth denoiser step, while a
-@@ -725,6 +783,21 @@ SD_API int32_t sd_loom_generate_image_v1(sd_ctx_t* sd_ctx,
+ SD_API void sd_set_preview_callback(sd_preview_cb_t cb, enum preview_t mode, int interval, bool denoised, bool noisy, void* data);
+@@ -656,6 +714,21 @@
                                          sd_loom_step_cb_v1_t callback,
                                          void* callback_data,
                                          sd_image_t** image_out);
@@ -96,21 +94,9 @@ index dc21f32..b813989 100644
  
  // List available ggml backend devices, one `name<TAB>description` per line.
  // The names are the device names accepted by the --backend / --params-backend
-diff --git src/stable-diffusion.cpp src/stable-diffusion.cpp
-index 265e7cc..d74b220 100644
 --- src/stable-diffusion.cpp
 +++ src/stable-diffusion.cpp
-@@ -4,6 +4,9 @@
- #include <cinttypes>
- #include <cmath>
- #include <cstdlib>
-+#include <cstring>
-+#include <string>
-+#include <vector>
- 
- #include "core/ggml_extend.h"
- #include "core/util.h"
-@@ -700,6 +703,7 @@ sd_ctx_t* sd_loom_new_ctx_v1(const sd_loom_ctx_params_v1_t* params) {
+@@ -3696,6 +3696,7 @@
      native_params.diffusion_flash_attn = params->diffusion_flash_attn;
      native_params.rng_type             = CPU_RNG;
      native_params.sampler_rng_type     = CPU_RNG;
@@ -118,7 +104,7 @@ index 265e7cc..d74b220 100644
  
      switch (params->profile) {
          case SD_LOOM_PROFILE_MINIT2I_B16:
-@@ -916,6 +920,440 @@ int32_t sd_loom_generate_image_v1(sd_ctx_t* sd_ctx,
+@@ -5797,6 +5798,409 @@
      return status;
  }
  
@@ -189,15 +175,6 @@ index 265e7cc..d74b220 100644
 +    return length <= maximum && (allow_empty || length > 0);
 +}
 +
-+// Upstream keeps one RuntimeLora entry per (LoRA, module) pair; a requested
-+// LoRA counts as applied when any of its entries contributed a tensor.
-+static bool sd_loom_runtime_lora_applied_v2(const StableDiffusionGGML::RuntimeLora& entry,
-+                                            const std::string& expected_id) {
-+    return entry.model != nullptr &&
-+           entry.model->lora_id == expected_id &&
-+           !entry.model->applied_lora_tensors.empty();
-+}
-+
 +static bool sd_loom_loras_applied_v2(sd_ctx_t* sd_ctx,
 +                                     const std::vector<sd_lora_t>& loras) {
 +    for (const auto& requested : loras) {
@@ -207,25 +184,16 @@ index 265e7cc..d74b220 100644
 +        bool matched = std::any_of(
 +            sd_ctx->sd->runtime_lora_models.begin(),
 +            sd_ctx->sd->runtime_lora_models.end(),
-+            [&](const StableDiffusionGGML::RuntimeLora& entry) {
-+                return sd_loom_runtime_lora_applied_v2(entry, expected_id);
++            [&](const std::shared_ptr<LoraModel>& model) {
++                return model != nullptr &&
++                       model->lora_id == expected_id &&
++                       !model->applied_lora_tensors.empty();
 +            });
 +        if (!matched) {
 +            return false;
 +        }
 +    }
 +    return true;
-+}
-+
-+// Detaches every runtime LoRA outside generation. Upstream's apply_loras ends
-+// runners and rewrites the model manager's LoRA sources, so it runs under the
-+// context's single-owner operation guard.
-+static bool sd_loom_clear_loras(sd_ctx_t* sd_ctx) {
-+    StableDiffusionGGML::ContextOperation operation(*sd_ctx->sd);
-+    if (!operation.acquired) {
-+        return false;
-+    }
-+    return sd_ctx->sd->apply_loras(nullptr, 0);
 +}
 +
 +static void sd_loom_reset_callbacks(sd_ctx_t* sd_ctx) {
@@ -325,18 +293,18 @@ index 265e7cc..d74b220 100644
 +
 +    sd_img_gen_params_t native_params;
 +    sd_img_gen_params_init(&native_params);
-+    native_params.loras                             = native_loras.data();
-+    native_params.lora_count                        = static_cast<uint32_t>(native_loras.size());
-+    native_params.prompt                            = params->prompt;
-+    native_params.negative_prompt                   = params->negative_prompt;
-+    native_params.width                             = params->width;
-+    native_params.height                            = params->height;
-+    native_params.seed                              = params->seed;
-+    native_params.strength                          = params->strength;
-+    native_params.sample_params.guidance.txt_cfg    = params->cfg_scale;
-+    native_params.sample_params.sample_method       = EULER_SAMPLE_METHOD;
-+    native_params.sample_params.sample_steps        = static_cast<int>(params->sigma_count - 1);
-+    native_params.sample_params.custom_sigmas       = const_cast<float*>(params->sigmas);
++    native_params.loras                            = native_loras.data();
++    native_params.lora_count                       = static_cast<uint32_t>(native_loras.size());
++    native_params.prompt                           = params->prompt;
++    native_params.negative_prompt                  = params->negative_prompt;
++    native_params.width                            = params->width;
++    native_params.height                           = params->height;
++    native_params.seed                             = params->seed;
++    native_params.strength                         = params->strength;
++    native_params.sample_params.guidance.txt_cfg   = params->cfg_scale;
++    native_params.sample_params.sample_method      = EULER_SAMPLE_METHOD;
++    native_params.sample_params.sample_steps       = static_cast<int>(params->sigma_count - 1);
++    native_params.sample_params.custom_sigmas      = const_cast<float*>(params->sigmas);
 +    native_params.sample_params.custom_sigmas_count = static_cast<int>(params->sigma_count);
 +    if (has_init) {
 +        native_params.init_image = sd_loom_native_image_v2(params->init_image);
@@ -370,13 +338,11 @@ index 265e7cc..d74b220 100644
 +            !sd_loom_loras_applied_v2(sd_ctx, native_loras)) {
 +            status = SD_LOOM_STATUS_UNSUPPORTED;
 +        }
-+        if (!sd_loom_clear_loras(sd_ctx)) {
-+            status = SD_LOOM_STATUS_NATIVE_ERROR;
-+        }
++        sd_ctx->sd->apply_loras(nullptr, 0);
 +    } catch (...) {
 +        status = SD_LOOM_STATUS_NATIVE_ERROR;
 +        try {
-+            sd_loom_clear_loras(sd_ctx);
++            sd_ctx->sd->apply_loras(nullptr, 0);
 +        } catch (...) {
 +        }
 +    }
@@ -389,8 +355,7 @@ index 265e7cc..d74b220 100644
 +        }
 +        return status;
 +    }
-+    if (!generated || images == nullptr || image_count != 1 ||
-+        status == SD_LOOM_STATUS_NATIVE_ERROR) {
++    if (!generated || images == nullptr || image_count != 1) {
 +        if (images != nullptr) {
 +            free_sd_images(images, image_count);
 +        }
@@ -433,10 +398,6 @@ index 265e7cc..d74b220 100644
 +        return SD_LOOM_STATUS_INVALID_ARGUMENT;
 +    }
 +    try {
-+        StableDiffusionGGML::ExecutionScope execution(*sd_ctx->sd);
-+        if (!execution.ready) {
-+            return SD_LOOM_STATUS_NATIVE_ERROR;
-+        }
 +        auto pixels = sd_image_to_tensor(sd_loom_native_image_v2(*image));
 +        auto latent = sd_ctx->sd->encode_first_stage(pixels);
 +        if (latent.empty() || latent.shape().empty() || latent.shape().size() > 8) {
@@ -513,10 +474,6 @@ index 265e7cc..d74b220 100644
 +        return SD_LOOM_STATUS_INVALID_ARGUMENT;
 +    }
 +    try {
-+        StableDiffusionGGML::ExecutionScope execution(*sd_ctx->sd);
-+        if (!execution.ready) {
-+            return SD_LOOM_STATUS_NATIVE_ERROR;
-+        }
 +        sd::Tensor<float> latent(std::move(shape), std::move(data));
 +        auto decoded = sd_ctx->sd->decode_first_stage(latent);
 +        if (decoded.empty()) {
@@ -546,9 +503,7 @@ index 265e7cc..d74b220 100644
 +        return SD_LOOM_STATUS_INVALID_ARGUMENT;
 +    }
 +    try {
-+        if (!sd_loom_clear_loras(sd_ctx)) {
-+            return SD_LOOM_STATUS_NATIVE_ERROR;
-+        }
++        sd_ctx->sd->apply_loras(nullptr, 0);
 +        sd_ctx->sd->reset_cancel_flag();
 +        return SD_LOOM_STATUS_OK;
 +    } catch (...) {
@@ -556,6 +511,6 @@ index 265e7cc..d74b220 100644
 +    }
 +}
 +
- SD_API bool generate_video(sd_ctx_t* sd_ctx,
-                            const sd_vid_gen_params_t* sd_vid_gen_params,
-                            sd_image_t** frames_out,
+ static std::optional<ImageGenerationLatents> prepare_video_generation_latents(sd_ctx_t* sd_ctx,
+                                                                               const sd_vid_gen_params_t* sd_vid_gen_params,
+                                                                               GenerationRequest* request) {
