@@ -1,8 +1,8 @@
 diff --git include/stable-diffusion.h include/stable-diffusion.h
-index ff1e974..dbbe0ce 100644
+index 2e20cf9..7fe78a8 100644
 --- include/stable-diffusion.h
 +++ include/stable-diffusion.h
-@@ -422,8 +422,8 @@ typedef bool (*sd_graph_eval_callback_t)(struct ggml_tensor* t, bool ask, void*
+@@ -471,8 +471,8 @@ typedef bool (*sd_graph_eval_callback_t)(struct ggml_tensor* t, bool ask, void*
  
  // Logit Loom companion ABI. This surface is maintained by the Logit Loom
  // patch and is not part of upstream stable-diffusion.cpp.
@@ -13,7 +13,7 @@ index ff1e974..dbbe0ce 100644
  #define SD_LOOM_PROGRAM_ABI_VERSION 3
  #define SD_LOOM_MODEL_BLOCK_ABI_VERSION 4
  #define SD_LOOM_MODEL_BLOCK_APPLICATION_ABI_VERSION 5
-@@ -476,6 +476,9 @@ typedef struct {
+@@ -529,6 +529,9 @@ typedef struct {
      float cfg_scale;
      const float* sigmas;
      size_t sigma_count;
@@ -23,7 +23,7 @@ index ff1e974..dbbe0ce 100644
  } sd_loom_image_params_v1_t;
  
  typedef struct {
-@@ -544,6 +547,9 @@ typedef struct {
+@@ -597,6 +600,9 @@ typedef struct {
      size_t reference_image_count;
      const sd_loom_lora_v2_t* loras;
      size_t lora_count;
@@ -33,11 +33,41 @@ index ff1e974..dbbe0ce 100644
  } sd_loom_image_params_v2_t;
  
  typedef struct {
+diff --git src/pipeline/diffusion_engine.cpp src/pipeline/diffusion_engine.cpp
+index 9297872..df8aa51 100644
+--- src/pipeline/diffusion_engine.cpp
++++ src/pipeline/diffusion_engine.cpp
+@@ -2881,7 +2881,10 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
+                                      denoiser,
+                                      loom_step_callback,
+                                      loom_step_callback_data,
+-                                     &loom_step_status);
++                                     &loom_step_status,
++                                     loom_resume_state,
++                                     loom_resume_state_len,
++                                     loom_resume_next_step);
+     if (x0_opt.empty()) {
+         LOG_ERROR("Diffusion model sampling failed");
+         if (control_net) {
+diff --git src/pipeline/diffusion_engine.h src/pipeline/diffusion_engine.h
+index e05c324..e230b79 100644
+--- src/pipeline/diffusion_engine.h
++++ src/pipeline/diffusion_engine.h
+@@ -81,6 +81,9 @@ public:
+     sd_loom_step_cb_v1_t loom_step_callback            = nullptr;
+     void* loom_step_callback_data                      = nullptr;
+     int32_t loom_step_status                           = SD_LOOM_STATUS_OK;
++    const float* loom_resume_state                     = nullptr;
++    size_t loom_resume_state_len                       = 0;
++    uint32_t loom_resume_next_step                     = 0;
+     uint64_t loom_program_generation                   = 0;
+     bool loom_program_active                           = false;
+     std::vector<sd_loom_scheduled_model_block_v4_t> loom_model_block_controls;
 diff --git src/runtime/denoiser.hpp src/runtime/denoiser.hpp
-index fb5bbfb..8dba2fd 100644
+index b27a64f..6a66560 100644
 --- src/runtime/denoiser.hpp
 +++ src/runtime/denoiser.hpp
-@@ -1561,9 +1561,27 @@ static sd::Tensor<float> sample_euler(denoise_cb_t model,
+@@ -1821,9 +1821,27 @@ static sd::Tensor<float> sample_euler(denoise_cb_t model,
                                        const std::vector<float>& sigmas,
                                        sd_loom_step_cb_v1_t step_callback,
                                        void* step_callback_data,
@@ -66,8 +96,8 @@ index fb5bbfb..8dba2fd 100644
 +    for (int i = static_cast<int>(resume_next_step); i < steps; i++) {
          auto step_started = std::chrono::steady_clock::now();
          float sigma       = sigmas[i];
-         auto denoised_opt = model(x, sigma, i + 1);
-@@ -2707,7 +2725,10 @@ static sd::Tensor<float> sample_k_diffusion(sample_method_t method,
+         // Upstream skips a zero-length step without evaluating the model; x is
+@@ -3093,7 +3111,10 @@ static sd::Tensor<float> sample_k_diffusion(sample_method_t method,
                                              std::shared_ptr<Denoiser> denoiser_for_dispatch,
                                              sd_loom_step_cb_v1_t step_callback,
                                              void* step_callback_data,
@@ -79,7 +109,7 @@ index fb5bbfb..8dba2fd 100644
      if (step_callback != nullptr && method != EULER_SAMPLE_METHOD) {
          *step_callback_status = SD_LOOM_STATUS_UNSUPPORTED;
          return {};
-@@ -2727,7 +2748,10 @@ static sd::Tensor<float> sample_k_diffusion(sample_method_t method,
+@@ -3116,7 +3137,10 @@ static sd::Tensor<float> sample_k_diffusion(sample_method_t method,
                                  sigmas,
                                  step_callback,
                                  step_callback_data,
@@ -92,32 +122,10 @@ index fb5bbfb..8dba2fd 100644
              return sample_heun(model, std::move(x), sigmas);
          case DPM2_SAMPLE_METHOD:
 diff --git src/stable-diffusion.cpp src/stable-diffusion.cpp
-index 09fe8f8..3d1b648 100644
+index dc2051b..fe26137 100644
 --- src/stable-diffusion.cpp
 +++ src/stable-diffusion.cpp
-@@ -235,6 +235,9 @@ public:
-     sd_loom_step_cb_v1_t loom_step_callback = nullptr;
-     void* loom_step_callback_data            = nullptr;
-     int32_t loom_step_status                  = SD_LOOM_STATUS_OK;
-+    const float* loom_resume_state            = nullptr;
-+    size_t loom_resume_state_len              = 0;
-+    uint32_t loom_resume_next_step            = 0;
-     uint64_t loom_program_generation          = 0;
-     bool loom_program_active                  = false;
-     std::vector<sd_loom_scheduled_model_block_v4_t> loom_model_block_controls;
-@@ -2775,7 +2778,10 @@ public:
-                                          denoiser,
-                                          loom_step_callback,
-                                          loom_step_callback_data,
--                                         &loom_step_status);
-+                                         &loom_step_status,
-+                                         loom_resume_state,
-+                                         loom_resume_state_len,
-+                                         loom_resume_next_step);
-         if (x0_opt.empty()) {
-             LOG_ERROR("Diffusion model sampling failed");
-             if (control_net) {
-@@ -3737,6 +3743,20 @@ static bool sd_loom_nonempty(const char* value) {
+@@ -686,6 +686,20 @@ static bool sd_loom_nonempty(const char* value) {
      return value != nullptr && value[0] != '\0';
  }
  
@@ -138,7 +146,7 @@ index 09fe8f8..3d1b648 100644
  static void sd_loom_discard_progress(int, int, float, void*) {
  }
  
-@@ -5803,6 +5823,10 @@ int32_t sd_loom_generate_image_v1(sd_ctx_t* sd_ctx,
+@@ -867,6 +881,10 @@ int32_t sd_loom_generate_image_v1(sd_ctx_t* sd_ctx,
          params->sigmas == nullptr ||
          params->sigma_count < 2 ||
          params->sigma_count > 4097 ||
@@ -149,27 +157,60 @@ index 09fe8f8..3d1b648 100644
          sd_ctx->sd->loom_condition_callback != nullptr ||
          sd_ctx->sd->loom_step_callback != nullptr) {
          return SD_LOOM_STATUS_INVALID_ARGUMENT;
-@@ -5834,6 +5858,9 @@ int32_t sd_loom_generate_image_v1(sd_ctx_t* sd_ctx,
-     sd_ctx->sd->loom_step_callback      = callback;
-     sd_ctx->sd->loom_step_callback_data = callback_data;
-     sd_ctx->sd->loom_step_status        = SD_LOOM_STATUS_OK;
+@@ -883,21 +901,24 @@ int32_t sd_loom_generate_image_v1(sd_ctx_t* sd_ctx,
+ 
+     sd_img_gen_params_t native_params;
+     sd_img_gen_params_init(&native_params);
+-    native_params.prompt                            = params->prompt;
+-    native_params.width                             = params->width;
+-    native_params.height                            = params->height;
+-    native_params.seed                              = params->seed;
+-    native_params.sample_params.guidance.txt_cfg    = params->cfg_scale;
+-    native_params.sample_params.sample_method       = EULER_SAMPLE_METHOD;
+-    native_params.sample_params.sample_steps        = static_cast<int>(params->sigma_count - 1);
+-    native_params.sample_params.custom_sigmas       = const_cast<float*>(params->sigmas);
+-    native_params.sample_params.custom_sigmas_count = static_cast<int>(params->sigma_count);
++    native_params.prompt                                = params->prompt;
++    native_params.width                                 = params->width;
++    native_params.height                                = params->height;
++    native_params.seed                                  = params->seed;
++    native_params.sample_params.guidance.txt_cfg        = params->cfg_scale;
++    native_params.sample_params.sample_method           = EULER_SAMPLE_METHOD;
++    native_params.sample_params.sample_steps            = static_cast<int>(params->sigma_count - 1);
++    native_params.sample_params.custom_sigmas           = const_cast<float*>(params->sigmas);
++    native_params.sample_params.custom_sigmas_count     = static_cast<int>(params->sigma_count);
+ 
+     sd_ctx->sd->loom_condition_callback      = condition_callback;
+     sd_ctx->sd->loom_condition_callback_data = condition_callback_data;
+-    sd_ctx->sd->loom_step_callback           = callback;
+-    sd_ctx->sd->loom_step_callback_data      = callback_data;
+-    sd_ctx->sd->loom_step_status             = SD_LOOM_STATUS_OK;
++    sd_ctx->sd->loom_step_callback      = callback;
++    sd_ctx->sd->loom_step_callback_data = callback_data;
++    sd_ctx->sd->loom_step_status        = SD_LOOM_STATUS_OK;
 +    sd_ctx->sd->loom_resume_state       = params->resume_state;
 +    sd_ctx->sd->loom_resume_state_len   = params->resume_state_len;
 +    sd_ctx->sd->loom_resume_next_step   = params->resume_next_step;
  
      sd_image_t* images = nullptr;
      int image_count    = 0;
-@@ -5845,6 +5872,9 @@ int32_t sd_loom_generate_image_v1(sd_ctx_t* sd_ctx,
-     sd_ctx->sd->loom_step_callback      = nullptr;
-     sd_ctx->sd->loom_step_callback_data = nullptr;
-     sd_ctx->sd->loom_step_status        = SD_LOOM_STATUS_OK;
+@@ -906,9 +927,12 @@ int32_t sd_loom_generate_image_v1(sd_ctx_t* sd_ctx,
+ 
+     sd_ctx->sd->loom_condition_callback      = nullptr;
+     sd_ctx->sd->loom_condition_callback_data = nullptr;
+-    sd_ctx->sd->loom_step_callback           = nullptr;
+-    sd_ctx->sd->loom_step_callback_data      = nullptr;
+-    sd_ctx->sd->loom_step_status             = SD_LOOM_STATUS_OK;
++    sd_ctx->sd->loom_step_callback      = nullptr;
++    sd_ctx->sd->loom_step_callback_data = nullptr;
++    sd_ctx->sd->loom_step_status        = SD_LOOM_STATUS_OK;
 +    sd_ctx->sd->loom_resume_state       = nullptr;
 +    sd_ctx->sd->loom_resume_state_len   = 0;
 +    sd_ctx->sd->loom_resume_next_step   = 0;
  
      if (status == SD_LOOM_STATUS_CALLBACK_ERROR ||
          status == SD_LOOM_STATUS_UNSUPPORTED) {
-@@ -5958,6 +5988,9 @@ static void sd_loom_reset_callbacks(sd_ctx_t* sd_ctx) {
+@@ -1040,6 +1064,9 @@ static void sd_loom_reset_callbacks(sd_ctx_t* sd_ctx) {
      sd_ctx->sd->loom_step_callback           = nullptr;
      sd_ctx->sd->loom_step_callback_data      = nullptr;
      sd_ctx->sd->loom_step_status             = SD_LOOM_STATUS_OK;
@@ -179,7 +220,7 @@ index 09fe8f8..3d1b648 100644
  }
  
  int32_t sd_loom_generate_image_v2(sd_ctx_t* sd_ctx,
-@@ -5991,6 +6024,10 @@ int32_t sd_loom_generate_image_v2(sd_ctx_t* sd_ctx,
+@@ -1073,6 +1100,10 @@ int32_t sd_loom_generate_image_v2(sd_ctx_t* sd_ctx,
          params->strength <= 0.f ||
          params->strength > 1.f ||
          !sd_loom_valid_schedule_v2(params->sigmas, params->sigma_count) ||
@@ -190,7 +231,38 @@ index 09fe8f8..3d1b648 100644
          params->reference_image_count > 16 ||
          params->lora_count > 32 ||
          (params->reference_image_count > 0 && params->reference_images == nullptr) ||
-@@ -6081,6 +6118,9 @@ int32_t sd_loom_generate_image_v2(sd_ctx_t* sd_ctx,
+@@ -1131,18 +1162,18 @@ int32_t sd_loom_generate_image_v2(sd_ctx_t* sd_ctx,
+ 
+     sd_img_gen_params_t native_params;
+     sd_img_gen_params_init(&native_params);
+-    native_params.loras                             = native_loras.data();
+-    native_params.lora_count                        = static_cast<uint32_t>(native_loras.size());
+-    native_params.prompt                            = params->prompt;
+-    native_params.negative_prompt                   = params->negative_prompt;
+-    native_params.width                             = params->width;
+-    native_params.height                            = params->height;
+-    native_params.seed                              = params->seed;
+-    native_params.strength                          = params->strength;
+-    native_params.sample_params.guidance.txt_cfg    = params->cfg_scale;
+-    native_params.sample_params.sample_method       = EULER_SAMPLE_METHOD;
+-    native_params.sample_params.sample_steps        = static_cast<int>(params->sigma_count - 1);
+-    native_params.sample_params.custom_sigmas       = const_cast<float*>(params->sigmas);
++    native_params.loras                            = native_loras.data();
++    native_params.lora_count                       = static_cast<uint32_t>(native_loras.size());
++    native_params.prompt                           = params->prompt;
++    native_params.negative_prompt                  = params->negative_prompt;
++    native_params.width                            = params->width;
++    native_params.height                           = params->height;
++    native_params.seed                             = params->seed;
++    native_params.strength                         = params->strength;
++    native_params.sample_params.guidance.txt_cfg   = params->cfg_scale;
++    native_params.sample_params.sample_method      = EULER_SAMPLE_METHOD;
++    native_params.sample_params.sample_steps       = static_cast<int>(params->sigma_count - 1);
++    native_params.sample_params.custom_sigmas      = const_cast<float*>(params->sigmas);
+     native_params.sample_params.custom_sigmas_count = static_cast<int>(params->sigma_count);
+     if (has_init) {
+         native_params.init_image = sd_loom_native_image_v2(params->init_image);
+@@ -1163,6 +1194,9 @@ int32_t sd_loom_generate_image_v2(sd_ctx_t* sd_ctx,
      sd_ctx->sd->loom_step_callback           = callback;
      sd_ctx->sd->loom_step_callback_data      = callback_data;
      sd_ctx->sd->loom_step_status             = SD_LOOM_STATUS_OK;
@@ -200,7 +272,7 @@ index 09fe8f8..3d1b648 100644
  
      sd_image_t* images = nullptr;
      int image_count    = 0;
-@@ -7332,6 +7372,9 @@ int32_t sd_loom_program_generate_image_v3(
+@@ -2425,6 +2459,9 @@ int32_t sd_loom_program_generate_image_v3(
              reference_images.size(),
              loras.data(),
              loras.size(),

@@ -1,6 +1,8 @@
+diff --git src/stable-diffusion.cpp src/stable-diffusion.cpp
+index d0969d1..a0a6914 100644
 --- src/stable-diffusion.cpp
 +++ src/stable-diffusion.cpp
-@@ -3802,6 +3802,11 @@
+@@ -727,6 +727,11 @@ sd_ctx_t* sd_loom_new_ctx_v1(const sd_loom_ctx_params_v1_t* params) {
      native_params.rng_type             = CPU_RNG;
      native_params.sampler_rng_type     = CPU_RNG;
      native_params.lora_apply_mode      = LORA_APPLY_AT_RUNTIME;

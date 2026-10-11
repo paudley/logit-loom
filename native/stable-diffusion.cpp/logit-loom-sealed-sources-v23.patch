@@ -1,0 +1,95 @@
+diff --git src/model_manager.cpp src/model_manager.cpp
+index 2815e16..2c4dd63 100644
+--- src/model_manager.cpp
++++ src/model_manager.cpp
+@@ -1922,7 +1922,8 @@ bool ModelManager::ensure_compute_backend_capacity(
+         }
+     };
+     auto can_demote_to_disk = [&](TensorState* state) {
+-        return state != nullptr && state->tensor != nullptr && state->tensor->view_src == nullptr &&
++        return !sources_sealed_ &&
++               state != nullptr && state->tensor != nullptr && state->tensor->view_src == nullptr &&
+                state->residency_mode == ResidencyMode::ParamBackend &&
+                state->params_backend != nullptr && state->params_backend == state->compute_backend &&
+                state->compute_backend == compute_backend && !sd_backend_is_cpu(state->params_backend) &&
+diff --git src/model_manager.h src/model_manager.h
+index 643fc07..7c8400f 100644
+--- src/model_manager.h
++++ src/model_manager.h
+@@ -114,6 +114,7 @@ private:
+     bool writable_mmap_              = false;
+     bool segmented_compute_disabled_ = false;
+     bool prefetch_disabled_          = false;
++    bool sources_sealed_             = false;
+ 
+     void finish_compute_backend_usage(const std::vector<TensorState*>& states);
+     void release_all();
+@@ -266,6 +267,9 @@ public:
+ 
+     bool validate_registered_tensors();
+     bool load_all_params_eagerly();
++    // Logit Loom: resident parameters are never demoted to disk residency,
++    // because their source descriptors cannot be reopened.
++    void seal_sources() { sources_sealed_ = true; }
+ 
+     bool assign_compute_backend(const std::vector<ggml_tensor*>& tensors,
+                                 ggml_backend_t compute_backend) override;
+diff --git src/pipeline/diffusion_engine.cpp src/pipeline/diffusion_engine.cpp
+index 874cc06..eeb2650 100644
+--- src/pipeline/diffusion_engine.cpp
++++ src/pipeline/diffusion_engine.cpp
+@@ -265,6 +265,17 @@ bool StableDiffusionGGML::reset_runners(const RunnerGroups& groups) {
+ }
+ 
+ bool StableDiffusionGGML::refresh_model_sources() {
++    if (loom_sealed_model_sources) {
++        // A sealed /proc/self/fd path may be closed or name another file by
++        // now, so its file stamp proves nothing. The catalog can still move
++        // when LoRA sources (isolated, open for the request) are attached;
++        // reconcile runners against the loader as it is, without touching
++        // the filesystem.
++        if (runner_state_.ready && runner_state_.catalog_revision == model_manager->loader().revision()) {
++            return true;
++        }
++        return apply_model_update(model_manager->loader());
++    }
+     bool changed;
+     if (!model_manager->loader().files_changed(changed, false)) {
+         return false;
+diff --git src/pipeline/diffusion_engine.h src/pipeline/diffusion_engine.h
+index 6d8ff74..87b08f6 100644
+--- src/pipeline/diffusion_engine.h
++++ src/pipeline/diffusion_engine.h
+@@ -90,6 +90,9 @@ public:
+     bool loom_program_active                           = false;
+     std::vector<sd_loom_scheduled_model_block_v4_t> loom_model_block_controls;
+     KreaActivationRequest* loom_krea_activation = nullptr;
++    // Logit Loom: model sources are sealed descriptors that are resident once
++    // the context exists; they are never re-read, re-stamped or refreshed.
++    bool loom_sealed_model_sources = false;
+     int n_threads                    = -1;
+     std::unique_ptr<sd::ParallelExecutor> tensor_executor;
+     float default_flow_shift = INFINITY;
+diff --git src/stable-diffusion.cpp src/stable-diffusion.cpp
+index a007fca..56f0486 100644
+--- src/stable-diffusion.cpp
++++ src/stable-diffusion.cpp
+@@ -782,7 +782,17 @@ sd_ctx_t* sd_loom_new_ctx_v1(const sd_loom_ctx_params_v1_t* params) {
+ 
+     // Preserve stdout for the embedding application's structured output.
+     sd_set_progress_callback(sd_loom_discard_progress, nullptr);
+-    return new_sd_ctx(&native_params);
++    sd_ctx_t* sd_ctx = new_sd_ctx(&native_params);
++    if (sd_ctx != nullptr) {
++        // Upstream re-stamps every model file before each execution and may
++        // demote resident weights to disk residency under memory pressure,
++        // reloading them later from their paths. These paths are sealed
++        // descriptors that are closed once the context exists, so both are
++        // switched off: sources stay as loaded, and a shortage fails instead.
++        sd_ctx->sd->loom_sealed_model_sources = true;
++        sd_ctx->sd->model_manager->seal_sources();
++    }
++    return sd_ctx;
+ }
+ 
+ SD_API void sd_cancel_generation(sd_ctx_t* sd_ctx, enum sd_cancel_mode_t mode) {
