@@ -46,6 +46,9 @@ pub enum Profile {
     ZImageTurbo,
     /// Qwen-Image with Qwen2.5-VL-7B-Instruct and its own VAE.
     QwenImage,
+    /// Qwen-Image 2.1 Turbo with Qwen3-VL-8B-Instruct and the Qwen-Image 2.1
+    /// (Wan 2.2-style) VAE.
+    QwenImage21,
     /// FLUX.2-dev with Mistral-Small-3.2-24B-Instruct and the FLUX.2 VAE.
     Flux2Dev,
     /// FLUX.2-klein-4B with Qwen3-4B and the FLUX.2 VAE.
@@ -63,11 +66,12 @@ pub struct LatentGeometry {
 
 impl Profile {
     /// Every profile the companion ABI can construct.
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::MiniT2iB16,
         Self::Krea2Turbo,
         Self::ZImageTurbo,
         Self::QwenImage,
+        Self::QwenImage21,
         Self::Flux2Dev,
         Self::Flux2Klein4b,
     ];
@@ -79,6 +83,7 @@ impl Profile {
             Self::Krea2Turbo => "krea-2-turbo",
             Self::ZImageTurbo => "z-image-turbo",
             Self::QwenImage => "qwen-image",
+            Self::QwenImage21 => "qwen-image-2.1-turbo",
             Self::Flux2Dev => "flux2-dev",
             Self::Flux2Klein4b => "flux2-klein-4b",
         }
@@ -92,6 +97,7 @@ impl Profile {
             Self::Krea2Turbo => "krea2",
             Self::ZImageTurbo => "zimage",
             Self::QwenImage => "qwenimage",
+            Self::QwenImage21 => "qwenimage21",
             Self::Flux2Dev => "flux2dev",
             Self::Flux2Klein4b => "flux2klein4b",
         }
@@ -109,7 +115,8 @@ impl Profile {
             Self::MiniT2iB16 => crate::ffi::PROFILE_MINIT2I,
             Self::Krea2Turbo => crate::ffi::PROFILE_KREA2,
             Self::ZImageTurbo => crate::ffi::PROFILE_ZIMAGE,
-            Self::QwenImage => crate::ffi::PROFILE_QWEN_IMAGE,
+            // The native companion detects 2.1 from the diffusion weights.
+            Self::QwenImage | Self::QwenImage21 => crate::ffi::PROFILE_QWEN_IMAGE,
             Self::Flux2Dev => crate::ffi::PROFILE_FLUX2_DEV,
             Self::Flux2Klein4b => crate::ffi::PROFILE_FLUX2_KLEIN,
         }
@@ -118,14 +125,19 @@ impl Profile {
     /// Returns the latent geometry, or `None` for a direct-RGB profile.
     ///
     /// Values are upstream's `get_latent_channel` and VAE scale factor at the
-    /// pinned revision: the FLUX.2 VAE packs 128 channels at 16x, every other
-    /// diffusion transformer here uses 16 channels at 8x.
+    /// pinned revision: the FLUX.2 VAE packs 128 channels at 16x, the
+    /// Qwen-Image 2.1 VAE 64 channels at 16x, every other diffusion
+    /// transformer here uses 16 channels at 8x.
     pub const fn latent_geometry(self) -> Option<LatentGeometry> {
         match self {
             Self::MiniT2iB16 => None,
             Self::Krea2Turbo | Self::ZImageTurbo | Self::QwenImage => Some(LatentGeometry {
                 downsample: 8,
                 channels: 16,
+            }),
+            Self::QwenImage21 => Some(LatentGeometry {
+                downsample: 16,
+                channels: 64,
             }),
             Self::Flux2Dev | Self::Flux2Klein4b => Some(LatentGeometry {
                 downsample: 16,
@@ -1200,6 +1212,14 @@ mod tests {
         assert_eq!(
             Profile::QwenImage.state_shape(1024, 768),
             vec![128, 96, 16, 1]
+        );
+        assert_eq!(
+            Profile::QwenImage21.state_shape(1024, 1024),
+            vec![64, 64, 64, 1]
+        );
+        assert_eq!(
+            Profile::from_artifact_family("qwenimage21"),
+            Some(Profile::QwenImage21)
         );
         assert_eq!(
             Profile::MiniT2iB16.state_shape(256, 256),

@@ -39,6 +39,10 @@ pub enum FlowScheduleFamilyV1 {
         /// Exact fitted `mu` bit pattern.
         mu_bits: u32,
     },
+    /// Sigma boundaries published with a step-distilled model, used verbatim.
+    /// The boundaries themselves, carried in the schedule's sigma bits, are
+    /// the parameters; Qwen-Image 2.1 Turbo publishes its eight-step list.
+    Explicit,
 }
 
 /// Exact flow-matching Euler schedule contract.
@@ -126,6 +130,41 @@ impl FlowMatchScheduleV1 {
             },
             steps,
             sigma_bits: sigmas.into_iter().map(f32::to_bits).collect(),
+        })
+    }
+
+    /// Adopts published sigma boundaries verbatim, terminal zero included.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error unless there are between two and the diffusion bound
+    /// plus one boundaries, every boundary is finite and non-negative, the
+    /// list never increases, and zero appears only as the final boundary.
+    pub fn explicit(sigmas: &[f32]) -> Result<Self> {
+        let steps = u32::try_from(sigmas.len().saturating_sub(1))
+            .map_err(|_| invalid("explicit sigma count exceeds the diffusion bound"))?;
+        bounded_steps(steps)?;
+        let (last, interior) = sigmas
+            .split_last()
+            .ok_or_else(|| invalid("explicit sigmas must not be empty"))?;
+        if last.to_bits() != 0.0_f32.to_bits() {
+            return Err(invalid("explicit sigmas must end at positive zero"));
+        }
+        if interior
+            .iter()
+            .any(|sigma| !sigma.is_finite() || *sigma <= 0.0)
+        {
+            return Err(invalid(
+                "explicit sigmas before the terminal zero must be finite and positive",
+            ));
+        }
+        if sigmas.windows(2).any(|pair| pair[1] > pair[0]) {
+            return Err(invalid("explicit sigmas must not increase"));
+        }
+        Ok(Self {
+            family: FlowScheduleFamilyV1::Explicit,
+            steps,
+            sigma_bits: sigmas.iter().copied().map(f32::to_bits).collect(),
         })
     }
 
@@ -270,11 +309,13 @@ mod tests {
         assert_eq!(
             match short.family() {
                 FlowScheduleFamilyV1::Flux2Empirical { mu_bits, .. } => mu_bits,
-                FlowScheduleFamilyV1::DiscreteFlowShift { .. } => 0,
+                FlowScheduleFamilyV1::DiscreteFlowShift { .. } | FlowScheduleFamilyV1::Explicit =>
+                    0,
             },
             match long.family() {
                 FlowScheduleFamilyV1::Flux2Empirical { mu_bits, .. } => mu_bits,
-                FlowScheduleFamilyV1::DiscreteFlowShift { .. } => 1,
+                FlowScheduleFamilyV1::DiscreteFlowShift { .. } | FlowScheduleFamilyV1::Explicit =>
+                    1,
             }
         );
     }
@@ -295,6 +336,44 @@ mod tests {
             assert_ne!(left, right);
         }
         assert_ne!(ids[0], ids[3]);
+    }
+
+    /// Qwen-Image 2.1 Turbo's published eight-step boundaries.
+    const QWEN_IMAGE_21_TURBO: [f32; 9] = [
+        1.0, 0.978_453, 0.954_18, 0.926_626, 0.895_08, 0.845_148, 0.704_534, 0.414_568, 0.0,
+    ];
+
+    #[test]
+    fn explicit_schedule_keeps_published_boundaries_bit_for_bit() {
+        let schedule = FlowMatchScheduleV1::explicit(&QWEN_IMAGE_21_TURBO).unwrap();
+        assert_eq!(schedule.family(), FlowScheduleFamilyV1::Explicit);
+        assert_eq!(schedule.steps(), 8);
+        let expected: Vec<u32> = QWEN_IMAGE_21_TURBO.iter().map(|s| s.to_bits()).collect();
+        assert_eq!(schedule.sigma_bits(), expected.as_slice());
+    }
+
+    #[test]
+    fn explicit_identity_binds_every_boundary() {
+        let base = FlowMatchScheduleV1::explicit(&QWEN_IMAGE_21_TURBO).unwrap();
+        let mut nudged = QWEN_IMAGE_21_TURBO;
+        nudged[4] = f32::from_bits(nudged[4].to_bits() - 1);
+        let other = FlowMatchScheduleV1::explicit(&nudged).unwrap();
+        let shifted = FlowMatchScheduleV1::discrete_flow_shift(8, 3.0).unwrap();
+        assert_ne!(base.identity().unwrap(), other.identity().unwrap());
+        assert_ne!(base.identity().unwrap(), shifted.identity().unwrap());
+    }
+
+    #[test]
+    fn explicit_schedule_refuses_malformed_boundaries() {
+        assert!(FlowMatchScheduleV1::explicit(&[]).is_err());
+        assert!(FlowMatchScheduleV1::explicit(&[0.0]).is_err());
+        assert!(FlowMatchScheduleV1::explicit(&[1.0, 0.5]).is_err());
+        assert!(FlowMatchScheduleV1::explicit(&[1.0, -0.0]).is_err());
+        assert!(FlowMatchScheduleV1::explicit(&[0.5, 1.0, 0.0]).is_err());
+        assert!(FlowMatchScheduleV1::explicit(&[1.0, 0.0, 0.0]).is_err());
+        assert!(FlowMatchScheduleV1::explicit(&[f32::NAN, 0.0]).is_err());
+        assert!(FlowMatchScheduleV1::explicit(&[f32::INFINITY, 0.0]).is_err());
+        assert!(FlowMatchScheduleV1::explicit(&[1.0, 0.0]).is_ok());
     }
 
     #[test]

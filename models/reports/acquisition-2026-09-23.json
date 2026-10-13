@@ -293,6 +293,50 @@
       "pending_artifacts": []
     },
     {
+      "profile_id": "qwen-image-2.1-turbo",
+      "method": "existing-local-artifacts",
+      "status": "verified",
+      "catalog_artifact_bytes": 16976584568,
+      "verified_artifact_bytes": 16976584568,
+      "measured_profile_storage_bytes": null,
+      "verified_artifacts": [
+        {
+          "catalog_domain": "logit-loom-model-catalog-v1",
+          "catalog_sha256": "2cbe7cd265aa95ed26778083b8279eff63e284dffd08fe89e073653969fffc9a",
+          "profile_id": "qwen-image-2.1-turbo",
+          "source_id": "qwen-image-2.1-turbo-q8-0",
+          "repository": "AtomicChat/Qwen-Image-2.1-Turbo-GGUF",
+          "revision": "bb25d06bc74119c12207243d68917951e6d9c232",
+          "artifact_path": "Qwen-Image-2.1-Turbo-Q8_0.gguf",
+          "bytes": 7591554784,
+          "sha256": "99f498fb7188be7eac9eb5f345a9e074d30eef3ca235b419e92563e5b48073c4"
+        },
+        {
+          "catalog_domain": "logit-loom-model-catalog-v1",
+          "catalog_sha256": "2cbe7cd265aa95ed26778083b8279eff63e284dffd08fe89e073653969fffc9a",
+          "profile_id": "qwen-image-2.1-turbo",
+          "source_id": "qwen3-vl-8b-abliterated-text-encoder",
+          "repository": "AtomicChat/Qwen-Image-2.1-Turbo-Uncensored-GGUF",
+          "revision": "e3b01e9bfacc373148bdb93824496e0c72643250",
+          "artifact_path": "Qwen-Image-2.1-Turbo-Abliterated-Uncensored-Q8_0.gguf",
+          "bytes": 8709520096,
+          "sha256": "f8f9f6276b726db5291f4a5343089612cb5fd08aa81e8f0791dc66d2c03d07ca"
+        },
+        {
+          "catalog_domain": "logit-loom-model-catalog-v1",
+          "catalog_sha256": "2cbe7cd265aa95ed26778083b8279eff63e284dffd08fe89e073653969fffc9a",
+          "profile_id": "qwen-image-2.1-turbo",
+          "source_id": "qwen-image-2.1-vae",
+          "repository": "Comfy-Org/Qwen-Image-2.1",
+          "revision": "df94239739eef7205973a145ffa6f441f7b64e84",
+          "artifact_path": "vae/qwen_image_2.1_vae_bf16.safetensors",
+          "bytes": 675509688,
+          "sha256": "bb21f7473051e1ac368515dd3f2e15cd44d7a11748ee8823e1ddca3e4876b7c9"
+        }
+      ],
+      "pending_artifacts": []
+    },
+    {
       "profile_id": "flux2-dev",
       "method": "existing-local-artifacts",
       "status": "verified",

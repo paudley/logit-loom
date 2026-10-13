@@ -271,6 +271,59 @@
       ]
     },
     {
+      "id": "qwen-image-2.1-turbo",
+      "display_name": "Qwen-Image 2.1 Turbo",
+      "modality": "image",
+      "role": "advanced",
+      "integration_status": "catalogued",
+      "acceptance_status": "not-run",
+      "adapter_target": "diffusion",
+      "requires_accelerator": true,
+      "remote_code_policy": "forbidden",
+      "notes": "Draws resident image model from 2026-10-13. Step-distilled Qwen-Image 2.1 Turbo diffusion GGUF, the AtomicChat abliterated Qwen3-VL-8B-Instruct GGUF text encoder (every Lillith model is abliterated), and the Qwen-Image 2.1 VAE (64 latent channels at 16x). Its model card renders 8 steps at cfg 1 under explicit sigmas.",
+      "sources": [
+        {
+          "id": "qwen-image-2.1-turbo-q8-0",
+          "repository": "AtomicChat/Qwen-Image-2.1-Turbo-GGUF",
+          "revision": "bb25d06bc74119c12207243d68917951e6d9c232",
+          "local_subdir": "diffusion",
+          "files": [
+            {
+              "path": "Qwen-Image-2.1-Turbo-Q8_0.gguf",
+              "bytes": 7591554784,
+              "sha256": "99f498fb7188be7eac9eb5f345a9e074d30eef3ca235b419e92563e5b48073c4"
+            }
+          ]
+        },
+        {
+          "id": "qwen3-vl-8b-abliterated-text-encoder",
+          "repository": "AtomicChat/Qwen-Image-2.1-Turbo-Uncensored-GGUF",
+          "revision": "e3b01e9bfacc373148bdb93824496e0c72643250",
+          "local_subdir": "text-encoder",
+          "files": [
+            {
+              "path": "Qwen-Image-2.1-Turbo-Abliterated-Uncensored-Q8_0.gguf",
+              "bytes": 8709520096,
+              "sha256": "f8f9f6276b726db5291f4a5343089612cb5fd08aa81e8f0791dc66d2c03d07ca"
+            }
+          ]
+        },
+        {
+          "id": "qwen-image-2.1-vae",
+          "repository": "Comfy-Org/Qwen-Image-2.1",
+          "revision": "df94239739eef7205973a145ffa6f441f7b64e84",
+          "local_subdir": "vae",
+          "files": [
+            {
+              "path": "vae/qwen_image_2.1_vae_bf16.safetensors",
+              "bytes": 675509688,
+              "sha256": "bb21f7473051e1ac368515dd3f2e15cd44d7a11748ee8823e1ddca3e4876b7c9"
+            }
+          ]
+        }
+      ]
+    },
+    {
       "id": "flux2-dev",
       "display_name": "FLUX.2-dev",
       "modality": "image",
