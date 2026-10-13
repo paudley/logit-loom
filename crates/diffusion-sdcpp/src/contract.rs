@@ -83,7 +83,7 @@ impl Profile {
             Self::Krea2Turbo => "krea-2-turbo",
             Self::ZImageTurbo => "z-image-turbo",
             Self::QwenImage => "qwen-image",
-            Self::QwenImage21 => "qwen-image-2.1-turbo",
+            Self::QwenImage21 => "qwen-image-21-turbo",
             Self::Flux2Dev => "flux2-dev",
             Self::Flux2Klein4b => "flux2-klein-4b",
         }

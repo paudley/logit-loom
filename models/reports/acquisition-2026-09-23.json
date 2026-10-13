@@ -293,7 +293,7 @@
       "pending_artifacts": []
     },
     {
-      "profile_id": "qwen-image-2.1-turbo",
+      "profile_id": "qwen-image-21-turbo",
       "method": "existing-local-artifacts",
       "status": "verified",
       "catalog_artifact_bytes": 16976584568,
@@ -302,8 +302,8 @@
       "verified_artifacts": [
         {
           "catalog_domain": "logit-loom-model-catalog-v1",
-          "catalog_sha256": "2cbe7cd265aa95ed26778083b8279eff63e284dffd08fe89e073653969fffc9a",
-          "profile_id": "qwen-image-2.1-turbo",
+          "catalog_sha256": "b9dae5a0841f20639d0b6cf9ee9c92f2e429c15ea6775483b310247d814310df",
+          "profile_id": "qwen-image-21-turbo",
           "source_id": "qwen-image-2.1-turbo-q8-0",
           "repository": "AtomicChat/Qwen-Image-2.1-Turbo-GGUF",
           "revision": "bb25d06bc74119c12207243d68917951e6d9c232",
@@ -313,8 +313,8 @@
         },
         {
           "catalog_domain": "logit-loom-model-catalog-v1",
-          "catalog_sha256": "2cbe7cd265aa95ed26778083b8279eff63e284dffd08fe89e073653969fffc9a",
-          "profile_id": "qwen-image-2.1-turbo",
+          "catalog_sha256": "b9dae5a0841f20639d0b6cf9ee9c92f2e429c15ea6775483b310247d814310df",
+          "profile_id": "qwen-image-21-turbo",
           "source_id": "qwen3-vl-8b-abliterated-text-encoder",
           "repository": "AtomicChat/Qwen-Image-2.1-Turbo-Uncensored-GGUF",
           "revision": "e3b01e9bfacc373148bdb93824496e0c72643250",
@@ -324,8 +324,8 @@
         },
         {
           "catalog_domain": "logit-loom-model-catalog-v1",
-          "catalog_sha256": "2cbe7cd265aa95ed26778083b8279eff63e284dffd08fe89e073653969fffc9a",
-          "profile_id": "qwen-image-2.1-turbo",
+          "catalog_sha256": "b9dae5a0841f20639d0b6cf9ee9c92f2e429c15ea6775483b310247d814310df",
+          "profile_id": "qwen-image-21-turbo",
           "source_id": "qwen-image-2.1-vae",
           "repository": "Comfy-Org/Qwen-Image-2.1",
           "revision": "df94239739eef7205973a145ffa6f441f7b64e84",

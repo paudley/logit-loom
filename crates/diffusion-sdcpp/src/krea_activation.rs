@@ -1226,6 +1226,21 @@ fn require_status(status: i32, operation: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every profile can state that its model has no activation mechanics:
+    /// the record refuses any profile id outside `[a-z0-9-]`, and a refusal
+    /// there fails every render of that profile.
+    #[test]
+    fn every_profile_id_is_a_valid_activation_absence_profile() {
+        for profile in crate::Profile::ALL {
+            let absent = ActivationMechanicsAbsentV1 {
+                profile: profile.id().to_owned(),
+                model: Digest::of_bytes("test-model", b""),
+                backend: Digest::of_bytes("test-backend", b""),
+            };
+            assert!(absent.digest().is_ok(), "{}", profile.id());
+        }
+    }
     use logit_loom_diffusion::{
         KreaActivationInputV1, KreaTokenRangeV1, krea_activation_input_content_v1,
     };
