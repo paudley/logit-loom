@@ -9,6 +9,11 @@
 //! measures them against the token the chain chose, and nothing is written
 //! back, so selection is bit-identical with or without it.
 //!
+//! The same stage can also record, per emitted token, the chosen token's
+//! log-probability and the top-N alternatives of the raw row (see
+//! [`DistributionProbe::with_logprobs`]); one leading stage and one row copy
+//! serve both.
+//!
 //! This module holds the adapter crate's only unsafe code; its contract is in
 //! `SAFETY.md`.
 #![allow(unsafe_code)]
@@ -21,6 +26,8 @@ use llama_cpp_4::sampling::LlamaSampler;
 use llama_cpp_sys_4 as sys;
 use logit_loom::{DistributionSummary, TokenDistribution, TokenId};
 
+use crate::logprobs::{TokenLogprobs, record_row};
+
 /// State one probe's stages share.
 #[derive(Debug, Default)]
 struct ProbeState {
@@ -31,6 +38,12 @@ struct ProbeState {
     summary: DistributionSummary,
     /// Set if a callback ever panicked; the record is then incomplete.
     poisoned: bool,
+    /// `Some(n)` records per-token log-probabilities with `n` alternatives.
+    logprob_top_n: Option<usize>,
+    /// Records not yet drained, one per `accept`, in call order.
+    records: Vec<TokenLogprobs>,
+    /// Reusable index storage for the top-N selection.
+    scratch: Vec<u32>,
 }
 
 /// Measures every token a native chain samples, from outside the chain.
@@ -47,6 +60,76 @@ impl DistributionProbe {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// A probe that also records log-probabilities of the raw row.
+    ///
+    /// For every token the chain accepts, one [`TokenLogprobs`] is appended:
+    /// the emitted token's log-probability and the `top_n` most probable
+    /// tokens of the same untouched row (`0` records the emitted token only).
+    /// `top_n` is limited only by the vocabulary: larger values return the
+    /// whole row. Records grow by `top_n` entries per token until
+    /// [`Self::drain_logprobs`] takes them, so a long generation should drain
+    /// periodically.
+    ///
+    /// # Guarantees
+    ///
+    /// `accept` is the unit of record: one record per `accept` call, in call
+    /// order, so records line up with the tokens the chain admitted. A record
+    /// is measured only when the most recent `apply` since the previous
+    /// `accept` was the full identity-ordered row; otherwise it is an
+    /// unmeasured placeholder ([`TokenLogprobs::measured`]). A sampler loop
+    /// that calls `apply` for several positions before the matching `accept`s
+    /// therefore measures at most the last one and marks the rest unmeasured,
+    /// never attributing a row to the wrong token. Only the sequential
+    /// `apply` then `accept` pairing, as in `llama_sampler_sample`, is covered
+    /// by tests; no speculative or multi-token decoder has been exercised.
+    #[must_use]
+    pub fn with_logprobs(top_n: usize) -> Self {
+        let probe = Self::default();
+        if let Ok(mut state) = probe.state.lock() {
+            state.logprob_top_n = Some(top_n);
+        }
+        probe
+    }
+
+    /// The configured alternative count, or `None` if records are off.
+    #[must_use]
+    pub fn top_logprobs(&self) -> Option<usize> {
+        self.state.lock().ok()?.logprob_top_n
+    }
+
+    /// A copy of the undrained records, or `None` if a callback panicked and
+    /// the record can no longer be trusted.
+    #[must_use]
+    pub fn logprobs(&self) -> Option<Vec<TokenLogprobs>> {
+        let state = self.state.lock().ok()?;
+        (!state.poisoned).then(|| state.records.clone())
+    }
+
+    /// Takes the undrained records in token order, leaving the probe empty, or
+    /// `None` (taking nothing) if a callback panicked.
+    ///
+    /// Drained batches concatenate to the full emitted sequence.
+    #[must_use]
+    pub fn drain_logprobs(&self) -> Option<Vec<TokenLogprobs>> {
+        let mut state = self.state.lock().ok()?;
+        (!state.poisoned).then(|| std::mem::take(&mut state.records))
+    }
+
+    /// Discards undrained records. The distribution summary and the
+    /// poisoned flag are unchanged.
+    pub fn clear_logprobs(&self) {
+        if let Ok(mut state) = self.state.lock() {
+            state.records.clear();
+        }
+    }
+
+    /// Whether a callback ever panicked, leaving the summary and log-probability
+    /// records incomplete.
+    #[must_use]
+    pub fn is_poisoned(&self) -> bool {
+        !self.state.lock().is_ok_and(|state| !state.poisoned)
     }
 
     /// A native stage that records into this probe.
@@ -158,7 +241,14 @@ unsafe extern "C" fn probe_accept(sampler: *mut sys::llama_sampler, token: sys::
     // SAFETY: llama.cpp passes a live probe sampler.
     let state = unsafe { state_of(sampler) };
     with_state(state, |state| {
-        let measured = std::mem::take(&mut state.pending)
+        let pending = std::mem::take(&mut state.pending);
+        if let Some(top_n) = state.logprob_top_n {
+            let state = &mut *state;
+            let row: &[f32] = if pending { &state.row } else { &[] };
+            let record = record_row(row, token, top_n, &mut state.scratch);
+            state.records.push(record);
+        }
+        let measured = pending
             .then(|| TokenId::new(token).ok())
             .flatten()
             .and_then(|token| TokenDistribution::measure(&state.row, token).ok());
@@ -190,6 +280,11 @@ unsafe extern "C" fn probe_free(sampler: *mut sys::llama_sampler) {
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_precision_loss,
+    clippy::cast_sign_loss
+)]
 mod tests {
     use super::*;
 
@@ -289,5 +384,201 @@ mod tests {
                 .measured,
             2
         );
+    }
+
+    // ---- log-probability records ----
+
+    use llama_cpp_4::token::LlamaToken;
+    use llama_cpp_4::token::data::LlamaTokenData;
+    use llama_cpp_4::token::data_array::LlamaTokenDataArray;
+
+    /// Deterministic pseudo-random logits so no test needs a model or an RNG
+    /// crate.
+    fn synthetic_row(vocabulary: usize, step: u64, seed: u64) -> Vec<f32> {
+        let mut state = seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ step.wrapping_mul(0xD1B5_4A32);
+        (0..vocabulary)
+            .map(|_| {
+                state = state
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1_442_695_040_888_963_407);
+                ((state >> 40) as f32 / 16_777_216.0 - 0.5) * 12.0
+            })
+            .collect()
+    }
+
+    fn array(logits: &[f32]) -> LlamaTokenDataArray {
+        LlamaTokenDataArray::new(
+            logits
+                .iter()
+                .zip(0..)
+                .map(|(&logit, id)| LlamaTokenData::new(LlamaToken(id), logit, 0.0))
+                .collect(),
+            false,
+        )
+    }
+
+    #[derive(Clone, Copy)]
+    enum Kind {
+        Greedy,
+        Temperature,
+        TopK,
+        TopP,
+    }
+
+    fn tail(kind: Kind, seed: u32) -> Vec<LlamaSampler> {
+        match kind {
+            Kind::Greedy => vec![LlamaSampler::greedy()],
+            Kind::Temperature => vec![LlamaSampler::temp(0.7), LlamaSampler::dist(seed)],
+            Kind::TopK => vec![
+                LlamaSampler::top_k(5),
+                LlamaSampler::temp(1.3),
+                LlamaSampler::dist(seed),
+            ],
+            Kind::TopP => vec![
+                LlamaSampler::top_p(0.8, 1),
+                LlamaSampler::temp(0.9),
+                LlamaSampler::dist(seed),
+            ],
+        }
+    }
+
+    /// Runs `steps` sample-then-accept rounds through a real native chain.
+    fn run_chain(
+        probe: Option<&DistributionProbe>,
+        kind: Kind,
+        seed: u32,
+        vocabulary: usize,
+        steps: u64,
+    ) -> Vec<i32> {
+        let mut stages = Vec::new();
+        stages.extend(probe.map(DistributionProbe::stage));
+        stages.extend(tail(kind, seed));
+        let mut chain = LlamaSampler::chain_simple(stages);
+        (0..steps)
+            .map(|step| {
+                let mut candidates = array(&synthetic_row(vocabulary, step, u64::from(seed)));
+                chain.apply(&mut candidates);
+                let token = candidates.selected_token().expect("selected");
+                chain.accept(token);
+                token.0
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_probe_never_changes_selection_and_records_every_token_in_order() {
+        for kind in [Kind::Greedy, Kind::Temperature, Kind::TopK, Kind::TopP] {
+            for seed in 0..40_u32 {
+                let bare = run_chain(None, kind, seed, 50, 24);
+                let probe = DistributionProbe::with_logprobs(7);
+                let probed = run_chain(Some(&probe), kind, seed, 50, 24);
+                assert_eq!(bare, probed, "selection changed (seed {seed})");
+
+                let records = probe.drain_logprobs().expect("healthy");
+                assert_eq!(
+                    records.iter().map(|r| r.token).collect::<Vec<_>>(),
+                    probed,
+                    "one record per emitted token, in order"
+                );
+                for (step, record) in records.iter().enumerate() {
+                    let row = synthetic_row(50, step as u64, u64::from(seed));
+                    let sum: f64 = row.iter().map(|&x| f64::from(x).exp()).sum();
+                    let expected = f64::from(row[record.token as usize]).exp() / sum;
+                    let got = record.logprob.expect("measured");
+                    assert!(
+                        (got - expected.ln()).abs() < 1e-9,
+                        "raw logprob, not the sampled distribution"
+                    );
+                    assert_eq!(record.top.len(), 7);
+                    assert!(record.top.windows(2).all(|w| w[0].logprob >= w[1].logprob));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn records_drain_in_batches_and_clear_on_request() {
+        let probe = DistributionProbe::with_logprobs(2);
+        assert_eq!(probe.top_logprobs(), Some(2));
+        assert_eq!(DistributionProbe::new().top_logprobs(), None);
+        let stage = raw_stage(&probe);
+        let mut row = data(&[0.0, 1.0, 2.0]);
+        for token in [2, 1] {
+            sample(stage, &mut row, false, token);
+        }
+        let first = probe.drain_logprobs().expect("healthy");
+        assert_eq!(first.iter().map(|r| r.token).collect::<Vec<_>>(), [2, 1]);
+        assert_eq!(probe.logprobs().expect("healthy"), Vec::new());
+        sample(stage, &mut row, false, 0);
+        assert_eq!(
+            probe.logprobs().expect("healthy").len(),
+            1,
+            "snapshot keeps"
+        );
+        assert_eq!(probe.logprobs().expect("healthy").len(), 1);
+        probe.clear_logprobs();
+        assert_eq!(probe.drain_logprobs().expect("healthy"), Vec::new());
+        free(stage);
+        // A probe without logprobs records nothing.
+        let off = DistributionProbe::new();
+        let stage = raw_stage(&off);
+        sample(stage, &mut row, false, 0);
+        free(stage);
+        assert_eq!(off.logprobs().expect("healthy"), Vec::new());
+    }
+
+    #[test]
+    fn several_applies_before_the_accepts_never_misattribute_a_row() {
+        let probe = DistributionProbe::with_logprobs(1);
+        let stage = raw_stage(&probe);
+        let mut first = data(&[5.0, 0.0]);
+        let mut second = data(&[0.0, 5.0]);
+        for row in [&mut first, &mut second] {
+            let mut array = sys::llama_token_data_array {
+                data: row.as_mut_ptr(),
+                size: row.len(),
+                selected: -1,
+                sorted: false,
+            };
+            // SAFETY: `stage` is live and `array` is valid for the call.
+            unsafe { sys::llama_sampler_apply(stage, &raw mut array) };
+        }
+        // SAFETY: `stage` is a live probe sampler.
+        unsafe {
+            sys::llama_sampler_accept(stage, 0);
+            sys::llama_sampler_accept(stage, 1);
+        }
+        free(stage);
+        let records = probe.drain_logprobs().expect("healthy");
+        assert_eq!(records.len(), 2, "one record per accept");
+        assert!(records[0].measured(), "paired with the latest row");
+        assert!(!records[1].measured(), "no row left for the second accept");
+    }
+
+    #[test]
+    fn sorted_views_and_bare_accepts_leave_unmeasured_placeholders() {
+        let probe = DistributionProbe::with_logprobs(3);
+        let stage = raw_stage(&probe);
+        let mut row = data(&[1.0, 2.0]);
+        sample(stage, &mut row, true, 1);
+        free(stage);
+        let records = probe.drain_logprobs().expect("healthy");
+        assert_eq!(records.len(), 1);
+        assert!(!records[0].measured() && records[0].top.is_empty());
+    }
+
+    #[test]
+    fn a_panicking_callback_marks_every_record_incomplete() {
+        let probe = DistributionProbe::with_logprobs(1);
+        let stage = raw_stage(&probe);
+        let mut row = data(&[1.0, 2.0]);
+        sample(stage, &mut row, false, 1);
+        assert!(!probe.is_poisoned());
+        with_state(&probe.state, |_| panic!("injected callback failure"));
+        assert!(probe.is_poisoned());
+        assert!(probe.summary().is_none());
+        assert!(probe.logprobs().is_none());
+        assert!(probe.drain_logprobs().is_none(), "nothing is handed out");
+        free(stage);
     }
 }

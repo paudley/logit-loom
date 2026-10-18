@@ -6,6 +6,7 @@
 
 mod activation;
 mod error;
+mod logprobs;
 mod mechanics;
 mod model;
 mod native_stage;
@@ -20,6 +21,7 @@ pub use activation::{
     LlamaCppTensorProfile,
 };
 pub use error::Error;
+pub use logprobs::{TokenLogprobs, TopLogprob};
 pub use mechanics::{
     OrdinaryTextMechanicsSnapshot, TextMechanicsCheckpoint, TextMechanicsExecutionOutput,
     TextMechanicsOutput, TextMechanicsRequest, TextMechanicsResume, execute_text_mechanics,

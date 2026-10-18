@@ -24,6 +24,21 @@ include breaking API changes.
 
 ### Added
 
+- `DistributionProbe::with_logprobs(top_n)` (logit-loom-llamacpp): the same
+  leading native stage also records, per accepted token, the emitted token's
+  log-probability from the raw (untouched) logits by max-shifted
+  log-sum-exp in `f64`, and the `top_n` most probable raw alternatives, most
+  probable first with ties by lower token id. `top_n` is limited only by the
+  vocabulary; `0` records the emitted token only. `TokenLogprobs` and
+  `TopLogprob` carry token ids and log-probabilities, never text. One record
+  is made per `accept`, in order; a row that is not a full identity-ordered
+  view, or that holds NaN or `+inf`, yields an unmeasured placeholder, and a
+  `-inf` logit yields a `-inf` log-probability. `logprobs` snapshots,
+  `drain_logprobs` takes, and `clear_logprobs` discards the undrained
+  records so long generations do not grow without bound; a panicking
+  callback makes them return `None`. Selection stays bit-identical. No unsafe
+  code is added and no serialized shape changes.
+
 - `DistributionProbe` (logit-loom-llamacpp): a read-only native
   `llama_sampler` that leads a chain the caller samples natively. It copies
   the untouched candidate row in `apply` and measures it against the chosen

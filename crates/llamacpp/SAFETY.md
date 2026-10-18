@@ -28,3 +28,12 @@ root denies it. The module relies on these conditions:
 5. The probe is used on the thread that samples its chain; the shared state is
    behind a `Mutex`, so a clone used from another thread would still be sound,
    only serialized.
+6. Log-probability records add no unsafe code and no new native access. The
+   arithmetic lives in the safe `logprobs` module; `accept` runs it on the
+   row `apply` already copied into the probe's own `Vec`, under the same
+   `catch_unwind` and `Mutex`, and writes only probe-owned memory. The
+   candidate array is still only read, so selection stays bit-identical with
+   or without recording. A panic in that path poisons the record, and
+   `logprobs`, `drain_logprobs`, and `summary` then return `None` rather than
+   a partial record. Recording is bounded only by process memory: each token
+   adds one record of `top_n` entries until the caller drains it.
