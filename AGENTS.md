@@ -55,6 +55,9 @@ Preserve these unless a design change is explicitly reviewed:
 9. Plans and receipts describe mechanics and lineage. They are not evidence of
    semantic correctness or efficacy.
 10. Public inputs are bounded and validated before allocation or native calls.
+    The image prompt and negative prompt are the exception: their length is
+    bounded by the caller's descriptor and the text encoder's own admission,
+    and only emptiness and NUL are checked here.
 
 The foundational crates forbid unsafe Rust. Keep native unsafety inside the
 upstream binding unless there is no safe alternative; any proposed local

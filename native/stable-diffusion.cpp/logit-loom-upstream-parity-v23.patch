@@ -9,7 +9,7 @@ index a0a6914..a007fca 100644
 +    // Upstream defaults that changed after ea4e566c, held at the behavior the
 +    // ea4e566c-based companion had, so the same request computes the same
 +    // graph: no automatic backend fitting (upstream now defaults auto_fit to
-+    // true; Brainstem assigns the backend explicitly), one monolithic graph per evaluation instead of
++    // true; the host assigns the backend explicitly), one monolithic graph per evaluation instead of
 +    // automatic graph cutting (activation events are read from one graph),
 +    // no batched CFG forward (1b0ba10; each branch keeps its own evaluation and
 +    // activation branch), and no conditioning cache (e6281b6) so a context

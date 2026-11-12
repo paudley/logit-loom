@@ -185,7 +185,7 @@ On a unified-memory device every device buffer is placed host-visible first
 `DeviceLocal|HostVisible|HostCoherent` type, which RADV backs with the 1 GiB
 VRAM carve-out on Strix Halo; buffers that fit fill it, amdgpu page tables can
 then no longer be placed, and the kernel's `BO_VA -ENOMEM` path wedged the GPU
-on 2026-09-22. The patch has to be code: Brainstem passes workers no ambient
+on 2026-09-22. The patch has to be code: the embedding host passes workers no ambient
 environment. Buffers remain host-visible, so UMA mapping and borrowing paths
 are unchanged, and discrete GPUs are untouched.
 

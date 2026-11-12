@@ -319,7 +319,7 @@ impl<'a> AdvancedImageRequest<'a> {
     ///
     /// # Errors
     ///
-    /// Returns an error for an oversized or NUL-containing value.
+    /// Returns an error for a NUL-containing value.
     pub fn with_negative_prompt(mut self, prompt: impl Into<String>) -> Result<Self> {
         self.negative_prompt = prompt.into();
         self.validate()?;
@@ -400,13 +400,10 @@ impl<'a> AdvancedImageRequest<'a> {
     /// Returns the first invalid field.
     pub fn validate(&self) -> Result<()> {
         self.base.validate_common()?;
-        if self.negative_prompt.len() > crate::MAX_PROMPT_BYTES
-            || self.negative_prompt.contains('\0')
-        {
-            return Err(Error::Invalid(format!(
-                "negative prompt must contain at most {} bytes without NUL",
-                crate::MAX_PROMPT_BYTES
-            )));
+        if self.negative_prompt.contains('\0') {
+            return Err(Error::Invalid(
+                "negative prompt must contain no NUL".to_owned(),
+            ));
         }
         if !self.strength.is_finite() || !(0.0..=1.0).contains(&self.strength) {
             return Err(Error::Invalid(
