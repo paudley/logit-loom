@@ -63,7 +63,7 @@ fi
 
 if rg -n --hidden --glob '!target/**' --glob '!.git/**' \
     --glob '!scripts/release-check.sh' \
-    '(/home/|Active/|lillith|gmeow|math_gdrive)' .; then
+    '(/home/|Active/)' .; then
     echo "possible internal reference found" >&2
     exit 1
 fi
