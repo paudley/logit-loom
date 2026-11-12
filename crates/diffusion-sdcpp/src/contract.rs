@@ -1286,6 +1286,13 @@ mod tests {
     fn prompt_length_is_not_bounded_by_the_request_contract() {
         let long = "a".repeat(5 * 1024 * 1024);
         assert!(ImageRequest::linear_euler(long, 512, 512, 7, 6.0, 4).is_ok());
+        let base = ImageRequest::linear_euler("a", 512, 512, 7, 6.0, 4).expect("request");
+        let advanced = crate::AdvancedImageRequest::text_to_image(base).expect("advanced");
+        assert!(
+            advanced
+                .with_negative_prompt("b".repeat(5 * 1024 * 1024))
+                .is_ok()
+        );
         assert!(ImageRequest::linear_euler("", 512, 512, 7, 6.0, 4).is_err());
         assert!(ImageRequest::linear_euler("a\0b", 512, 512, 7, 6.0, 4).is_err());
     }

@@ -14,6 +14,9 @@ include breaking API changes.
   negative prompt are removed. A prompt is refused only when it is empty
   (positive prompt) or contains NUL. How long a prompt may be is the text
   encoder's and the caller's admission to decide, not a chosen byte count.
+  The public constant is removed (a breaking change for code that names it),
+  the validation error text changed, and the native image-v2 patch no longer
+  checks the prompt length, so the native companion must be rebuilt.
 
 ### Changed
 

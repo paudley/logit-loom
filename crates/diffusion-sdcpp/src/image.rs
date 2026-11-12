@@ -319,7 +319,7 @@ impl<'a> AdvancedImageRequest<'a> {
     ///
     /// # Errors
     ///
-    /// Returns an error for an oversized or NUL-containing value.
+    /// Returns an error for a NUL-containing value.
     pub fn with_negative_prompt(mut self, prompt: impl Into<String>) -> Result<Self> {
         self.negative_prompt = prompt.into();
         self.validate()?;
