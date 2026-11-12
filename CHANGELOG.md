@@ -8,6 +8,13 @@ include breaking API changes.
 
 ## [Unreleased]
 
+### Removed
+
+- `MAX_PROMPT_BYTES` and the 4 MiB byte limit on the image prompt and the
+  negative prompt are removed. A prompt is refused only when it is empty
+  (positive prompt) or contains NUL. How long a prompt may be is the text
+  encoder's and the caller's admission to decide, not a chosen byte count.
+
 ### Changed
 
 - The stable-diffusion.cpp companion is rebuilt on upstream

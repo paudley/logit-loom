@@ -22,8 +22,8 @@ pub use contract::{
     GenerationMeasurements, GenerationOutput, GenerationReceipt, ImageExecutionBindings,
     ImageOutputSink, ImageRequest, ImageRequestReceipt, LatentGeometry, MAX_BACKEND_LABEL_BYTES,
     MAX_CHECKPOINT_ENVELOPE_BYTES, MAX_CHECKPOINT_RECEIPT_BYTES, MAX_CHECKPOINT_STATE_BYTES,
-    MAX_IMAGE_DIMENSION, MAX_PROMPT_BYTES, NativeRuntimeReceipt, NoopProgram, Profile,
-    ProfileArtifacts, ProfileReceipt, SdcppOptions, StepProgram, StepReceipt,
+    MAX_IMAGE_DIMENSION, NativeRuntimeReceipt, NoopProgram, Profile, ProfileArtifacts,
+    ProfileReceipt, SdcppOptions, StepProgram, StepReceipt,
 };
 pub use error::{Error, Result};
 pub use execution::{

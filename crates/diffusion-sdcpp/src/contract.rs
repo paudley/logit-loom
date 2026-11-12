@@ -15,9 +15,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::{Error, Result};
 
-/// Maximum UTF-8 bytes accepted before caller-owned token-context admission,
-/// without imposing the former hidden 64 KiB native-adapter cap.
-pub const MAX_PROMPT_BYTES: usize = 4 * 1024 * 1024;
 /// Maximum output image dimension.
 pub const MAX_IMAGE_DIMENSION: u32 = 4_096;
 /// Maximum native backend label bytes.
@@ -406,7 +403,7 @@ impl ImageRequest {
     ///
     /// # Errors
     ///
-    /// Returns an error for an empty/oversized/NUL prompt, dimensions outside
+    /// Returns an error for an empty or NUL-containing prompt, dimensions outside
     /// adapter bounds, seed outside the native range, invalid guidance, or an
     /// invalid Euler schedule.
     pub fn new(
@@ -528,13 +525,10 @@ impl ImageRequest {
     }
 
     pub(crate) fn validate_common(&self) -> Result<()> {
-        if self.prompt.is_empty()
-            || self.prompt.len() > MAX_PROMPT_BYTES
-            || self.prompt.contains('\0')
-        {
-            return Err(Error::Invalid(format!(
-                "prompt must contain 1..={MAX_PROMPT_BYTES} bytes without NUL"
-            )));
+        if self.prompt.is_empty() || self.prompt.contains('\0') {
+            return Err(Error::Invalid(
+                "prompt must be non-empty and contain no NUL".to_owned(),
+            ));
         }
         if self.width == 0
             || self.height == 0
@@ -1286,6 +1280,14 @@ mod tests {
     #[test]
     fn linear_schedule_rejects_extreme_steps_before_allocation() {
         assert!(ImageRequest::linear_euler("test", 512, 512, 7, 6.0, u32::MAX).is_err());
+    }
+
+    #[test]
+    fn prompt_length_is_not_bounded_by_the_request_contract() {
+        let long = "a".repeat(5 * 1024 * 1024);
+        assert!(ImageRequest::linear_euler(long, 512, 512, 7, 6.0, 4).is_ok());
+        assert!(ImageRequest::linear_euler("", 512, 512, 7, 6.0, 4).is_err());
+        assert!(ImageRequest::linear_euler("a\0b", 512, 512, 7, 6.0, 4).is_err());
     }
 
     #[test]
