@@ -107,9 +107,12 @@ Validation rejects before allocation or native calls:
 - output aliases and multiple mutable consumers;
 - unsupported stage/operator/profile combinations;
 - invalid or non-canonical schedules;
-- excessive stages, values, inputs, outputs, tensor elements, or retained
-  bytes; and
-- a liveness-derived scratch bound above the public maximum.
+- value, stage, or output counts beyond the u16 index width, and declared or
+  liveness-derived sizes that cannot be represented in 64 bits.
+
+No chosen count or byte ceiling applies to stages, values, inputs, outputs,
+or declared value sizes; a size the host cannot satisfy is refused by the
+allocator with a typed error, not by a number in this contract.
 
 The executor computes value liveness before execution. A native value is
 released immediately after its final stage or output consumer unless an

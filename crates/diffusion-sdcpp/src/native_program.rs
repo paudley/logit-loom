@@ -19,8 +19,8 @@ use logit_loom_diffusion::{
     ImageProgramStageReceiptV1, ImageProgramStageV1, ImageProgramValueMeasurementV1,
     ImageProgramValuePlacementV1, ImageProgramValueReceiptV1, ImageProgramValueSpecV1,
     Intervention, KreaActivationPlanV1, KreaActivationTerminalV1, KreaActivationTopologyV1,
-    MAX_IMAGE_DIMENSION, MAX_IMAGE_PROGRAM_VALUE_BYTES, ObservationKind, Pipeline, SeedSelection,
-    StepContext, StepSelector, TensorDType, TensorLayout, TensorSelector,
+    MAX_IMAGE_DIMENSION, ObservationKind, Pipeline, SeedSelection, StepContext, StepSelector,
+    TensorDType, TensorLayout, TensorSelector,
 };
 use logit_loom_executor::{CancellationProbe, ExecutorState, InputBuffer};
 
@@ -118,8 +118,8 @@ pub fn resident_png_encoding_v1(color: ImagePngColorV1) -> Result<Digest> {
 ///
 /// # Errors
 ///
-/// Returns an error for invalid geometry or arithmetic beyond the public
-/// resident-value bound.
+/// Returns an error for invalid geometry or when the bound cannot be
+/// represented in 64 bits.
 pub fn resident_png_maximum_bytes_v1(
     width: u32,
     height: u32,
@@ -146,11 +146,6 @@ pub fn resident_png_maximum_bytes_v1(
         .and_then(|overhead| overhead.checked_add(63))
         .and_then(|overhead| filtered_bytes.checked_add(overhead))
         .ok_or_else(|| Error::Invalid("resident PNG encoded bound overflowed".to_owned()))?;
-    if maximum > MAX_IMAGE_PROGRAM_VALUE_BYTES {
-        return Err(Error::Invalid(
-            "resident PNG encoded bound exceeds the public value limit".to_owned(),
-        ));
-    }
     Ok(maximum)
 }
 
@@ -1693,24 +1688,24 @@ impl<R: ResidentArtifactPathResolver> SdcppResidentProgram<'_, R> {
                         )));
                     }
                     PreparedInput::Text {
-                        bytes: bytes.to_vec(),
+                        bytes: try_copy_bytes(bytes, "resident input value")?,
                         text: text.to_owned(),
                     }
                 }
                 ImageProgramValueSpecV1::Rgb8 { width, height } => PreparedInput::Image {
-                    bytes: bytes.to_vec(),
+                    bytes: try_copy_bytes(bytes, "resident input value")?,
                     width: *width,
                     height: *height,
                     channels: 3,
                 },
                 ImageProgramValueSpecV1::Rgba8 { width, height } => PreparedInput::Image {
-                    bytes: bytes.to_vec(),
+                    bytes: try_copy_bytes(bytes, "resident input value")?,
                     width: *width,
                     height: *height,
                     channels: 4,
                 },
                 ImageProgramValueSpecV1::Gray8 { width, height } => PreparedInput::Image {
-                    bytes: bytes.to_vec(),
+                    bytes: try_copy_bytes(bytes, "resident input value")?,
                     width: *width,
                     height: *height,
                     channels: 1,
@@ -1728,7 +1723,7 @@ impl<R: ResidentArtifactPathResolver> SdcppResidentProgram<'_, R> {
                 ImageProgramValueSpecV1::Checkpoint { .. } => {
                     let checkpoint = DiffusionCheckpoint::from_envelope_bytes(bytes)?;
                     PreparedInput::Checkpoint {
-                        envelope: bytes.to_vec(),
+                        envelope: try_copy_bytes(bytes, "resident input value")?,
                         checkpoint,
                     }
                 }
@@ -2700,9 +2695,8 @@ impl<R: ResidentArtifactPathResolver> SdcppResidentProgram<'_, R> {
 
     fn copy_handle(&self, handle: ValueHandleV3) -> Result<Vec<u8>> {
         let descriptor = self.descriptor(handle)?;
-        let length = usize::try_from(descriptor.bytes)
-            .map_err(|_| Error::Invalid("resident value exceeds usize".to_owned()))?;
-        let mut bytes = vec![0_u8; length];
+        let mut bytes = try_zeroed_bytes(descriptor.bytes, "resident value materialization")?;
+        let length = bytes.len();
         let written = self.copy_handle_into(handle, &mut bytes)?;
         if written != length {
             return Err(Error::Incompatible(
@@ -3250,6 +3244,33 @@ fn value_for_role(stage: &ImageProgramNativeStageV1, role: ImageBufferRole) -> R
     Ok(value)
 }
 
+/// Allocates a zero-filled buffer sized by a native or caller-declared length.
+///
+/// The host allocator is the authority on size: a request it cannot satisfy is
+/// returned as [`Error::Allocation`] instead of aborting the process.
+fn try_zeroed_bytes(bytes: u64, what: &'static str) -> Result<Vec<u8>> {
+    let length = usize::try_from(bytes).map_err(|_| Error::Allocation { what, bytes })?;
+    let mut buffer = Vec::new();
+    buffer
+        .try_reserve_exact(length)
+        .map_err(|_| Error::Allocation { what, bytes })?;
+    buffer.resize(length, 0);
+    Ok(buffer)
+}
+
+/// Copies caller-supplied bytes, reporting allocator refusal as a typed error.
+fn try_copy_bytes(source: &[u8], what: &'static str) -> Result<Vec<u8>> {
+    let mut buffer = Vec::new();
+    buffer
+        .try_reserve_exact(source.len())
+        .map_err(|_| Error::Allocation {
+            what,
+            bytes: source.len() as u64,
+        })?;
+    buffer.extend_from_slice(source);
+    Ok(buffer)
+}
+
 fn f32_from_le_bytes(bytes: &[u8]) -> Result<Vec<f32>> {
     if bytes.is_empty() || !bytes.len().is_multiple_of(4) {
         return Err(Error::Invalid(
@@ -3555,6 +3576,23 @@ mod tests {
         )
         .unwrap();
         (stage, plan)
+    }
+
+    #[test]
+    fn absurd_value_size_is_a_typed_allocation_error_not_an_abort() {
+        let error = try_zeroed_bytes(u64::MAX, "resident value materialization").unwrap_err();
+        assert!(
+            matches!(
+                error,
+                Error::Allocation {
+                    bytes: u64::MAX,
+                    ..
+                }
+            ),
+            "{error}"
+        );
+        assert!(error.to_string().contains("refused"), "{error}");
+        assert_eq!(try_zeroed_bytes(3, "probe").unwrap(), [0, 0, 0]);
     }
 
     #[test]

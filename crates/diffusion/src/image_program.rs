@@ -15,19 +15,6 @@ use crate::{
     SeedSelection, StepSelector, TensorDType, TensorSpec,
 };
 
-/// Maximum ordered stages in one resident image program.
-pub const MAX_IMAGE_PROGRAM_STAGES: usize = 64;
-/// Maximum typed values in one resident image program.
-pub const MAX_IMAGE_PROGRAM_VALUES: usize = 128;
-/// Maximum external inputs in one resident image program.
-pub const MAX_IMAGE_PROGRAM_INPUTS: usize = 32;
-/// Maximum caller-owned output routes in one resident image program.
-pub const MAX_IMAGE_PROGRAM_OUTPUTS: usize = 32;
-/// Maximum declared size of one logical program value.
-pub const MAX_IMAGE_PROGRAM_VALUE_BYTES: u64 = 1024 * 1024 * 1024;
-/// Maximum liveness-derived resident value-arena size.
-pub const MAX_IMAGE_PROGRAM_ARENA_BYTES: u64 = 2 * 1024 * 1024 * 1024;
-
 /// Returns the canonical content identity for one produced program value.
 ///
 /// External input identities remain caller-supplied [`BufferSpec`] identities.
@@ -139,19 +126,21 @@ pub enum ImageProgramValueSpecV1 {
 }
 
 impl ImageProgramValueSpecV1 {
-    /// Validates dimensions, tensor metadata, and public byte bounds.
+    /// Validates dimensions and tensor metadata.
+    ///
+    /// A declared size has no chosen ceiling; only zero sizes, impossible
+    /// geometry, and arithmetic that cannot be represented in 64 bits are
+    /// refused. The host allocator is the authority on whether a size can be
+    /// satisfied.
     ///
     /// # Errors
     ///
-    /// Returns the first invalid dimension, tensor, or byte bound.
+    /// Returns the first invalid dimension, tensor, or byte count.
     pub fn validate(&self) -> Result<(), CoreError> {
-        let bytes = match self {
+        match self {
             Self::Utf8 { maximum_bytes }
             | Self::Checkpoint { maximum_bytes, .. }
-            | Self::Opaque { maximum_bytes, .. } => {
-                validate_variable_bytes(*maximum_bytes)?;
-                *maximum_bytes
-            }
+            | Self::Opaque { maximum_bytes, .. } => validate_variable_bytes(*maximum_bytes),
             Self::Png {
                 width,
                 height,
@@ -159,24 +148,16 @@ impl ImageProgramValueSpecV1 {
                 ..
             } => {
                 validate_dimensions(*width, *height)?;
-                validate_variable_bytes(*maximum_bytes)?;
-                *maximum_bytes
+                validate_variable_bytes(*maximum_bytes)
             }
-            Self::Rgb8 { width, height } => image_bytes(*width, *height, 3)?,
-            Self::Rgba8 { width, height } => image_bytes(*width, *height, 4)?,
-            Self::Gray8 { width, height } => image_bytes(*width, *height, 1)?,
+            Self::Rgb8 { width, height } => image_bytes(*width, *height, 3).map(drop),
+            Self::Rgba8 { width, height } => image_bytes(*width, *height, 4).map(drop),
+            Self::Gray8 { width, height } => image_bytes(*width, *height, 1).map(drop),
             Self::Tensor { tensor, .. } => {
                 tensor.validate()?;
-                tensor_bytes(tensor)?
+                tensor_bytes(tensor).map(drop)
             }
-        };
-        if bytes > MAX_IMAGE_PROGRAM_VALUE_BYTES {
-            return Err(CoreError::invalid(
-                "image program value",
-                format!("exceeds {MAX_IMAGE_PROGRAM_VALUE_BYTES} bytes"),
-            ));
         }
-        Ok(())
     }
 
     /// Returns the maximum resident bytes represented by this value.
@@ -840,13 +821,7 @@ impl ImageProgramPlanV1 {
         self.validate_collections_and_values()?;
         let producers = self.validate_producers_and_stages()?;
         let consumers = self.validate_outputs_and_consumers(&producers)?;
-        let liveness = self.compute_liveness(&consumers)?;
-        if liveness.peak_bytes > MAX_IMAGE_PROGRAM_ARENA_BYTES {
-            return Err(CoreError::invalid(
-                "image program arena",
-                format!("exceeds {MAX_IMAGE_PROGRAM_ARENA_BYTES} live bytes"),
-            ));
-        }
+        self.compute_liveness(&consumers)?;
         Ok(())
     }
 
@@ -860,12 +835,6 @@ impl ImageProgramPlanV1 {
         let producers = self.validate_producers_and_stages()?;
         let consumers = self.validate_outputs_and_consumers(&producers)?;
         let liveness = self.compute_liveness(&consumers)?;
-        if liveness.peak_bytes > MAX_IMAGE_PROGRAM_ARENA_BYTES {
-            return Err(CoreError::invalid(
-                "image program arena",
-                format!("exceeds {MAX_IMAGE_PROGRAM_ARENA_BYTES} live bytes"),
-            ));
-        }
         Ok(liveness)
     }
 
@@ -881,17 +850,31 @@ impl ImageProgramPlanV1 {
 
     fn validate_collections_and_values(&self) -> Result<(), CoreError> {
         if self.values.is_empty()
-            || self.values.len() > MAX_IMAGE_PROGRAM_VALUES
             || self.inputs.is_empty()
-            || self.inputs.len() > MAX_IMAGE_PROGRAM_INPUTS
             || self.stages.is_empty()
-            || self.stages.len() > MAX_IMAGE_PROGRAM_STAGES
             || self.outputs.is_empty()
-            || self.outputs.len() > MAX_IMAGE_PROGRAM_OUTPUTS
         {
             return Err(CoreError::invalid(
                 "image program collections",
-                "a required collection is empty or exceeds its public bound",
+                "a required collection is empty",
+            ));
+        }
+        // Value and route identifiers are u16 on the wire, so the number of
+        // values or routes cannot exceed what those identifiers can name; the
+        // completed-stage count in a receipt is also u16. Inputs are distinct
+        // values, so they are bounded by the value count.
+        let index_values = usize::from(u16::MAX) + 1;
+        let index_stages = usize::from(u16::MAX);
+        if self.values.len() > index_values
+            || self.outputs.len() > index_values
+            || self.stages.len() > index_stages
+        {
+            return Err(CoreError::invalid(
+                "image program collections",
+                format!(
+                    "a collection exceeds the u16 index width (at most {index_values} values or \
+                     outputs and {index_stages} stages)"
+                ),
             ));
         }
         for (index, value) in self.values.iter().enumerate() {
@@ -1057,12 +1040,10 @@ impl ImageProgramPlanV1 {
                 }
                 ImageProgramOutputSourceV1::ProgramReceipt => {
                     receipt_routes += 1;
-                    if index + 1 != self.outputs.len()
-                        || route.buffer.byte_length > MAX_IMAGE_PROGRAM_VALUE_BYTES
-                    {
+                    if index + 1 != self.outputs.len() {
                         return Err(CoreError::invalid(
                             "image program receipt output",
-                            "must be the single final bounded route",
+                            "must be the single final route",
                         ));
                     }
                 }
@@ -1693,10 +1674,10 @@ fn release_live_value(
 }
 
 fn validate_variable_bytes(bytes: u64) -> Result<(), CoreError> {
-    if bytes == 0 || bytes > MAX_IMAGE_PROGRAM_VALUE_BYTES {
+    if bytes == 0 {
         return Err(CoreError::invalid(
             "image program value bytes",
-            format!("must be within 1..={MAX_IMAGE_PROGRAM_VALUE_BYTES}"),
+            "must be at least 1",
         ));
     }
     Ok(())
@@ -2434,37 +2415,32 @@ mod tests {
     }
 
     #[test]
-    fn arena_overflow_is_rejected_before_execution() {
+    fn declared_sizes_have_no_chosen_ceiling_and_overflow_is_typed() {
+        // A 4 TiB declared prompt value exceeds the former 1 GiB value and
+        // 2 GiB arena ceilings; only the host allocator can refuse it.
+        const LARGE: u64 = 1 << 42;
         let mut plan = graph();
         plan.values[0].spec = ImageProgramValueSpecV1::Utf8 {
-            maximum_bytes: MAX_IMAGE_PROGRAM_VALUE_BYTES,
+            maximum_bytes: LARGE,
         };
-        plan.inputs[0].buffer.byte_length = 6;
-        plan.values[1].spec = ImageProgramValueSpecV1::Opaque {
-            opaque_kind: ImageOpaqueValueKindV1::Conditioning,
-            compatibility: digest("large-one"),
-            maximum_bytes: MAX_IMAGE_PROGRAM_VALUE_BYTES,
+        plan.validate().unwrap();
+        assert!(plan.liveness().unwrap().peak_bytes >= LARGE);
+        // A live total that cannot be represented in 64 bits is a physical
+        // arithmetic fact and is refused with a typed error.
+        plan.values[0].spec = ImageProgramValueSpecV1::Utf8 {
+            maximum_bytes: u64::MAX,
         };
-        plan.inputs[1].buffer.byte_length = 2;
-        plan.values.push(value(
-            8,
-            ImageProgramValueSpecV1::Opaque {
-                opaque_kind: ImageOpaqueValueKindV1::Conditioning,
-                compatibility: digest("large-two"),
-                maximum_bytes: MAX_IMAGE_PROGRAM_VALUE_BYTES,
-            },
-        ));
-        plan.inputs.push(ImageProgramInputV1 {
-            value: 8,
-            buffer: buffer("large-input", 1),
-        });
-        if let ImageProgramStageOperationV1::Native { plan: native } = &mut plan.stages[0].operation
-        {
-            native
-                .inputs
-                .push(binding(ImageBufferRole::NegativeConditioning, 8));
-        }
-        assert!(plan.validate().is_err());
+        let error = plan.validate().unwrap_err().to_string();
+        assert!(error.contains("overflowed"), "{error}");
+    }
+
+    #[test]
+    fn collection_counts_are_refused_only_by_index_width() {
+        let mut plan = graph();
+        let template = plan.values[0].clone();
+        plan.values.resize(usize::from(u16::MAX) + 2, template);
+        let error = plan.validate().unwrap_err().to_string();
+        assert!(error.contains("u16 index width"), "{error}");
     }
 
     #[test]

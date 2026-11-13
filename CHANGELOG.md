@@ -8,7 +8,31 @@ include breaking API changes.
 
 ## [Unreleased]
 
+### Added
+
+- `Error::Allocation { what, bytes }` in the stable-diffusion.cpp adapter: the
+  typed refusal returned when the host allocator cannot satisfy a request
+  (classified as rejected).
+
 ### Removed
+
+- The chosen limits on resident image programs are removed:
+  `MAX_IMAGE_PROGRAM_STAGES`, `MAX_IMAGE_PROGRAM_VALUES`,
+  `MAX_IMAGE_PROGRAM_INPUTS`, `MAX_IMAGE_PROGRAM_OUTPUTS`,
+  `MAX_IMAGE_PROGRAM_VALUE_BYTES` and `MAX_IMAGE_PROGRAM_ARENA_BYTES` are no
+  longer exported (a breaking change for code that names them), and the
+  program, value, receipt-route, and resident PNG bound checks against them
+  are gone, so their validation error text changed. What remains is physical:
+  zero sizes and malformed values are refused, value and route counts beyond
+  the u16 identifier width (and stage counts beyond the u16 completed-stage
+  count) are refused naming that width, and byte totals that overflow 64 bits
+  are refused. The input buffers copied from a caller's bytes and the resident
+  handle copy are now allocated fallibly, and an allocator refusal is
+  returned as the new `Error::Allocation` instead of aborting; a few other
+  copies of memory the caller or the native side already holds remain
+  infallible. Until the native companion is
+  rebuilt, it keeps its own checks and a native refusal is what a caller sees
+  for sizes it rejects.
 
 - `MAX_PROMPT_BYTES` and the 4 MiB byte limit on the image prompt and the
   negative prompt are removed. A prompt is refused only when it is empty

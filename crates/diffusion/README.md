@@ -41,8 +41,8 @@ The single-primary contracts define one bounded RGB8 diffusion primary
 followed by zero or more exact integer `MaskBlend` stages. The resident-program
 contract adds canonical value producers, earlier-stage-only references,
 operation-specific type and geometry checks, immutable branching, mutable
-checkpoint-state single consumption, liveness-derived release points, a
-2 GiB arena ceiling, explicit value and receipt routes, completed-stage
+checkpoint-state single consumption, liveness-derived release points,
+liveness-peak accounting with overflow refusal, explicit value and receipt routes, completed-stage
 prefix receipts, cleanup uncertainty, and placement/transfer measurements
 outside deterministic identity. Stage-produced values use the
 `image-program-value-content-v1` content domain so an executor can verify
