@@ -1,0 +1,18 @@
+ghprsq structured squash audit metadata
+
+parent_hashes: 971436006bda853f3adf61e4a7aca5535c5b5a50
+
+GhpRsq-Schema: 1
+GhpRsq-Merge-Style: structured-squash
+GhpRsq-GitHub-Repo: paudley/logit-loom
+GhpRsq-GitHub-Pull-Request: 18
+GhpRsq-GitHub-PR-URL: https://github.com/paudley/logit-loom/pull/18
+GhpRsq-Base-Ref: main
+GhpRsq-Base-OID: 5aad3f73bee9a2ebf33d8ea15efd887f205c5382
+GhpRsq-Head-Ref: prepare-sdcpp-git-ceiling
+GhpRsq-Head-OID: 971436006bda853f3adf61e4a7aca5535c5b5a50
+GhpRsq-Result-Tree: 4b73841dff945e54347638c6b5047f63cff1037a
+GhpRsq-Result-Commit: c963369d345dc366f189938453ebc348cd3dafe5
+GhpRsq-Parent-Hashes: 971436006bda853f3adf61e4a7aca5535c5b5a50
+GhpRsq-Squash-Notes-SHA256: 5c87b90f5f41b3f7044d4dd372e737905ebe91f59108131889d26251901ae4f1
+GhpRsq-Stage-Evidence: none
