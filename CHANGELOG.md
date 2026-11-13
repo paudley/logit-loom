@@ -13,6 +13,12 @@ include breaking API changes.
 - `Error::Allocation { what, bytes }` in the stable-diffusion.cpp adapter: the
   typed refusal returned when the host allocator cannot satisfy a request
   (classified as rejected).
+- `scripts/prepare-sdcpp.sh --git-ceiling` accepts a source directory inside a
+  Git work tree (for example a git-ignored directory of the calling project)
+  by stopping Git's repository discovery at the source directory's parent for
+  `git apply` and CMake. The script now also fails when the configure step
+  does not record an unknown revision, with or without the option, so an
+  enclosing repository cannot leak into the build.
 
 ### Removed
 

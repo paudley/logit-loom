@@ -11,14 +11,23 @@ upstream_commit="2988060a4338a5dcd94721c964a8e87003c1ac8b"
 upstream_tree_sha256="04e2de27a19f4924314d3ee48e23634fb4fd96e353a5769e76b85e262ac93a3f"
 
 usage() {
-    echo "usage: $0 --source DIR --build DIR --backend vulkan|hip|cuda|metal" >&2
+    echo "usage: $0 --source DIR --build DIR --backend vulkan|hip|cuda|metal [--git-ceiling]" >&2
+    echo "  --git-ceiling  accept a source directory inside a Git work tree (for" >&2
+    echo "                 example a git-ignored directory of the calling project) by" >&2
+    echo "                 blocking Git's repository discovery above it for git apply" >&2
+    echo "                 and for CMake; the build must then record an unknown revision" >&2
 }
 
 source_dir=""
 build_dir=""
 backend=""
+git_ceiling=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --git-ceiling)
+            git_ceiling=1
+            shift
+            ;;
         --source)
             source_dir="${2:-}"
             shift 2
@@ -163,13 +172,25 @@ fi
 mkdir -p -- "$(dirname -- "${source_dir}")"
 # Outside any Git work tree, so git apply works on plain files and CMake's
 # revision queries find no repository: the build reads nothing but these files.
-if git -C "$(dirname -- "${source_dir}")" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    echo "native source must be outside every Git work tree: ${source_dir}" >&2
+# With --git-ceiling a directory inside a work tree is accepted instead, and
+# Git's repository discovery is stopped at the source directory's parent
+# (GIT_CEILING_DIRECTORIES, exported to git apply and to CMake alike), so
+# neither sees the enclosing repository. That is checked after the copy below,
+# and the configure step must then record an unknown revision.
+if [[ "${git_ceiling}" == 1 ]]; then
+    export GIT_CEILING_DIRECTORIES
+    GIT_CEILING_DIRECTORIES="$(dirname -- "${source_dir}")"
+elif git -C "$(dirname -- "${source_dir}")" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    echo "native source must be outside every Git work tree (or pass --git-ceiling): ${source_dir}" >&2
     exit 1
 fi
 cp -R --preserve=mode -- "${vendored_root}" "${source_dir}"
 require_tree "copied stable-diffusion.cpp" "${source_dir}" without-ggml "${upstream_tree_sha256}"
 require_tree "copied ggml" "${source_dir}/ggml" all "${ggml_tree_sha256}"
+if git -C "${source_dir}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    echo "Git still finds a repository at the source directory (${source_dir}); the ceiling did not isolate it" >&2
+    exit 1
+fi
 
 for patch_file in "${patch_files[@]}"; do
     if ! (cd -- "${source_dir}" && git apply -p0 --whitespace=nowarn "${patch_file}"); then
@@ -186,6 +207,7 @@ done
 touch -- "${source_dir}/${marker}"
 mkdir -p -- "${build_dir}"
 
+configure_log="${build_dir}/configure.log"
 cmake \
     -S "${source_dir}" \
     -B "${build_dir}" \
@@ -195,7 +217,18 @@ cmake \
     -DSD_BUILD_SHARED_LIBS=ON \
     -DSD_WEBM=OFF \
     -DSD_WEBP=OFF \
-    "${backend_flag}"
+    "${backend_flag}" 2>&1 | tee -- "${configure_log}"
+# The build reads nothing but the vendored files: every revision query the
+# upstream configure steps make must have found no repository.
+for expected in \
+    "stable-diffusion.cpp version unknown" \
+    "stable-diffusion.cpp commit unknown" \
+    "ggml commit:  unknown"; do
+    if ! grep -q -F -- "${expected}" "${configure_log}"; then
+        echo "configure did not record an unknown revision (expected: ${expected}); an enclosing repository leaked into the build" >&2
+        exit 1
+    fi
+done
 cmake --build "${build_dir}" --target stable-diffusion --parallel
 
 library="${build_dir}/bin/libstable-diffusion.so"
