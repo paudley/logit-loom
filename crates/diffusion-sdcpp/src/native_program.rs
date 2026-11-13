@@ -127,7 +127,16 @@ pub fn resident_png_maximum_bytes_v1(
 ) -> Result<u64> {
     if width == 0 || height == 0 || width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION {
         return Err(Error::Invalid(
-            "resident PNG dimensions exceed the public image bound".to_owned(),
+            "resident PNG dimensions must be within the native signed 32-bit extent".to_owned(),
+        ));
+    }
+    if !logit_loom_diffusion::image_extent_fits_native_int(
+        width,
+        height,
+        u64::from(color.channels()),
+    ) {
+        return Err(Error::Invalid(
+            logit_loom_diffusion::IMAGE_EXTENT_PRODUCT_REFUSAL.to_owned(),
         ));
     }
     let row_bytes = u64::from(width)
@@ -146,6 +155,15 @@ pub fn resident_png_maximum_bytes_v1(
         .and_then(|overhead| overhead.checked_add(63))
         .and_then(|overhead| filtered_bytes.checked_add(overhead))
         .ok_or_else(|| Error::Invalid("resident PNG encoded bound overflowed".to_owned()))?;
+    // The native PNG encoder computes its row stride, filtered length and encoded
+    // length as signed 32-bit integers, so a larger image cannot be encoded: a
+    // property of that encoder, not a chosen size.
+    if maximum > u64::from(i32::MAX.cast_unsigned()) {
+        return Err(Error::Invalid(
+            "resident PNG encoded bound exceeds the native encoder's signed 32-bit length"
+                .to_owned(),
+        ));
+    }
     Ok(maximum)
 }
 
@@ -2358,7 +2376,14 @@ impl<R: ResidentArtifactPathResolver> SdcppResidentProgram<'_, R> {
             })?;
         let mut applications =
             vec![NativeModelBlockApplicationV5::default(); prepared.model_block_operators.len()];
-        let mut transition_masks = vec![0_u64; transition_mask_words];
+        let mut transition_masks = Vec::new();
+        transition_masks
+            .try_reserve_exact(transition_mask_words)
+            .map_err(|_| Error::Allocation {
+                what: "model-block transition masks",
+                bytes: (transition_mask_words as u64).saturating_mul(8),
+            })?;
+        transition_masks.resize(transition_mask_words, 0_u64);
         let params = ProgramImageParamsV5 {
             abi_version: MODEL_BLOCK_ABI_VERSION,
             image: params,
@@ -3248,13 +3273,33 @@ fn value_for_role(stage: &ImageProgramNativeStageV1, role: ImageBufferRole) -> R
 ///
 /// The host allocator is the authority on size: a request it cannot satisfy is
 /// returned as [`Error::Allocation`] instead of aborting the process.
-fn try_zeroed_bytes(bytes: u64, what: &'static str) -> Result<Vec<u8>> {
+pub(crate) fn try_zeroed_bytes(bytes: u64, what: &'static str) -> Result<Vec<u8>> {
     let length = usize::try_from(bytes).map_err(|_| Error::Allocation { what, bytes })?;
     let mut buffer = Vec::new();
     buffer
         .try_reserve_exact(length)
         .map_err(|_| Error::Allocation { what, bytes })?;
     buffer.resize(length, 0);
+    Ok(buffer)
+}
+
+/// Allocates a zero-filled buffer of `length` bytes, reporting allocator refusal
+/// as a typed error.
+pub(crate) fn try_zeroed_len(length: usize, what: &'static str) -> Result<Vec<u8>> {
+    try_zeroed_bytes(u64::try_from(length).unwrap_or(u64::MAX), what)
+}
+
+/// Copies a slice of any element type, reporting allocator refusal as a typed
+/// error.
+pub(crate) fn try_copy_slice<T: Clone>(source: &[T], what: &'static str) -> Result<Vec<T>> {
+    let mut buffer = Vec::new();
+    buffer
+        .try_reserve_exact(source.len())
+        .map_err(|_| Error::Allocation {
+            what,
+            bytes: (source.len() as u64).saturating_mul(size_of::<T>() as u64),
+        })?;
+    buffer.extend_from_slice(source);
     Ok(buffer)
 }
 
@@ -3797,6 +3842,20 @@ mod tests {
         assert_eq!(lowered.operators[1].step_selection, ffi::STEP_EXACT_V5);
         assert_eq!(lowered.operators[1].step_count, 2);
         assert_eq!(lowered.operators[1].steps, lowered.steps[1].as_ptr());
+    }
+
+    /// INVARIANT: the resident PNG bound is refused only for a format property:
+    /// the native encoder's signed 32-bit lengths, or an extent beyond the
+    /// native signed 32-bit width. A large image below that is not refused.
+    #[test]
+    fn png_bound_is_refused_only_beyond_the_encoder_length_width() {
+        assert!(resident_png_maximum_bytes_v1(8_192, 8_192, ImagePngColorV1::Rgb8).is_ok());
+        assert!(resident_png_maximum_bytes_v1(16_384, 16_384, ImagePngColorV1::Rgba8).is_ok());
+        assert!(resident_png_maximum_bytes_v1(32_768, 32_768, ImagePngColorV1::Rgba8).is_err());
+        assert!(
+            resident_png_maximum_bytes_v1(MAX_IMAGE_DIMENSION + 1, 1, ImagePngColorV1::Rgb8)
+                .is_err()
+        );
     }
 
     #[test]

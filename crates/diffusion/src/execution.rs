@@ -10,20 +10,31 @@ use serde::{Deserialize, Serialize};
 
 use crate::{DiffusionSchedule, TensorDType, TensorSpec};
 
-/// Maximum image dimension accepted by the generic execution contract.
-pub const MAX_IMAGE_DIMENSION: u32 = 4_096;
-/// Maximum input or output buffer bindings in one image execution.
-pub const MAX_IMAGE_BUFFERS: usize = 64;
-/// Maximum ordered `LoRA` entries in one image execution.
-pub const MAX_IMAGE_LORAS: usize = 32;
-/// Maximum installed operator invocations in one image execution.
-pub const MAX_IMAGE_OPERATORS: usize = 64;
-/// Maximum observation requests in one image execution.
-pub const MAX_IMAGE_OBSERVATIONS: usize = 64;
-/// Maximum bytes in one selector label.
-pub const MAX_SELECTOR_LABEL_BYTES: usize = 128;
-/// Maximum schema-specific bytes in one installed operator invocation.
-pub const MAX_OPERATOR_CONTROL_BYTES: usize = 4_096;
+/// Widest image extent the execution contract can express.
+///
+/// This is a property of the native format, not a chosen size: the companion
+/// takes image width and height as signed 32-bit integers, so an extent above
+/// `i32::MAX` cannot be represented. Pixel and byte lengths derived from an
+/// extent are computed with checked arithmetic, and memory is the real limit on
+/// how large an image can be.
+pub const MAX_IMAGE_DIMENSION: u32 = i32::MAX.cast_unsigned();
+
+/// Refusal text for an image whose extent product overflows the native `int`.
+pub const IMAGE_EXTENT_PRODUCT_REFUSAL: &str = "image extent exceeds the 32-bit product the native library computes with: width*height*channels > INT_MAX";
+
+/// Returns whether `width * height * channels` fits the native signed 32-bit
+/// `int`.
+///
+/// This is a property of the native format, not a chosen size: upstream
+/// computes pixel and byte counts of an image as `int`. Use 4 for `channels`
+/// where the channel count is not yet known (an image has at most four).
+#[must_use]
+pub fn image_extent_fits_native_int(width: u32, height: u32, channels: u64) -> bool {
+    u64::from(width)
+        .checked_mul(u64::from(height))
+        .and_then(|pixels| pixels.checked_mul(channels))
+        .is_some_and(|bytes| bytes > 0 && bytes <= u64::from(MAX_IMAGE_DIMENSION))
+}
 
 /// Whole-image operation selected by an exact execution plan.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -419,11 +430,9 @@ impl TensorSelector {
     ///
     /// # Errors
     ///
-    /// Returns an error for an empty, oversized, or NUL-containing label.
+    /// Returns an error for an empty or NUL-containing label.
     pub fn validate(&self) -> Result<(), CoreError> {
-        let valid = |label: &str| {
-            !label.is_empty() && label.len() <= MAX_SELECTOR_LABEL_BYTES && !label.contains('\0')
-        };
+        let valid = |label: &str| !label.is_empty() && !label.contains('\0');
         match self {
             Self::SchedulerState => Ok(()),
             Self::Conditioning { label } if valid(label) => Ok(()),
@@ -432,9 +441,7 @@ impl TensorSelector {
             } if valid(component) && valid(site) => Ok(()),
             _ => Err(CoreError::invalid(
                 "image tensor selector",
-                format!(
-                    "labels must be non-empty, NUL-free, and at most {MAX_SELECTOR_LABEL_BYTES} bytes"
-                ),
+                "labels must be non-empty and NUL-free",
             )),
         }
     }
@@ -452,7 +459,7 @@ pub struct OperatorInvocation {
     pub selector: TensorSelector,
     /// Boundaries at which the operator runs.
     pub steps: StepSelector,
-    /// Bounded schema-specific control bytes.
+    /// Schema-specific control bytes; their length is the schema's to define.
     pub controls: Vec<u8>,
 }
 
@@ -460,12 +467,6 @@ impl OperatorInvocation {
     pub(crate) fn validate_for(&self, step_count: usize) -> Result<(), CoreError> {
         self.selector.validate()?;
         self.steps.validate_for(step_count)?;
-        if self.controls.len() > MAX_OPERATOR_CONTROL_BYTES {
-            return Err(CoreError::invalid(
-                "image operator controls",
-                format!("exceed {MAX_OPERATOR_CONTROL_BYTES} bytes"),
-            ));
-        }
         Ok(())
     }
 }
@@ -566,7 +567,7 @@ impl ImageExecutionPlan {
     /// Returns the first mechanically invalid field.
     pub fn validate(&self) -> Result<(), CoreError> {
         self.validate_scalars()?;
-        self.validate_collection_bounds()?;
+        self.validate_lora_count()?;
         self.validate_inputs()?;
         let step_count = self.validate_operation()?;
         self.validate_step_mechanics(step_count)
@@ -580,7 +581,15 @@ impl ImageExecutionPlan {
         {
             return Err(CoreError::invalid(
                 "image execution dimensions",
-                format!("must be within 1..={MAX_IMAGE_DIMENSION}"),
+                format!(
+                    "must be within 1..={MAX_IMAGE_DIMENSION} (the native signed 32-bit extent)"
+                ),
+            ));
+        }
+        if !image_extent_fits_native_int(self.width, self.height, 4) {
+            return Err(CoreError::invalid(
+                "image execution dimensions",
+                IMAGE_EXTENT_PRODUCT_REFUSAL,
             ));
         }
         if !self.guidance_scale().is_finite()
@@ -619,15 +628,13 @@ impl ImageExecutionPlan {
         Ok(())
     }
 
-    fn validate_collection_bounds(&self) -> Result<(), CoreError> {
-        if self.inputs.len() > MAX_IMAGE_BUFFERS
-            || self.loras.len() > MAX_IMAGE_LORAS
-            || self.operators.len() > MAX_IMAGE_OPERATORS
-            || self.observations.len() > MAX_IMAGE_OBSERVATIONS
-        {
+    /// No collection size is chosen here. The one bound is a format property:
+    /// the native request counts `LoRA` entries in an unsigned 32-bit integer.
+    fn validate_lora_count(&self) -> Result<(), CoreError> {
+        if u32::try_from(self.loras.len()).is_err() {
             return Err(CoreError::invalid(
                 "image execution collection",
-                "a public collection bound was exceeded",
+                "LoRA entries exceed the native 32-bit count",
             ));
         }
         Ok(())
@@ -805,15 +812,6 @@ impl ImageExecutionReceipt {
                 "plan or profile identity differs",
             ));
         }
-        if self.outputs.len() > MAX_IMAGE_BUFFERS
-            || self.checkpoints.len() > MAX_IMAGE_BUFFERS
-            || self.observations.len() > MAX_IMAGE_OBSERVATIONS
-        {
-            return Err(CoreError::invalid(
-                "image execution receipt",
-                "a receipt collection bound was exceeded",
-            ));
-        }
         for output in &self.outputs {
             output.validate()?;
         }
@@ -871,7 +869,13 @@ fn validate_image_bytes(
     if width == 0 || height == 0 || width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION {
         return Err(CoreError::invalid(
             "image buffer dimensions",
-            format!("must be within 1..={MAX_IMAGE_DIMENSION}"),
+            format!("must be within 1..={MAX_IMAGE_DIMENSION} (the native signed 32-bit extent)"),
+        ));
+    }
+    if !image_extent_fits_native_int(width, height, channels) {
+        return Err(CoreError::invalid(
+            "image buffer dimensions",
+            IMAGE_EXTENT_PRODUCT_REFUSAL,
         ));
     }
     let minimum_stride = u64::from(width)
@@ -964,6 +968,30 @@ mod tests {
         let decoded: ImageExecutionPlan = serde_json::from_slice(&encoded).unwrap();
         assert_eq!(decoded, plan);
         assert_eq!(decoded.digest().unwrap(), plan.digest().unwrap());
+    }
+
+    /// INVARIANT: no image size or collection size is chosen; an extent above
+    /// the former 4096 bound validates and only the native signed 32-bit extent
+    /// or zero is refused.
+    #[test]
+    fn image_extent_is_bounded_only_by_the_native_format() {
+        let mut value = plan();
+        value.width = 16_384;
+        value.height = 8_192;
+        value.validate().unwrap();
+        // The product width * height * channels must fit the native `int`.
+        value.width = 16_384;
+        value.height = 16_384;
+        value.validate().unwrap();
+        value.width = 32_768;
+        assert!(value.validate().is_err());
+        value.width = MAX_IMAGE_DIMENSION;
+        value.height = 1;
+        assert!(value.validate().is_err());
+        value.width = MAX_IMAGE_DIMENSION + 1;
+        assert!(value.validate().is_err());
+        value.width = 0;
+        assert!(value.validate().is_err());
     }
 
     #[test]

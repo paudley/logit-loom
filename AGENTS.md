@@ -54,10 +54,22 @@ Preserve these unless a design change is explicitly reviewed:
    portable file format.
 9. Plans and receipts describe mechanics and lineage. They are not evidence of
    semantic correctness or efficacy.
-10. Public inputs are bounded and validated before allocation or native calls.
-    The image prompt and negative prompt are the exception: their length is
-    bounded by the caller's descriptor and the text encoder's own admission,
-    and only emptiness and NUL are checked here.
+10. Public inputs are validated before allocation or native calls. A bound
+    stays only when it is physical or a property of the format (an index
+    width, an arithmetic overflow, a size the encoding fixes) and is then named
+    as that where it is enforced; a number somebody picked is not a bound.
+    Where memory is the real limit, allocation is fallible and the refusal is
+    typed and named. The image prompt and negative prompt, and the image,
+    reference, `LoRA`, tensor, checkpoint, and resident-program sizes and
+    counts in the `diffusion` and `diffusion-sdcpp` crates and the matching
+    native patches, follow this rule. These chosen limits remain and are not
+    yet removed: the Krea activation limits (`MAX_KREA_*` and the
+    `krea-activation-v6` patch), the projected-component limits
+    (`MAX_PROJECTED_COMPONENT_*`), the executor constants
+    (`MAX_EXECUTION_BUFFERS`, `MAX_WHOLE_GENERATION_*`, the media-type length),
+    `MAX_STEP_OBSERVERS`, and the core text-generation constants. Allocation is
+    fallible only where the `CHANGELOG` lists it: some copies of memory the
+    caller or the native side already holds remain infallible.
 
 The foundational crates forbid unsafe Rust. Keep native unsafety inside the
 upstream binding unless there is no safe alternative; any proposed local

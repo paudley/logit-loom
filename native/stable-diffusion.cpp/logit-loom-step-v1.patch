@@ -371,7 +371,7 @@ diff --git src/stable-diffusion.cpp src/stable-diffusion.cpp
 index 44a660b..265e7cc 100644
 --- src/stable-diffusion.cpp
 +++ src/stable-diffusion.cpp
-@@ -663,6 +663,84 @@ void free_sd_ctx(sd_ctx_t* sd_ctx) {
+@@ -663,6 +663,105 @@ void free_sd_ctx(sd_ctx_t* sd_ctx) {
      free(sd_ctx);
  }
  
@@ -381,6 +381,27 @@ index 44a660b..265e7cc 100644
 +
 +const char* sd_loom_upstream_commit(void) {
 +    return "2988060a4338a5dcd94721c964a8e87003c1ac8b";
++}
++
++// Upstream computes pixel and byte counts of an image (width * height and
++// width * height * channels, for example when it allocates the decoded image or
++// sizes a reference) as `int`. The product must therefore fit `int`: a format
++// property of the native library, not a chosen size. `channels` is the image's
++// channel count (at most 4 for an sd_image_t). A refusal is logged by name.
++static bool sd_loom_extent_fits_int(uint64_t width, uint64_t height, uint64_t channels) {
++    const uint64_t maximum = static_cast<uint64_t>(std::numeric_limits<int>::max());
++    bool fits = width > 0 && height > 0 && channels > 0 &&
++                width <= maximum &&
++                height <= maximum / width &&
++                channels <= maximum / (width * height);
++    if (!fits && width > 0 && height > 0 && channels > 0) {
++        LOG_ERROR("Logit Loom image extent exceeds the 32-bit product the native library "
++                  "computes with: width*height*channels > INT_MAX (%llu x %llu x %llu)",
++                  static_cast<unsigned long long>(width),
++                  static_cast<unsigned long long>(height),
++                  static_cast<unsigned long long>(channels));
++    }
++    return fits;
 +}
 +
 +static bool sd_loom_nonempty(const char* value) {
@@ -456,7 +477,7 @@ index 44a660b..265e7cc 100644
  SD_API void sd_cancel_generation(sd_ctx_t* sd_ctx, enum sd_cancel_mode_t mode) {
      if (sd_ctx && sd_ctx->sd) {
          if (mode < SD_CANCEL_ALL || mode > SD_CANCEL_RESET) {
-@@ -749,6 +827,95 @@ SD_API bool generate_image(sd_ctx_t* sd_ctx,
+@@ -749,6 +848,100 @@ SD_API bool generate_image(sd_ctx_t* sd_ctx,
      return execution.ready && sd::pipeline::generate_image(sd_ctx->sd, params, images_out, num_images_out);
  }
  
@@ -470,6 +491,11 @@ index 44a660b..265e7cc 100644
 +    if (image_out != nullptr) {
 +        *image_out = nullptr;
 +    }
++    // The only size limits are format properties: width and height are `int` in
++    // upstream's image parameters (positive, with width * height * 4 channels at
++    // most INT_MAX because upstream computes pixel counts as `int`), and the sigma
++    // count is passed on as an `int`. No image size, guidance scale or step count
++    // is chosen here; memory is the real limit and upstream's allocation reports it.
 +    if (sd_ctx == nullptr ||
 +        sd_ctx->sd == nullptr ||
 +        params == nullptr ||
@@ -480,14 +506,14 @@ index 44a660b..265e7cc 100644
 +        !sd_loom_nonempty(params->prompt) ||
 +        params->width <= 0 ||
 +        params->height <= 0 ||
-+        params->width > 4096 ||
-+        params->height > 4096 ||
++        !sd_loom_extent_fits_int(static_cast<uint64_t>(params->width),
++                                 static_cast<uint64_t>(params->height),
++                                 4) ||
 +        !std::isfinite(params->cfg_scale) ||
 +        params->cfg_scale < 0.f ||
-+        params->cfg_scale > 64.f ||
 +        params->sigmas == nullptr ||
 +        params->sigma_count < 2 ||
-+        params->sigma_count > 4097 ||
++        params->sigma_count > static_cast<size_t>(std::numeric_limits<int>::max()) ||
 +        sd_ctx->sd->loom_condition_callback != nullptr ||
 +        sd_ctx->sd->loom_step_callback != nullptr) {
 +        return SD_LOOM_STATUS_INVALID_ARGUMENT;

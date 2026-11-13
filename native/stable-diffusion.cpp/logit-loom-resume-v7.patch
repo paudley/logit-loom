@@ -125,10 +125,12 @@ diff --git src/stable-diffusion.cpp src/stable-diffusion.cpp
 index dc2051b..fe26137 100644
 --- src/stable-diffusion.cpp
 +++ src/stable-diffusion.cpp
-@@ -686,6 +686,20 @@ static bool sd_loom_nonempty(const char* value) {
+@@ -686,6 +686,21 @@ static bool sd_loom_nonempty(const char* value) {
      return value != nullptr && value[0] != '\0';
  }
  
++// The resume state is bounded only by the latent it replaces: its length must
++// equal the latent's element count, which is checked where the state is applied.
 +static bool sd_loom_valid_resume(const float* state,
 +                                 size_t state_len,
 +                                 uint32_t next_step,
@@ -138,7 +140,6 @@ index dc2051b..fe26137 100644
 +    }
 +    return state != nullptr &&
 +           state_len > 0 &&
-+           state_len <= 16 * 1024 * 1024 &&
 +           sigma_count >= 2 &&
 +           next_step < sigma_count - 1;
 +}
@@ -146,10 +147,10 @@ index dc2051b..fe26137 100644
  static void sd_loom_discard_progress(int, int, float, void*) {
  }
  
-@@ -867,6 +881,10 @@ int32_t sd_loom_generate_image_v1(sd_ctx_t* sd_ctx,
+@@ -867,6 +882,10 @@ int32_t sd_loom_generate_image_v1(sd_ctx_t* sd_ctx,
          params->sigmas == nullptr ||
          params->sigma_count < 2 ||
-         params->sigma_count > 4097 ||
+         params->sigma_count > static_cast<size_t>(std::numeric_limits<int>::max()) ||
 +        !sd_loom_valid_resume(params->resume_state,
 +                              params->resume_state_len,
 +                              params->resume_next_step,
@@ -157,7 +158,7 @@ index dc2051b..fe26137 100644
          sd_ctx->sd->loom_condition_callback != nullptr ||
          sd_ctx->sd->loom_step_callback != nullptr) {
          return SD_LOOM_STATUS_INVALID_ARGUMENT;
-@@ -883,21 +901,24 @@ int32_t sd_loom_generate_image_v1(sd_ctx_t* sd_ctx,
+@@ -883,21 +902,24 @@ int32_t sd_loom_generate_image_v1(sd_ctx_t* sd_ctx,
  
      sd_img_gen_params_t native_params;
      sd_img_gen_params_init(&native_params);
@@ -194,7 +195,7 @@ index dc2051b..fe26137 100644
  
      sd_image_t* images = nullptr;
      int image_count    = 0;
-@@ -906,9 +927,12 @@ int32_t sd_loom_generate_image_v1(sd_ctx_t* sd_ctx,
+@@ -906,9 +928,12 @@ int32_t sd_loom_generate_image_v1(sd_ctx_t* sd_ctx,
  
      sd_ctx->sd->loom_condition_callback      = nullptr;
      sd_ctx->sd->loom_condition_callback_data = nullptr;
@@ -210,7 +211,7 @@ index dc2051b..fe26137 100644
  
      if (status == SD_LOOM_STATUS_CALLBACK_ERROR ||
          status == SD_LOOM_STATUS_UNSUPPORTED) {
-@@ -1040,6 +1064,9 @@ static void sd_loom_reset_callbacks(sd_ctx_t* sd_ctx) {
+@@ -1040,6 +1065,9 @@ static void sd_loom_reset_callbacks(sd_ctx_t* sd_ctx) {
      sd_ctx->sd->loom_step_callback           = nullptr;
      sd_ctx->sd->loom_step_callback_data      = nullptr;
      sd_ctx->sd->loom_step_status             = SD_LOOM_STATUS_OK;
@@ -220,7 +221,7 @@ index dc2051b..fe26137 100644
  }
  
  int32_t sd_loom_generate_image_v2(sd_ctx_t* sd_ctx,
-@@ -1073,6 +1100,10 @@ int32_t sd_loom_generate_image_v2(sd_ctx_t* sd_ctx,
+@@ -1073,6 +1101,10 @@ int32_t sd_loom_generate_image_v2(sd_ctx_t* sd_ctx,
          params->strength <= 0.f ||
          params->strength > 1.f ||
          !sd_loom_valid_schedule_v2(params->sigmas, params->sigma_count) ||
@@ -228,10 +229,10 @@ index dc2051b..fe26137 100644
 +                              params->resume_state_len,
 +                              params->resume_next_step,
 +                              params->sigma_count) ||
-         params->reference_image_count > 16 ||
-         params->lora_count > 32 ||
+         params->reference_image_count > static_cast<size_t>(std::numeric_limits<int>::max()) ||
+         params->lora_count > std::numeric_limits<uint32_t>::max() ||
          (params->reference_image_count > 0 && params->reference_images == nullptr) ||
-@@ -1131,18 +1162,18 @@ int32_t sd_loom_generate_image_v2(sd_ctx_t* sd_ctx,
+@@ -1131,18 +1163,18 @@ int32_t sd_loom_generate_image_v2(sd_ctx_t* sd_ctx,
  
      sd_img_gen_params_t native_params;
      sd_img_gen_params_init(&native_params);
@@ -262,7 +263,7 @@ index dc2051b..fe26137 100644
      native_params.sample_params.custom_sigmas_count = static_cast<int>(params->sigma_count);
      if (has_init) {
          native_params.init_image = sd_loom_native_image_v2(params->init_image);
-@@ -1163,6 +1194,9 @@ int32_t sd_loom_generate_image_v2(sd_ctx_t* sd_ctx,
+@@ -1163,6 +1195,9 @@ int32_t sd_loom_generate_image_v2(sd_ctx_t* sd_ctx,
      sd_ctx->sd->loom_step_callback           = callback;
      sd_ctx->sd->loom_step_callback_data      = callback_data;
      sd_ctx->sd->loom_step_status             = SD_LOOM_STATUS_OK;
@@ -272,7 +273,7 @@ index dc2051b..fe26137 100644
  
      sd_image_t* images = nullptr;
      int image_count    = 0;
-@@ -2425,6 +2459,9 @@ int32_t sd_loom_program_generate_image_v3(
+@@ -2425,6 +2460,9 @@ int32_t sd_loom_program_generate_image_v3(
              reference_images.size(),
              loras.data(),
              loras.size(),

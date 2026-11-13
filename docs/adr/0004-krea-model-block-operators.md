@@ -38,8 +38,13 @@ ModelBlock {
 ```
 
 The fixed eight-byte control body contains the exact IEEE-754 residual scale
-and its caller-declared positive absolute bound. Both values are finite, the
-declared bound is at most 16, and the scale must fit inside it.
+and its caller-declared positive absolute bound. Both values are finite and
+the scale must fit inside the bound; no magnitude is chosen by the library.
+
+Validating that a new operator does not overlap an earlier one on the same
+block compares every step of every earlier operator on that block, so the cost
+grows as operators squared times steps; it always terminates because step
+lists are finite and block indices are bounded by the loaded model.
 
 For one selected Krea block with input `x` and ordinary output `f(x)`, the
 installed graph computes:
@@ -64,9 +69,10 @@ result so the v4 result shape is not reinterpreted. Rust lowers installed Krea
 residual operators through v5; scheduler-state operators continue through the
 transactional post-Euler pipeline. The native boundary:
 
-- accepts at most 64 model-block invocations;
-- rejects unknown components, sites, selectors, non-finite or out-of-bound
-  scales, and overlapping controls for the same block and step;
+- accepts any number of model-block invocations (none is capped; transition
+  bitmap sizes are overflow-checked);
+- rejects unknown components, sites, selectors, non-finite scales, and
+  overlapping controls for the same block and step;
 - dynamically queries `Krea2Config::layers`, which stable-diffusion.cpp
   detects from the loaded `blocks.<index>` tensor namespace;
 - rejects every block index outside that loaded topology;

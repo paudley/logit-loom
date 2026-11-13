@@ -215,7 +215,14 @@ fn transition_bitmap(steps: &StepSelector, step_count: usize) -> Result<Vec<u64>
         .checked_add(63)
         .ok_or_else(|| Error::Incompatible("model-block transition count overflowed".to_owned()))?
         / 64;
-    let mut words = vec![0_u64; word_count];
+    let mut words = Vec::new();
+    words
+        .try_reserve_exact(word_count)
+        .map_err(|_| Error::Allocation {
+            what: "model-block transition bitmap",
+            bytes: (word_count as u64).saturating_mul(8),
+        })?;
+    words.resize(word_count, 0_u64);
     match steps {
         StepSelector::All => {
             for step in 0..step_count {

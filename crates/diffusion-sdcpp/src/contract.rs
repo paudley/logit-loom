@@ -7,27 +7,19 @@ use std::{
 };
 
 use logit_loom_diffusion::{
-    ControlFlow, DiffusionCheckpointReceipt, DiffusionPlan, DiffusionSchedule, Digest,
-    MAX_DIFFUSION_STEPS, MAX_TENSOR_ELEMENTS, StepContext,
+    ControlFlow, DiffusionCheckpointReceipt, DiffusionPlan, DiffusionSchedule, Digest, StepContext,
 };
 use logit_loom_models::ArtifactReceipt;
 use serde::{Deserialize, Serialize};
 
 use crate::{Error, Result};
 
-/// Maximum output image dimension.
-pub const MAX_IMAGE_DIMENSION: u32 = 4_096;
-/// Maximum native backend label bytes.
-pub const MAX_BACKEND_LABEL_BYTES: usize = 128;
-/// Maximum serialized checkpoint-lineage bytes accepted by the adapter.
-pub const MAX_CHECKPOINT_RECEIPT_BYTES: usize = 64 * 1024;
-/// Maximum exact `f32` scheduler-state bytes in one checkpoint.
-pub const MAX_CHECKPOINT_STATE_BYTES: usize = 16 * 1024 * 1024 * size_of::<f32>();
-/// Maximum complete version-one checkpoint envelope bytes.
-pub const MAX_CHECKPOINT_ENVELOPE_BYTES: usize = CHECKPOINT_ENVELOPE_MAGIC.len()
-    + size_of::<u32>()
-    + MAX_CHECKPOINT_RECEIPT_BYTES
-    + MAX_CHECKPOINT_STATE_BYTES;
+/// Widest output image extent the companion can express.
+///
+/// This is a property of the native format, not a chosen size: the companion
+/// takes image width and height as signed 32-bit integers. Memory, and the
+/// profile's alignment, are the real limits on an image's size.
+pub const MAX_IMAGE_DIMENSION: u32 = logit_loom_diffusion::MAX_IMAGE_DIMENSION;
 
 const CHECKPOINT_ENVELOPE_MAGIC: &[u8; 8] = b"LLSDCP01";
 
@@ -176,6 +168,11 @@ impl Profile {
                 self.id()
             )));
         }
+        if !logit_loom_diffusion::image_extent_fits_native_int(width, height, 4) {
+            return Err(Error::Invalid(
+                logit_loom_diffusion::IMAGE_EXTENT_PRODUCT_REFUSAL.to_owned(),
+            ));
+        }
         let elements = self
             .state_shape(width, height)
             .iter()
@@ -183,9 +180,13 @@ impl Profile {
                 elements.checked_mul(*dimension)
             })
             .ok_or_else(|| Error::Invalid("profile state element count overflowed".to_owned()))?;
-        if elements > MAX_TENSOR_ELEMENTS {
+        if elements
+            .checked_mul(size_of::<f32>() as u64)
+            .and_then(|bytes| usize::try_from(bytes).ok())
+            .is_none()
+        {
             return Err(Error::Invalid(format!(
-                "{} state has {elements} elements; maximum is {MAX_TENSOR_ELEMENTS}",
+                "{} state of {elements} f32 elements does not fit the address space",
                 self.id()
             )));
         }
@@ -441,16 +442,18 @@ impl ImageRequest {
         cfg_scale: f32,
         steps: u32,
     ) -> Result<Self> {
-        if steps == 0 || usize::try_from(steps).map_or(true, |steps| steps > MAX_DIFFUSION_STEPS) {
-            return Err(Error::Invalid(format!(
-                "Euler step count must be within 1..={MAX_DIFFUSION_STEPS}"
-            )));
+        if steps == 0 {
+            return Err(Error::Invalid(
+                "Euler step count must be at least one".to_owned(),
+            ));
         }
         let mut sigmas = Vec::with_capacity(
             usize::try_from(steps)
                 .map_err(|_| Error::Invalid("step count exceeds usize".to_owned()))?
                 .saturating_add(1),
         );
+        // The step count is a 16-bit integer in this schedule's identity and its
+        // exact `f32` arithmetic: a format property, not a chosen bound.
         let divisor = f32::from(
             u16::try_from(steps)
                 .map_err(|_| Error::Invalid("Euler step count exceeds u16".to_owned()))?,
@@ -538,6 +541,11 @@ impl ImageRequest {
             return Err(Error::Invalid(format!(
                 "image dimensions must be within 1..={MAX_IMAGE_DIMENSION}"
             )));
+        }
+        if !logit_loom_diffusion::image_extent_fits_native_int(self.width, self.height, 4) {
+            return Err(Error::Invalid(
+                logit_loom_diffusion::IMAGE_EXTENT_PRODUCT_REFUSAL.to_owned(),
+            ));
         }
         if self.seed > i64::MAX as u64 {
             return Err(Error::Invalid(
@@ -980,11 +988,7 @@ impl DiffusionCheckpoint {
         let receipt = serde_json::to_vec(&self.receipt).map_err(|error| {
             Error::Invalid(format!("checkpoint receipt encoding failed: {error}"))
         })?;
-        if receipt.len() > MAX_CHECKPOINT_RECEIPT_BYTES {
-            return Err(Error::Invalid(format!(
-                "checkpoint receipt exceeds {MAX_CHECKPOINT_RECEIPT_BYTES} bytes"
-            )));
-        }
+        // The envelope stores the receipt length in 32 bits: a format property.
         let receipt_len = u32::try_from(receipt.len())
             .map_err(|_| Error::Invalid("checkpoint receipt length exceeds u32".to_owned()))?;
         let capacity = CHECKPOINT_ENVELOPE_MAGIC
@@ -993,7 +997,13 @@ impl DiffusionCheckpoint {
             .and_then(|length| length.checked_add(receipt.len()))
             .and_then(|length| length.checked_add(self.state_le_bytes.len()))
             .ok_or_else(|| Error::Invalid("checkpoint envelope length overflowed".to_owned()))?;
-        let mut bytes = Vec::with_capacity(capacity);
+        let mut bytes = Vec::new();
+        bytes
+            .try_reserve_exact(capacity)
+            .map_err(|_| Error::Allocation {
+                what: "checkpoint envelope",
+                bytes: u64::try_from(capacity).unwrap_or(u64::MAX),
+            })?;
         bytes.extend_from_slice(CHECKPOINT_ENVELOPE_MAGIC);
         bytes.extend_from_slice(&receipt_len.to_le_bytes());
         bytes.extend_from_slice(&receipt);
@@ -1010,7 +1020,6 @@ impl DiffusionCheckpoint {
     pub fn from_envelope_bytes(bytes: &[u8]) -> Result<Self> {
         let header = CHECKPOINT_ENVELOPE_MAGIC.len() + size_of::<u32>();
         if bytes.len() <= header
-            || bytes.len() > MAX_CHECKPOINT_ENVELOPE_BYTES
             || &bytes[..CHECKPOINT_ENVELOPE_MAGIC.len()] != CHECKPOINT_ENVELOPE_MAGIC
         {
             return Err(Error::Invalid(
@@ -1026,9 +1035,9 @@ impl DiffusionCheckpoint {
         ]);
         let receipt_len = usize::try_from(receipt_len)
             .map_err(|_| Error::Invalid("checkpoint receipt length exceeds usize".to_owned()))?;
-        if receipt_len == 0 || receipt_len > MAX_CHECKPOINT_RECEIPT_BYTES {
+        if receipt_len == 0 {
             return Err(Error::Invalid(
-                "checkpoint receipt length is outside its public bound".to_owned(),
+                "checkpoint receipt length must be at least one byte".to_owned(),
             ));
         }
         let receipt_end = header
@@ -1054,12 +1063,9 @@ impl DiffusionCheckpoint {
         receipt: DiffusionCheckpointReceipt,
         state_le_bytes: Vec<u8>,
     ) -> Result<Self> {
-        if state_le_bytes.is_empty()
-            || state_le_bytes.len() > MAX_CHECKPOINT_STATE_BYTES
-            || !state_le_bytes.len().is_multiple_of(4)
-        {
+        if state_le_bytes.is_empty() || !state_le_bytes.len().is_multiple_of(4) {
             return Err(Error::Invalid(
-                "checkpoint state must contain bounded complete f32 bytes".to_owned(),
+                "checkpoint state must contain complete f32 bytes".to_owned(),
             ));
         }
         let state = Digest::of_bytes("sdcpp-checkpoint-f32-le-v1", &state_le_bytes);
@@ -1174,13 +1180,9 @@ pub(crate) fn component_map(
 }
 
 fn validate_backend(label: &str, value: &str) -> Result<()> {
-    if value.is_empty()
-        || value.len() > MAX_BACKEND_LABEL_BYTES
-        || value.contains('\0')
-        || value.to_ascii_lowercase().contains("cpu")
-    {
+    if value.is_empty() || value.contains('\0') || value.to_ascii_lowercase().contains("cpu") {
         return Err(Error::Invalid(format!(
-            "{label} must be a bounded non-CPU label without NUL"
+            "{label} must be a non-CPU label without NUL"
         )));
     }
     Ok(())
@@ -1262,13 +1264,30 @@ mod tests {
     fn profile_dimensions_are_explicit() {
         assert!(Profile::MiniT2iB16.validate_dimensions(512, 512).is_ok());
         assert!(Profile::MiniT2iB16.validate_dimensions(510, 512).is_err());
+        assert!(Profile::Krea2Turbo.validate_dimensions(1024, 1024).is_ok());
+        assert!(Profile::Krea2Turbo.validate_dimensions(1000, 1024).is_err());
+    }
+
+    /// INVARIANT: no image size is chosen; only the native signed 32-bit extent
+    /// and arithmetic overflow bound a profile's dimensions.
+    #[test]
+    fn profile_dimensions_above_the_former_chosen_bound_validate() {
         assert!(
             Profile::MiniT2iB16
                 .validate_dimensions(4_096, 4_096)
+                .is_ok()
+        );
+        assert!(
+            Profile::Krea2Turbo
+                .validate_dimensions(8_192, 8_192)
+                .is_ok()
+        );
+        let beyond_extent = MAX_IMAGE_DIMENSION + 1;
+        assert!(
+            Profile::MiniT2iB16
+                .validate_dimensions(beyond_extent, 512)
                 .is_err()
         );
-        assert!(Profile::Krea2Turbo.validate_dimensions(1024, 1024).is_ok());
-        assert!(Profile::Krea2Turbo.validate_dimensions(1000, 1024).is_err());
     }
 
     #[test]
@@ -1280,6 +1299,9 @@ mod tests {
     #[test]
     fn linear_schedule_rejects_extreme_steps_before_allocation() {
         assert!(ImageRequest::linear_euler("test", 512, 512, 7, 6.0, u32::MAX).is_err());
+        // Only the 16-bit schedule step width bounds the count, not a chosen 4096.
+        assert!(ImageRequest::linear_euler("test", 512, 512, 7, 6.0, 4_097).is_ok());
+        assert!(ImageRequest::linear_euler("test", 512, 512, 7, 6.0, 65_536).is_err());
     }
 
     #[test]
@@ -1347,13 +1369,10 @@ mod tests {
         *changed.last_mut().unwrap() ^= 1;
         assert!(DiffusionCheckpoint::from_envelope_bytes(&changed).is_err());
 
-        let mut excessive_receipt = checkpoint.to_envelope_bytes().unwrap();
+        let mut overlong_receipt = checkpoint.to_envelope_bytes().unwrap();
         let offset = CHECKPOINT_ENVELOPE_MAGIC.len();
-        excessive_receipt[offset..offset + size_of::<u32>()].copy_from_slice(
-            &u32::try_from(MAX_CHECKPOINT_RECEIPT_BYTES + 1)
-                .unwrap()
-                .to_le_bytes(),
-        );
-        assert!(DiffusionCheckpoint::from_envelope_bytes(&excessive_receipt).is_err());
+        overlong_receipt[offset..offset + size_of::<u32>()]
+            .copy_from_slice(&u32::MAX.to_le_bytes());
+        assert!(DiffusionCheckpoint::from_envelope_bytes(&overlong_receipt).is_err());
     }
 }

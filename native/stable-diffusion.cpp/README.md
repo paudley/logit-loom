@@ -266,5 +266,31 @@ version is unchanged; only the reported upstream commit differs.
   constants in `ggml-vulkan-push-constants.h`. Upstream has none of the Strix
   Halo, UMA, ceiling or dispatch-bound changes.
 
+## Bounds
+
+The companion chooses no size. A bound remains only when it is physical or a
+property of the format, and each is named where it is enforced:
+
+- image width and height, reference-image count, sigma count and `LoRA` count
+  are limited by the width of the upstream or ABI integer that carries them
+  (`int` or `uint32_t`);
+- a value slot is a `uint32_t` whose maximum is the empty handle;
+- a value's rank is at most the eight entries of the fixed `shape` array in the
+  value descriptor, whose layout is the byte-identical C ABI;
+- a PNG is refused when its upper bound exceeds `INT_MAX`, because the bundled
+  encoder computes its stride, filtered length and encoded length as `int`;
+- the product `width * height * channels` of an image extent must fit `int`,
+  because upstream computes pixel and byte counts as `int` (checked at every
+  entry that takes an extent, with the refusal logged by name; 4 channels are
+  assumed where the count is not yet known);
+- byte and pixel counts are checked for 64-bit and `size_t` overflow.
+
+Memory is the real limit on everything else: a copy or reservation the host
+cannot satisfy fails inside the existing exception handlers and is returned
+as the existing native-error status, with the allocation named in the native
+log (`Logit Loom allocation refused: ...`) or the exception logged by function.
+No status code or struct changes, so the header stays byte-identical. A native
+error poisons the Rust session, as before.
+
 The reviewed decision and boundary are in
 [`docs/adr/0001-stable-diffusion-runtime.md`](../../docs/adr/0001-stable-diffusion-runtime.md).

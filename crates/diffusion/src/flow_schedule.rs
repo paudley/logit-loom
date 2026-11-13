@@ -11,7 +11,7 @@
 use logit_loom_core::{CoreError, Digest};
 use serde::{Deserialize, Serialize};
 
-use crate::{Error, MAX_DIFFUSION_STEPS, Result};
+use crate::{Error, Result};
 
 /// Upstream's discrete training grid length (`TIMESTEPS`).
 const TRAINING_TIMESTEPS: u32 = 1_000;
@@ -207,11 +207,15 @@ impl FlowMatchScheduleV1 {
     }
 }
 
+/// A generated schedule counts its steps in a 16-bit integer: the step count is
+/// folded into the schedule identity and the sigma arithmetic converts it to
+/// `f32` exactly. That width is the format property that bounds a generated
+/// schedule; no smaller count is chosen.
 fn bounded_steps(steps: u32) -> Result<u16> {
-    if steps == 0 || usize::try_from(steps).map_or(true, |value| value > MAX_DIFFUSION_STEPS) {
-        return Err(invalid("steps must be within the diffusion bound"));
+    if steps == 0 {
+        return Err(invalid("steps must be at least one"));
     }
-    u16::try_from(steps).map_err(|_| invalid("validated steps do not fit the schedule bound"))
+    u16::try_from(steps).map_err(|_| invalid("steps exceed the 16-bit schedule step width"))
 }
 
 /// `DiscreteFlowDenoiser::t_to_sigma`: `time_snr_shift(shift, (t + 1) / 1000)`.

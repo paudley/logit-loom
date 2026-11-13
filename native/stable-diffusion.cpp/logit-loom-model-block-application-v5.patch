@@ -187,7 +187,7 @@ diff --git src/stable-diffusion.cpp src/stable-diffusion.cpp
 index 9c9a6c1..bc76900 100644
 --- src/stable-diffusion.cpp
 +++ src/stable-diffusion.cpp
-@@ -2626,6 +2626,222 @@ int32_t sd_loom_program_generate_image_v4(
+@@ -2626,6 +2626,224 @@ int32_t sd_loom_program_generate_image_v4(
      }
  }
  
@@ -265,15 +265,19 @@ index 9c9a6c1..bc76900 100644
 +                  transition_masks + transition_mask_capacity,
 +                  uint64_t{0});
 +    }
++    // Format properties only: the sigma count is an `int` upstream and the step
++    // count a uint32_t. The operator count and a residual scale's magnitude are not
++    // capped here (a scale must be finite; block indices are bounded by the loaded
++    // model's block count).
 +    if (!sd_loom_program_live_v3(program) ||
 +        params == nullptr ||
 +        result_out == nullptr ||
 +        params->abi_version != SD_LOOM_MODEL_BLOCK_APPLICATION_ABI_VERSION ||
 +        params->image.abi_version != SD_LOOM_PROGRAM_ABI_VERSION ||
 +        params->image.sigma_count < 2 ||
-+        params->image.sigma_count > 4097 ||
++        params->image.sigma_count >
++            static_cast<size_t>(std::numeric_limits<int>::max()) ||
 +        params->model_block_operator_count == 0 ||
-+        params->model_block_operator_count > 64 ||
 +        params->model_block_operators == nullptr ||
 +        application_results == nullptr ||
 +        application_capacity != params->model_block_operator_count ||
@@ -316,8 +320,6 @@ index 9c9a6c1..bc76900 100644
 +                operator_params.site != SD_LOOM_MODEL_BLOCK_RESIDUAL_V4 ||
 +                operator_params.block >= static_cast<uint64_t>(model_block_count) ||
 +                !std::isfinite(operator_params.residual_scale) ||
-+                operator_params.residual_scale < -16.f ||
-+                operator_params.residual_scale > 16.f ||
 +                !sd_loom_valid_model_block_steps_v5(operator_params, step_count)) {
 +                return SD_LOOM_STATUS_INVALID_ARGUMENT;
 +            }

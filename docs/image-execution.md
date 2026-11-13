@@ -166,13 +166,13 @@ adapter contract v9, and provides the following exact legacy subset:
 | Text-to-image | Exact prompt, optional negative prompt, seed, RGB8 geometry, guidance, and custom Euler sigmas |
 | Image-to-image | Exact tightly packed RGB8/RGBA8 source at output geometry plus a fixed request strength |
 | Inpaint/outpaint | Exact source and Gray8 mask at output geometry; canvas expansion remains caller-owned |
-| References | Up to 16 tightly packed RGB8/RGBA8 images in declared order |
-| LoRA | Up to 32 caller-verified local artifacts with one fixed scale per complete request and one of two exact whole-model target identities |
-| Checkpoint | One optional authenticated restore and one optional post-step capture, routed as a versioned opaque envelope with at most 16,777,216 `f32` state elements; direct continuation begins at the recorded next Euler transition without replaying completed transitions |
+| References | Tightly packed RGB8/RGBA8 images in declared order; no count is chosen (the native request counts them in a signed 32-bit integer) |
+| LoRA | Caller-verified local artifacts with one fixed scale per complete request and one of two exact whole-model target identities; no count is chosen (the native request counts them in an unsigned 32-bit integer) |
+| Checkpoint | One optional authenticated restore and one optional post-step capture, routed as a versioned opaque envelope whose state size is limited only by memory; direct continuation begins at the recorded next Euler transition without replaying completed transitions |
 | Operator | Ordered installed scheduler-state channel bias at `All` or exact selected steps |
 | Observation | Scheduler-state digest or numerical-statistics lineage; snapshots are rejected |
 | Cancellation | Cooperative stop after the exact post-operator observation boundary of a completed Euler transition |
-| Compositing | Up to 32 ordered tight-RGB8 integer mask blends within a 512 MiB aggregate internal scratch bound |
+| Compositing | Ordered tight-RGB8 integer mask blends; the aggregate internal scratch byte count is checked for 64-bit overflow, and memory is the real limit |
 | Output | Explicit tight-RGB8 image routes and at most one final captured-checkpoint route into caller-owned storage; an unreached cancellation boundary leaves that final allocation uninitialized |
 | Cleanup | Explicit retain or confirmed clear disposition before output initialization |
 | Direct VAE | Bounded Krea encode/decode remains available through `Sdcpp`, outside `ImageExecutionPlanV3` |
