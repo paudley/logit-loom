@@ -274,7 +274,19 @@ property of the format, and each is named where it is enforced:
 - image width and height, reference-image count, sigma count and `LoRA` count
   are limited by the width of the upstream or ABI integer that carries them
   (`int` or `uint32_t`);
-- a value slot is a `uint32_t` whose maximum is the empty handle;
+- a value slot is a `uint32_t` whose maximum is the empty handle, and a Krea
+  resident input slot is a `uint32_t` (refused beyond that width);
+- the upstream Krea graph holds a fixed `KREA2_GRAPH_SIZE` (65536) nodes and
+  leaves, and ggml aborts the process when a graph exceeds its capacity. The
+  activation entry refuses a request whose own tensors (a conservative count
+  from the calls the patch makes, with overflow-checked arithmetic) cannot fit,
+  and every site visit refuses to build more tensors than the graph has room
+  for, each with a logged `Krea graph capacity: ...` message. The count is an
+  upper bound and counts tensors that never reach the graph, so it can refuse
+  a request that would have fitted; the model's own tensors are measured as the
+  graph is built, not estimated;
+- the activation entry takes the sigma count as an `int`, and refuses a
+  transition-mask size that overflows `size_t`;
 - a value's rank is at most the eight entries of the fixed `shape` array in the
   value descriptor, whose layout is the byte-identical C ABI;
 - a PNG is refused when its upper bound exceeds `INT_MAX`, because the bundled

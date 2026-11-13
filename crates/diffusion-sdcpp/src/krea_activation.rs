@@ -13,11 +13,11 @@ use logit_loom_diffusion::{
     KreaActivationOperatorV1, KreaActivationPlanV1, KreaActivationReceiptV1,
     KreaActivationSiteKindV1, KreaActivationSiteV1, KreaActivationTerminalV1,
     KreaActivationTopologyV1, KreaCfgBranchV1, KreaTokenDomainKindV1, KreaTokenDomainV1,
-    KreaTokenSelectionV1, KreaVectorRepresentationV1, MAX_KREA_ACTIVATION_ELEMENTS,
-    MAX_KREA_ACTIVATION_SITES, StepSelector,
+    KreaTokenSelectionV1, KreaVectorRepresentationV1, StepSelector,
 };
 use logit_loom_executor::ExecutorState;
 
+use crate::native_program::try_filled;
 use crate::{
     ADAPTER_CONTRACT_VERSION, Error, KREA_ACTIVATION_ABI_VERSION, Result, Sdcpp, UPSTREAM_COMMIT,
     ffi::{
@@ -28,6 +28,68 @@ use crate::{
 };
 
 const KREA_PATCH: &[u8] = include_bytes!("../assets/logit-loom-krea-activation-v6.patch");
+
+/// Nodes and leaves the upstream Krea compute graph holds (`KREA2_GRAPH_SIZE`).
+/// This is a fixed physical capacity of the upstream structure, not a chosen
+/// limit: the native library aborts the process when a graph exceeds it, so a
+/// plan whose own tensors cannot fit is refused before any native call.
+const KREA_GRAPH_CAPACITY_TENSORS: u64 = 65_536;
+
+/// Upper bound on the ggml tensors a plan adds to the Krea compute graph.
+///
+/// This is the same count the native entry makes, read from the calls the
+/// patch makes and not measured against a running model. Five tensors per
+/// conditioner layer plus two re-assemble the text context for every activation
+/// request. A selection costs 2 for `All` or 3 per range (a view, a
+/// continuation and a concatenation); a capture adds its selection and one
+/// event continuation; an operation adds its selection, at most 7 transform
+/// tensors, its splice (2 for `All`, 2 per range) and two event continuations.
+/// All branches are summed though one graph holds one branch. It counts
+/// tensors that never reach the graph, and it does not count the model's own
+/// tensors, which only the native build of the graph can measure.
+fn graph_tensor_estimate(plan: &KreaActivationPlanV1, topology: &KreaActivationTopologyV1) -> u64 {
+    fn selection(tokens: &KreaTokenSelectionV1) -> u64 {
+        match tokens {
+            KreaTokenSelectionV1::All { .. } => 2,
+            KreaTokenSelectionV1::Ranges { ranges, .. } => (ranges.len() as u64).saturating_mul(3),
+        }
+    }
+    fn splice(tokens: &KreaTokenSelectionV1) -> u64 {
+        match tokens {
+            KreaTokenSelectionV1::All { .. } => 2,
+            KreaTokenSelectionV1::Ranges { ranges, .. } => (ranges.len() as u64).saturating_mul(2),
+        }
+    }
+    let mut total = u64::from(topology.conditioner_layers)
+        .saturating_mul(5)
+        .saturating_add(2);
+    for capture in &plan.captures {
+        total = total.saturating_add(selection(&capture.tokens).saturating_add(1));
+    }
+    for operation in &plan.operations {
+        total = total.saturating_add(
+            selection(&operation.tokens)
+                .saturating_add(7 + 2)
+                .saturating_add(splice(&operation.tokens)),
+        );
+    }
+    total
+}
+
+/// Refuses, by name, a plan whose own tensors cannot fit the upstream graph.
+fn require_graph_capacity(
+    plan: &KreaActivationPlanV1,
+    topology: &KreaActivationTopologyV1,
+) -> Result<()> {
+    let estimate = graph_tensor_estimate(plan, topology);
+    if estimate > KREA_GRAPH_CAPACITY_TENSORS {
+        return Err(Error::Invalid(format!(
+            "Krea graph capacity: the plan needs up to {estimate} tensors but the upstream \
+             graph holds {KREA_GRAPH_CAPACITY_TENSORS} (KREA2_GRAPH_SIZE)"
+        )));
+    }
+    Ok(())
+}
 
 /// One caller-verified finite input mapped from a sealed descriptor.
 #[derive(Clone, Copy, Debug)]
@@ -91,15 +153,16 @@ impl Sdcpp {
                 .krea_topology_v6(self.context.as_ptr(), &mut native, &mut [])
         };
         require_status(status, "Krea topology count")?;
-        if native.abi_version != KREA_ACTIVATION_ABI_VERSION
-            || native.site_count == 0
-            || native.site_count > MAX_KREA_ACTIVATION_SITES
-        {
+        if native.abi_version != KREA_ACTIVATION_ABI_VERSION || native.site_count == 0 {
             return Err(Error::Incompatible(
                 "native Krea topology count or ABI differs".to_owned(),
             ));
         }
-        let mut sites = vec![KreaSiteV6::default(); native.site_count];
+        let mut sites = try_filled(
+            KreaSiteV6::default(),
+            native.site_count,
+            "Krea topology sites",
+        )?;
         // SAFETY: `sites` has exactly the capacity returned by the first call.
         let status = unsafe {
             self.api
@@ -224,9 +287,10 @@ fn site_from_native(site: KreaSiteV6) -> Result<KreaActivationSiteV1> {
         ],
         "boundary",
     )?;
-    let maximum_tokens = u32::try_from(MAX_KREA_ACTIVATION_ELEMENTS / u64::from(site.width.max(1)))
-        .unwrap_or(u32::MAX)
-        .max(1);
+    // The native side reports no row count for a token family: a range is
+    // checked against the live domain when the request runs. The bound named
+    // here is the width of the `u32` token index.
+    let maximum_tokens = u32::MAX;
     let token_domains = mask_values(
         site.domain_mask,
         &[
@@ -321,6 +385,7 @@ impl InstalledKreaActivation {
         let plan_digest = plan
             .digest_for(&topology)
             .map_err(logit_loom_diffusion::Error::from)?;
+        require_graph_capacity(&plan, &topology)?;
         let mut supplied = HashMap::new();
         for buffer in buffers {
             if supplied.insert(buffer.input, buffer.bytes).is_some() {
@@ -1056,10 +1121,15 @@ pub(crate) unsafe extern "C" fn krea_event_callback(
     if data.is_null() || values.is_null() || elements == 0 {
         return ffi::CALLBACK_ERROR;
     }
-    if u64::try_from(elements).unwrap_or(u64::MAX) > MAX_KREA_ACTIVATION_ELEMENTS {
+    // `slice::from_raw_parts` requires the byte length of the slice to fit
+    // `isize`; a longer length cannot describe a slice at all.
+    if elements > isize::MAX as usize / size_of::<f32>() {
         // SAFETY: `data` was validated non-null and names the callback state.
         let state = unsafe { &mut *data.cast::<KreaCallbackState>() };
-        state.error = Some("native Krea event exceeded the public element bound".to_owned());
+        state.error = Some(
+            "native Krea event length cannot form a slice (byte length exceeds isize::MAX)"
+                .to_owned(),
+        );
         return ffi::CALLBACK_ERROR;
     }
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -1185,18 +1255,23 @@ fn decode_f32(bytes: &[u8]) -> Result<Vec<f32>> {
             "Krea input bytes are not complete f32 elements".to_owned(),
         ));
     }
-    bytes
-        .as_chunks::<4>()
-        .0
-        .iter()
-        .map(|chunk| {
-            let value = f32::from_bits(u32::from_le_bytes(*chunk));
-            value
-                .is_finite()
-                .then_some(value)
-                .ok_or_else(|| Error::Invalid("Krea input contains non-finite f32".to_owned()))
-        })
-        .collect()
+    let mut values = Vec::new();
+    values
+        .try_reserve_exact(bytes.len() / 4)
+        .map_err(|_| Error::Allocation {
+            what: "Krea input values",
+            bytes: bytes.len() as u64,
+        })?;
+    for chunk in bytes.as_chunks::<4>().0 {
+        let value = f32::from_bits(u32::from_le_bytes(*chunk));
+        if !value.is_finite() {
+            return Err(Error::Invalid(
+                "Krea input contains non-finite f32".to_owned(),
+            ));
+        }
+        values.push(value);
+    }
+    Ok(values)
 }
 
 fn pointer_or_null<T>(values: &[T]) -> *const T {
@@ -1456,6 +1531,27 @@ mod tests {
         assert_eq!(reused.measurements.inputs[0].host_to_device_bytes, 8);
     }
 
+    /// INVARIANT: a plan whose own tensor estimate exceeds the upstream graph
+    /// capacity is refused at plan time by name, before any native call; a
+    /// small plan is not.
+    #[test]
+    fn plan_over_graph_capacity_is_refused_by_name() {
+        let installed = installed();
+        require_graph_capacity(&installed.plan, &installed.topology).unwrap();
+        let mut plan = installed.plan.clone();
+        plan.operations[0].tokens = KreaTokenSelectionV1::Ranges {
+            domain: KreaTokenDomainKindV1::Text,
+            ranges: (0..30_000_u32)
+                .map(|index| KreaTokenRangeV1 {
+                    start: index * 2,
+                    end: index * 2 + 1,
+                })
+                .collect(),
+        };
+        let error = require_graph_capacity(&plan, &installed.topology).unwrap_err();
+        assert!(error.to_string().contains("Krea graph capacity"));
+    }
+
     #[test]
     fn native_topology_rejects_zero_width_before_publication() {
         let mut native = KreaSiteV6 {
@@ -1469,7 +1565,10 @@ mod tests {
         };
         assert!(site_from_native(native).is_err());
         native.width = 2;
-        assert_eq!(site_from_native(native).unwrap().width, 2);
+        let site = site_from_native(native).unwrap();
+        assert_eq!(site.width, 2);
+        // The reported token bound is the `u32` index width, not a derived count.
+        assert_eq!(site.token_domains[0].maximum_tokens, u32::MAX);
     }
 
     #[test]
@@ -1478,7 +1577,7 @@ mod tests {
         let mut callback = installed.callback_state();
         let callback_pointer = (&raw mut callback).cast::<c_void>();
         let dangling = std::ptr::NonNull::<f32>::dangling().as_ptr();
-        let elements = usize::try_from(MAX_KREA_ACTIVATION_ELEMENTS).unwrap() + 1;
+        let elements = isize::MAX as usize / size_of::<f32>() + 1;
         // SAFETY: The excessive length is rejected before the deliberately
         // dangling value pointer can be used to form or read a slice.
         let status = unsafe {

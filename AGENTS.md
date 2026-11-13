@@ -60,16 +60,15 @@ Preserve these unless a design change is explicitly reviewed:
     as that where it is enforced; a number somebody picked is not a bound.
     Where memory is the real limit, allocation is fallible and the refusal is
     typed and named. The image prompt and negative prompt, and the image,
-    reference, `LoRA`, tensor, checkpoint, and resident-program sizes and
-    counts in the `diffusion` and `diffusion-sdcpp` crates and the matching
-    native patches, follow this rule. These chosen limits remain and are not
-    yet removed: the Krea activation limits (`MAX_KREA_*` and the
-    `krea-activation-v6` patch), the projected-component limits
-    (`MAX_PROJECTED_COMPONENT_*`), the executor constants
-    (`MAX_EXECUTION_BUFFERS`, `MAX_WHOLE_GENERATION_*`, the media-type length),
-    `MAX_STEP_OBSERVERS`, and the core text-generation constants. Allocation is
-    fallible only where the `CHANGELOG` lists it: some copies of memory the
-    caller or the native side already holds remain infallible.
+    reference, `LoRA`, tensor, checkpoint, resident-program, and Krea
+    activation sizes and counts in the `diffusion` and `diffusion-sdcpp`
+    crates and the matching native patches, and the executor, whole-generation,
+    and step-observer counts and lengths, follow this rule. The Krea graph
+    capacity is a named physical bound of the upstream graph. These chosen
+    limits remain and are not yet removed: the projected-component limits
+    (`MAX_PROJECTED_COMPONENT_*`) and the core text-generation constants.
+    Allocation is fallible only where the `CHANGELOG` lists it: some copies of
+    memory the caller or the native side already holds remain infallible.
 
 The foundational crates forbid unsafe Rust. Keep native unsafety inside the
 upstream binding unless there is no safe alternative; any proposed local

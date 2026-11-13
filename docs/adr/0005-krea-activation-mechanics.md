@@ -65,6 +65,27 @@ the resident owner. A newly loaded runtime begins at nonzero session epoch
 clears advance that epoch. Clearing an activation plan releases every imported
 input; release and final clear are idempotent.
 
+No count or size in the contract is a chosen number. Site, capture, input,
+operation, and vector-rank indices are `u16` and strictly increasing, token
+indices and row counts are `u32`, and the declared host and device byte bounds
+are the caller's own and are enforced rather than capped. A resident input is
+refused only when memory cannot hold it. The one physical bound the plan does
+not carry is the upstream Krea graph capacity: the native entry refuses a
+request whose tensors cannot fit, and each site visit is checked as the graph
+is built, because exceeding the graph aborts the process. The reported token
+bound of a family is the `u32` index width; the live row count is checked
+natively when the request runs. Element and byte overflow, the `u32` token
+index, canonical `u16` ordering, aggregate budgets, exact range row counts and
+the graph-capacity estimate (also computed by the adapter before any native
+call) are refused at plan time by named errors. Decided only at run time: a
+range end beyond the live domain and a donor row count that differs from an
+`All` selection (the request fails with the native-error status, and the log
+names the capture or operation and the site but not the reason), and the
+model's own graph tensors. The per-capture element and byte bounds of an `All`
+capture are not read natively; the plan's aggregate host and device budgets
+are what bound the real sizes at run time. A resident input that memory cannot
+hold is refused with a named allocation log.
+
 The logical pre-denoiser boundary is evidenced once per generation. The
 companion may reconstruct the corresponding operation inside its native graph
 execution; that implementation detail does not create additional public

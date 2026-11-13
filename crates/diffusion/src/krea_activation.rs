@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! Bounded, topology-bound Krea activation mechanics.
+//! Topology-bound Krea activation mechanics.
 
 use std::collections::{BTreeSet, HashMap};
 
@@ -9,24 +9,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::StepSelector;
 
-/// Maximum Krea activation sites reported by one loaded topology.
-pub const MAX_KREA_ACTIVATION_SITES: usize = 256;
-/// Maximum token-domain ranges in one selection.
-pub const MAX_KREA_TOKEN_RANGES: usize = 256;
-/// Maximum captures in one resident request.
-pub const MAX_KREA_ACTIVATION_CAPTURES: usize = 128;
-/// Maximum activation inputs retained by one resident session.
-pub const MAX_KREA_ACTIVATION_INPUTS: usize = 128;
-/// Maximum ordered Krea activation operations in one request.
-pub const MAX_KREA_ACTIVATION_OPERATIONS: usize = 256;
-/// Maximum vector rank accepted by one activation input.
-pub const MAX_KREA_VECTOR_RANK: u16 = 256;
-/// Maximum finite `f32` elements in one Krea activation value.
-pub const MAX_KREA_ACTIVATION_ELEMENTS: u64 = 16 * 1024 * 1024;
-/// Maximum bytes retained for one activation input or capture.
-pub const MAX_KREA_ACTIVATION_VALUE_BYTES: u64 = MAX_KREA_ACTIVATION_ELEMENTS * 4;
-/// Maximum aggregate applications retained in one receipt.
-pub const MAX_KREA_ACTIVATION_APPLICATIONS: u64 = 1_000_000;
+// This module chooses no size. A bound remains only where it is a property of
+// the format, and it is named where it is enforced: site, capture, input,
+// operation, and vector-rank indices are `u16` and strictly increasing, so a
+// collection longer than `u16::MAX + 1` entries cannot be canonical; token
+// indices, ranges, and row counts are `u32`. Declared host and device byte
+// budgets are the caller's own numbers and are enforced, not capped.
 
 /// Scalar representation at a Krea activation site.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -97,7 +85,11 @@ pub enum KreaTokenDomainKindV1 {
 pub struct KreaTokenDomainV1 {
     /// Logical token family.
     pub kind: KreaTokenDomainKindV1,
-    /// Inclusive maximum token count accepted by the loaded topology.
+    /// Inclusive maximum token index width accepted by the loaded topology.
+    ///
+    /// The native side does not report a row count for a family, so this is
+    /// the width of the `u32` token index (`u32::MAX`); the live row count is
+    /// enforced natively when the request runs.
     pub maximum_tokens: u32,
 }
 
@@ -155,10 +147,9 @@ impl ActivationMechanicsAbsentV1 {
     ///
     /// # Errors
     ///
-    /// Returns an error for an empty or unbounded profile identifier.
+    /// Returns an error for an empty or malformed profile identifier.
     pub fn digest(&self) -> Result<Digest, CoreError> {
         if self.profile.is_empty()
-            || self.profile.len() > 128
             || !self
                 .profile
                 .bytes()
@@ -166,7 +157,7 @@ impl ActivationMechanicsAbsentV1 {
         {
             return Err(CoreError::invalid(
                 "activation mechanics absence",
-                "profile must be a bounded lowercase identifier",
+                "profile must be a nonempty lowercase identifier",
             ));
         }
         Digest::of_serializable("activation-mechanics-absent-v1", self)
@@ -196,17 +187,13 @@ impl KreaActivationTopologyV1 {
     ///
     /// # Errors
     ///
-    /// Returns an error for empty, excessive, duplicate, or internally
-    /// inconsistent topology data.
+    /// Returns an error for empty, duplicate, or internally inconsistent
+    /// topology data.
     pub fn digest(&self) -> Result<Digest, CoreError> {
-        if self.conditioner_layers == 0
-            || self.transformer_blocks == 0
-            || self.sites.is_empty()
-            || self.sites.len() > MAX_KREA_ACTIVATION_SITES
-        {
+        if self.conditioner_layers == 0 || self.transformer_blocks == 0 || self.sites.is_empty() {
             return Err(CoreError::invalid(
                 "Krea activation topology",
-                "layer, block, or site count is outside the supported bound",
+                "layer, block, or site count is zero",
             ));
         }
         let mut prior = None;
@@ -214,7 +201,6 @@ impl KreaActivationTopologyV1 {
         for site in &self.sites {
             if prior.is_some_and(|prior| prior >= site.site)
                 || site.width == 0
-                || u64::from(site.width) > MAX_KREA_ACTIVATION_ELEMENTS
                 || site.boundaries.is_empty()
                 || site.token_domains.is_empty()
                 || site.branches.is_empty()
@@ -229,7 +215,7 @@ impl KreaActivationTopologyV1 {
             {
                 return Err(CoreError::invalid(
                     "Krea activation topology",
-                    "sites, domains, branches, and widths must be canonical and bounded",
+                    "sites (strictly increasing `u16` identifiers), domains, branches, and widths must be canonical",
                 ));
             }
             match site.kind {
@@ -310,7 +296,9 @@ impl KreaTokenSelectionV1 {
         }
     }
 
-    fn validate_for(&self, site: &KreaActivationSiteV1) -> Result<u32, CoreError> {
+    /// Returns the exact selected row count of a range selection, or `None`
+    /// for `All`, whose row count is only known when the request runs.
+    fn validate_for(&self, site: &KreaActivationSiteV1) -> Result<Option<u32>, CoreError> {
         let maximum = site
             .token_domains
             .iter()
@@ -323,10 +311,9 @@ impl KreaTokenSelectionV1 {
                 )
             })?;
         match self {
-            Self::All { .. } => Ok(maximum),
+            Self::All { .. } => Ok(None),
             Self::Ranges { ranges, .. } => {
                 if ranges.is_empty()
-                    || ranges.len() > MAX_KREA_TOKEN_RANGES
                     || ranges
                         .iter()
                         .any(|range| range.len().is_none() || range.end > maximum)
@@ -337,15 +324,21 @@ impl KreaTokenSelectionV1 {
                         "ranges must be nonempty, disjoint, increasing, and in range",
                     ));
                 }
-                ranges.iter().try_fold(0_u32, |total, range| {
-                    total
-                        .checked_add(range.len().ok_or_else(|| {
-                            CoreError::invalid("Krea token selection", "range is empty")
-                        })?)
-                        .ok_or_else(|| {
-                            CoreError::invalid("Krea token selection", "token count overflowed")
-                        })
-                })
+                ranges
+                    .iter()
+                    .try_fold(0_u32, |total, range| {
+                        total
+                            .checked_add(range.len().ok_or_else(|| {
+                                CoreError::invalid("Krea token selection", "range is empty")
+                            })?)
+                            .ok_or_else(|| {
+                                CoreError::invalid(
+                                    "Krea token selection",
+                                    "token count overflowed `u32`",
+                                )
+                            })
+                    })
+                    .map(Some)
             }
         }
     }
@@ -436,7 +429,7 @@ impl KreaActivationCaptureV1 {
         let site = topology.site(self.site).ok_or_else(|| {
             CoreError::invalid("Krea activation capture", "selected site is absent")
         })?;
-        let tokens = u64::from(self.tokens.validate_for(site)?);
+        let tokens = self.tokens.validate_for(site)?.map(u64::from);
         self.boundary.validate_for(site, step_count)?;
         if !site.branches.contains(&self.branch) {
             return Err(CoreError::invalid(
@@ -444,23 +437,31 @@ impl KreaActivationCaptureV1 {
                 "CFG branch is unavailable at the selected site",
             ));
         }
-        let required = tokens.checked_mul(u64::from(site.width)).ok_or_else(|| {
-            CoreError::invalid("Krea activation capture", "element count overflowed")
-        })?;
+        // The row count of an `All` selection is known only when the request
+        // runs, so its element and byte requirements are enforced natively
+        // against the declared bounds instead of here.
+        let required = tokens
+            .map(|tokens| {
+                tokens.checked_mul(u64::from(site.width)).ok_or_else(|| {
+                    CoreError::invalid("Krea activation capture", "element count overflowed")
+                })
+            })
+            .transpose()?;
         if self.maximum_elements == 0
-            || self.maximum_elements < required
-            || self.maximum_elements > MAX_KREA_ACTIVATION_ELEMENTS
-            || self.maximum_host_bytes > MAX_KREA_ACTIVATION_VALUE_BYTES
-            || self.maximum_device_bytes > MAX_KREA_ACTIVATION_VALUE_BYTES
+            || required.is_some_and(|required| self.maximum_elements < required)
         {
             return Err(CoreError::invalid(
                 "Krea activation capture",
-                "capture bounds are zero, excessive, or smaller than the selection",
+                "capture element bound is zero or smaller than the selection",
             ));
         }
-        let required_bytes = required.checked_mul(4).ok_or_else(|| {
-            CoreError::invalid("Krea activation capture", "byte count overflowed")
-        })?;
+        let required_bytes = required
+            .map(|required| {
+                required.checked_mul(4).ok_or_else(|| {
+                    CoreError::invalid("Krea activation capture", "byte count overflowed")
+                })
+            })
+            .transpose()?;
         match self.retention {
             KreaActivationCaptureRetentionV1::Digest
                 if self.maximum_host_bytes != 0 || self.maximum_device_bytes != 0 =>
@@ -479,7 +480,9 @@ impl KreaActivationCaptureV1 {
                 ))
             }
             KreaActivationCaptureRetentionV1::DeviceSnapshot
-                if self.maximum_host_bytes != 0 || self.maximum_device_bytes < required_bytes =>
+                if self.maximum_host_bytes != 0
+                    || required_bytes
+                        .is_some_and(|required| self.maximum_device_bytes < required) =>
             {
                 Err(CoreError::invalid(
                     "Krea activation capture",
@@ -616,7 +619,7 @@ impl KreaActivationInputV1 {
                 let selected = topology.site(site).ok_or_else(|| {
                     CoreError::invalid("Krea activation input", "vector site is absent")
                 })?;
-                if rank == 0 || rank > MAX_KREA_VECTOR_RANK || width != selected.width {
+                if rank == 0 || width != selected.width {
                     return Err(CoreError::invalid(
                         "Krea activation input",
                         "vector rank or width differs from the selected site",
@@ -629,10 +632,10 @@ impl KreaActivationInputV1 {
             .checked_mul(u64::from(width))
             .and_then(|elements| elements.checked_mul(4))
             .ok_or_else(|| CoreError::invalid("Krea activation input", "byte count overflowed"))?;
-        if expected == 0 || expected > MAX_KREA_ACTIVATION_VALUE_BYTES {
+        if expected == 0 {
             return Err(CoreError::invalid(
                 "Krea activation input",
-                "declared shape exceeds the input byte bound",
+                "declared shape holds no bytes",
             ));
         }
         self.validate_source_for(topology, captures, step_count, site_id, expected)
@@ -848,21 +851,21 @@ impl KreaActivationOperationV1 {
     ///
     /// # Errors
     ///
-    /// Returns an error for NaN, infinity, or an operation-specific range
-    /// violation. Zero is a valid exact no-op control.
+    /// Returns an error for NaN, infinity, or a fraction operator outside
+    /// `0.0..=1.0`, which is the definition of those operators rather than a
+    /// size. A vector strength is any finite number. Zero is a valid exact
+    /// no-op control.
     pub fn strength(&self) -> Result<f32, CoreError> {
         let strength = f32::from_bits(self.strength_bits);
         let valid = match self.operator {
             KreaActivationOperatorV1::ScaledVectorAdd { .. }
-            | KreaActivationOperatorV1::ScaledVectorSubtract { .. } => {
-                strength.is_finite() && (-64.0..=64.0).contains(&strength)
-            }
+            | KreaActivationOperatorV1::ScaledVectorSubtract { .. } => strength.is_finite(),
             _ => strength.is_finite() && (0.0..=1.0).contains(&strength),
         };
         if !valid {
             return Err(CoreError::invalid(
                 "Krea activation operation",
-                "strength is non-finite or outside its mechanical bound",
+                "strength is non-finite or outside the operator's fraction",
             ));
         }
         Ok(strength)
@@ -901,7 +904,7 @@ impl KreaActivationOperationV1 {
                     self.operator,
                     KreaActivationOperatorV1::DonorTransplant { .. }
                 ) || domain != self.tokens.domain()
-                    || tokens != selected_tokens
+                    || selected_tokens.is_some_and(|selected| tokens != selected)
                 {
                     return Err(CoreError::invalid(
                         "Krea activation operation",
@@ -990,18 +993,12 @@ impl KreaActivationPlanV1 {
     pub fn digest_for(&self, topology: &KreaActivationTopologyV1) -> Result<Digest, CoreError> {
         if self.topology != topology.digest()?
             || self.step_count == 0
-            || self.inputs.len() > MAX_KREA_ACTIVATION_INPUTS
-            || self.captures.len() > MAX_KREA_ACTIVATION_CAPTURES
-            || self.operations.len() > MAX_KREA_ACTIVATION_OPERATIONS
             || (self.captures.is_empty() && self.operations.is_empty())
             || self.maximum_applications == 0
-            || self.maximum_applications > MAX_KREA_ACTIVATION_APPLICATIONS
-            || self.maximum_host_bytes > MAX_KREA_ACTIVATION_VALUE_BYTES
-            || self.maximum_device_bytes > MAX_KREA_ACTIVATION_VALUE_BYTES
         {
             return Err(CoreError::invalid(
                 "Krea activation plan",
-                "topology, collection, transition, or resource bounds are invalid",
+                "topology, collection, transition, or application bounds are invalid",
             ));
         }
         let step_count = usize::try_from(self.step_count)
@@ -1016,7 +1013,7 @@ impl KreaActivationPlanV1 {
             {
                 return Err(CoreError::invalid(
                     "Krea activation plan",
-                    "captures must be uniquely and canonically ordered",
+                    "captures must be uniquely and canonically ordered (strictly increasing `u16` indices)",
                 ));
             }
             capture.validate_for(topology, step_count)?;
@@ -1041,7 +1038,7 @@ impl KreaActivationPlanV1 {
             {
                 return Err(CoreError::invalid(
                     "Krea activation plan",
-                    "inputs must be uniquely and canonically ordered",
+                    "inputs must be uniquely and canonically ordered (strictly increasing `u16` indices)",
                 ));
             }
             prior_input = Some(input.input);
@@ -1057,7 +1054,7 @@ impl KreaActivationPlanV1 {
             if prior_operation.is_some_and(|prior| prior >= operation.operation) {
                 return Err(CoreError::invalid(
                     "Krea activation plan",
-                    "operations must be uniquely and canonically ordered",
+                    "operations must be uniquely and canonically ordered (strictly increasing `u16` indices)",
                 ));
             }
             operation.validate_for(topology, step_count, &inputs, &captures)?;
@@ -1327,7 +1324,6 @@ impl KreaActivationMeasurementsV1 {
             };
             if measurement.input != input.input
                 || measurement.device.is_empty()
-                || measurement.device.len() > 256
                 || measurement.device.contains('\0')
                 || measurement.resident_bytes != bytes
                 || measurement.host_to_device_transfers != expected_transfers
@@ -1476,7 +1472,15 @@ fn decode_f32(bytes: &[u8]) -> Result<Vec<f32>, CoreError> {
             "bytes must contain complete nonempty f32 elements",
         ));
     }
-    let mut values = Vec::with_capacity(bytes.len() / 4);
+    // Memory is the real limit here: the decoded copy is as large as the
+    // caller's bytes, so a refusal is typed and named.
+    let mut values = Vec::new();
+    values.try_reserve_exact(bytes.len() / 4).map_err(|_| {
+        CoreError::invalid(
+            "Krea activation f32 bytes",
+            "allocation refused for the decoded copy of the input bytes",
+        )
+    })?;
     for chunk in bytes.as_chunks::<4>().0 {
         let value = f32::from_bits(u32::from_le_bytes(*chunk));
         if !value.is_finite() {
@@ -1718,6 +1722,74 @@ mod tests {
         empty.captures.clear();
         empty.operations.clear();
         assert!(empty.digest_for(&topology).is_err());
+    }
+
+    /// INVARIANT: no collection size, range count, byte budget, or vector
+    /// strength is capped by a chosen number; only exact selections are
+    /// checked against the declared element bound, and the row count of an
+    /// `All` selection is left to the native request.
+    #[test]
+    fn plan_has_no_chosen_count_or_size_limits() {
+        let mut topology = topology();
+        topology.sites[0].token_domains[0].maximum_tokens = u32::MAX;
+        let digest = topology.digest().unwrap();
+        let mut input = bank(&[1.0, 0.0], KreaVectorRepresentationV1::F32Rows);
+        input.topology = digest.clone();
+        let captures = (0..300_u16)
+            .map(|capture| KreaActivationCaptureV1 {
+                capture,
+                site: 0,
+                tokens: KreaTokenSelectionV1::All {
+                    domain: KreaTokenDomainKindV1::Text,
+                },
+                boundary: KreaActivationBoundaryV1::PreDenoiser,
+                branch: KreaCfgBranchV1::Conditional,
+                retention: KreaActivationCaptureRetentionV1::Digest,
+                maximum_elements: 1,
+                maximum_host_bytes: 0,
+                maximum_device_bytes: 0,
+            })
+            .collect();
+        let mut operations: Vec<_> = (0..300_u16)
+            .map(|index| {
+                let mut operation = operation(
+                    KreaActivationOperatorV1::ScaledVectorAdd {
+                        input: 0,
+                        vector: 0,
+                    },
+                    100.0,
+                );
+                operation.operation = index;
+                operation
+            })
+            .collect();
+        operations[0].tokens = KreaTokenSelectionV1::Ranges {
+            domain: KreaTokenDomainKindV1::Text,
+            ranges: (0..300_u32)
+                .map(|index| KreaTokenRangeV1 {
+                    start: index * 2,
+                    end: index * 2 + 1,
+                })
+                .collect(),
+        };
+        let plan = KreaActivationPlanV1 {
+            topology: digest,
+            step_count: 2,
+            inputs: vec![input],
+            captures,
+            operations,
+            maximum_host_bytes: 0,
+            maximum_device_bytes: 8,
+            maximum_applications: 2_000_000,
+        };
+        plan.digest_for(&topology).unwrap();
+
+        let mut short = plan;
+        short.captures[0].tokens = KreaTokenSelectionV1::Ranges {
+            domain: KreaTokenDomainKindV1::Text,
+            ranges: vec![KreaTokenRangeV1 { start: 0, end: 1 }],
+        };
+        assert!(short.digest_for(&topology).is_err());
     }
 
     #[test]

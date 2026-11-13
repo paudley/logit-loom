@@ -11,18 +11,11 @@ use serde::{Deserialize, Serialize};
 mod whole;
 
 pub use whole::{
-    ClassifiedWholeGenerationError, DurabilityReceipt, MAX_WHOLE_GENERATION_EVIDENCE,
-    MAX_WHOLE_GENERATION_EVIDENCE_BYTES, MAX_WHOLE_GENERATION_INPUT_BYTES,
-    MAX_WHOLE_GENERATION_OUTPUT_BYTES, PendingGeneration, ProviderOwnedGenerationPlan,
-    ProviderOwnedSampler, WholeGenerationBackend, WholeGenerationCommitReceipt,
-    WholeGenerationEvidence, WholeGenerationFailure, WholeGenerationOutput, WholeGenerationPlan,
-    WholeGenerationReceipt, WholeGenerationRequest,
+    ClassifiedWholeGenerationError, DurabilityReceipt, PendingGeneration,
+    ProviderOwnedGenerationPlan, ProviderOwnedSampler, WholeGenerationBackend,
+    WholeGenerationCommitReceipt, WholeGenerationEvidence, WholeGenerationFailure,
+    WholeGenerationOutput, WholeGenerationPlan, WholeGenerationReceipt, WholeGenerationRequest,
 };
-
-/// Maximum bytes in a buffer media-type label.
-pub const MAX_MEDIA_TYPE_BYTES: usize = 128;
-/// Maximum buffers presented to one local execution.
-pub const MAX_EXECUTION_BUFFERS: usize = 64;
 
 /// Mechanical state of one worker-local executor.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -102,13 +95,11 @@ impl BufferSpec {
                 "must be positive",
             ));
         }
-        if self.media_type.is_empty()
-            || self.media_type.len() > MAX_MEDIA_TYPE_BYTES
-            || self.media_type.contains('\0')
-        {
+        // A NUL cannot be carried into a C string; no length is chosen.
+        if self.media_type.is_empty() || self.media_type.contains('\0') {
             return Err(CoreError::invalid(
                 "executor buffer media type",
-                format!("must be non-empty, NUL-free, and at most {MAX_MEDIA_TYPE_BYTES} bytes"),
+                "must be non-empty and NUL-free",
             ));
         }
         Ok(())
