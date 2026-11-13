@@ -12,8 +12,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::{Error, InterventionFailure, Result, StepContext, TensorSpec};
 
-const MAX_STEP_OBSERVERS: usize = 32;
-
 /// One synchronous observer at an exact post-step committed-state boundary.
 pub trait StepObserver {
     /// Returns the caller-defined implementation identity.
@@ -88,12 +86,10 @@ impl ObserverSet {
                 CoreError::invalid("diffusion observer step bound", "must be positive").into(),
             );
         }
-        if !(1..=MAX_STEP_OBSERVERS).contains(&observers.len()) {
-            return Err(CoreError::invalid(
-                "diffusion observers",
-                format!("requires 1..={MAX_STEP_OBSERVERS} entries"),
-            )
-            .into());
+        if observers.is_empty() {
+            return Err(
+                CoreError::invalid("diffusion observers", "requires at least one entry").into(),
+            );
         }
         let receipts = observers
             .iter()

@@ -267,7 +267,7 @@ index fe0404a..99fdb78 100644
  #include <utility>
  #include <vector>
  
-@@ -604,6 +608,415 @@ namespace Krea2 {
+@@ -604,6 +608,467 @@ namespace Krea2 {
          }
      };
  
@@ -334,6 +334,10 @@ index fe0404a..99fdb78 100644
 +            }
 +
 +            std::unordered_map<uint32_t, ggml_tensor*> captures;
++            if (!graph_has_room(site, site_boundary)) {
++                request_->execution_failed = true;
++                return tensor;
++            }
 +            uint64_t snapshot_device_bytes = 0;
 +            for (auto& capture : request_->captures) {
 +                if (capture.site != site || capture.branch != branch_ ||
@@ -475,6 +479,54 @@ index fe0404a..99fdb78 100644
 +
 +        bool records_boundary(const KreaActivationBoundary& boundary) const {
 +            return boundary.kind == KREA_ACTIVATION_TRANSITION || transition_ == 0;
++        }
++
++        // The upstream graph holds KREA2_GRAPH_SIZE nodes and leaves, and
++        // ggml aborts the process when it is exceeded, which no caller can
++        // catch. Every node and leaf is a tensor of the compute context, so
++        // the graph cannot overflow while the context holds at most
++        // KREA2_GRAPH_SIZE tensors. This refuses, with a named error, any
++        // visit that could take the count past that (a conservative bound:
++        // tensors that never reach the graph are counted too). Tensors the
++        // model creates after the last visited site are not counted, so that
++        // tail is not covered.
++        bool graph_has_room(uint32_t site, KreaActivationBoundaryKind site_boundary) const {
++            uint64_t needed = 0;
++            for (const auto& capture : request_->captures) {
++                if (capture.site == site && capture.branch == branch_ &&
++                    boundary_active(capture.boundary, site_boundary)) {
++                    needed = krea_activation_saturating_add(
++                        needed, krea_activation_capture_tensors(capture));
++                }
++            }
++            for (const auto& operation : request_->operations) {
++                if (operation.site == site && operation.branch == branch_ &&
++                    boundary_active(operation.boundary, site_boundary)) {
++                    needed = krea_activation_saturating_add(
++                        needed, krea_activation_operation_tensors(operation));
++                }
++            }
++            if (needed == 0) {
++                return true;
++            }
++            uint64_t used = 0;
++            for (ggml_tensor* tensor = ggml_get_first_tensor(context_->ggml_ctx);
++                 tensor != nullptr;
++                 tensor = ggml_get_next_tensor(context_->ggml_ctx, tensor)) {
++                ++used;
++            }
++            const uint64_t capacity = static_cast<uint64_t>(KREA2_GRAPH_SIZE);
++            if (used <= capacity && needed <= capacity - used) {
++                return true;
++            }
++            LOG_ERROR("Krea graph capacity: site %u needs up to %llu more tensors but "
++                      "%llu of the upstream graph's %llu are in use "
++                      "(KREA2_GRAPH_SIZE nodes in the upstream graph)",
++                      static_cast<unsigned>(site),
++                      static_cast<unsigned long long>(needed),
++                      static_cast<unsigned long long>(used),
++                      static_cast<unsigned long long>(capacity));
++            return false;
 +        }
 +
 +        bool domain(const KreaActivationSelection& selection,
@@ -683,7 +735,7 @@ index fe0404a..99fdb78 100644
      class Krea2Model : public GGMLBlock {
      protected:
          Krea2Config config;
-@@ -632,7 +1045,8 @@ namespace Krea2 {
+@@ -632,7 +1097,8 @@ namespace Krea2 {
                               ggml_tensor* pe,
                               std::vector<ggml_tensor*> ref_latents = {},
                               bool zero_timestep_refs               = false,
@@ -693,7 +745,7 @@ index fe0404a..99fdb78 100644
              int64_t W = x->ne[0];
              int64_t H = x->ne[1];
              int64_t N = x->ne[3];
-@@ -671,8 +1085,81 @@ namespace Krea2 {
+@@ -671,8 +1137,81 @@ namespace Krea2 {
                  tvec_0          = tproj->forward(ctx, t_0);
              }
  
@@ -777,7 +829,7 @@ index fe0404a..99fdb78 100644
              int64_t txt_len = txt->ne[1];
  
              auto hidden_states = ggml_concat(ctx->ggml_ctx, txt, img, 1);
-@@ -697,6 +1184,28 @@ namespace Krea2 {
+@@ -697,6 +1236,28 @@ namespace Krea2 {
                  }
                  if (control != block_controls.end() &&
                      control->residual_scale == 0.f) {
@@ -806,7 +858,7 @@ index fe0404a..99fdb78 100644
                      sd::ggml_graph_cut::mark_graph_cut(hidden_states, "krea2.blocks." + std::to_string(i), "hidden_states");
                      continue;
                  }
-@@ -712,6 +1221,29 @@ namespace Krea2 {
+@@ -712,6 +1273,29 @@ namespace Krea2 {
                                                          residual,
                                                          control->residual_scale));
                  }
@@ -836,7 +888,7 @@ index fe0404a..99fdb78 100644
                  sd::ggml_graph_cut::mark_graph_cut(hidden_states, "krea2.blocks." + std::to_string(i), "hidden_states");
              }
  
-@@ -750,6 +1282,9 @@ namespace Krea2 {
+@@ -750,6 +1334,9 @@ namespace Krea2 {
          Krea2Config config;
          Krea2Model model;
          std::vector<float> pe_vec;
@@ -846,7 +898,7 @@ index fe0404a..99fdb78 100644
  
          Krea2Runner(ggml_backend_t backend,
                      const String2TensorStorage& tensor_storage_map      = {},
-@@ -769,6 +1304,193 @@ namespace Krea2 {
+@@ -769,6 +1356,210 @@ namespace Krea2 {
              return config.layers;
          }
  
@@ -860,6 +912,7 @@ index fe0404a..99fdb78 100644
 +            *topology = {};
 +            topology->conditioner_layers = static_cast<uint32_t>(config.text_layers);
 +            topology->transformer_blocks = static_cast<uint32_t>(config.layers);
++            topology->graph_capacity = static_cast<uint64_t>(KREA2_GRAPH_SIZE);
 +            constexpr uint32_t pre = 1u << (KREA_ACTIVATION_PRE_DENOISER - 1);
 +            constexpr uint32_t transition = 1u << (KREA_ACTIVATION_TRANSITION - 1);
 +            constexpr uint32_t text = 1u << (KREA_ACTIVATION_TEXT - 1);
@@ -916,11 +969,15 @@ index fe0404a..99fdb78 100644
 +            const KreaActivationResidentInputSpec& spec,
 +            KreaActivationResidentInputDescription* description) override {
 +            if (description == nullptr || spec.values == nullptr || spec.rows == 0 ||
-+                spec.elements == 0 || spec.elements > 16ull * 1024 * 1024 ||
-+                activation_inputs.size() >= 128 ||
++                spec.elements == 0 ||
 +                (spec.representation != 1 && spec.representation != 2 &&
-+                 spec.representation != 3) ||
-+                (spec.representation != 1 && spec.rows > 256)) {
++                 spec.representation != 3)) {
++                return false;
++            }
++            // The handle's slot is a uint32_t; this is the only bound on the
++            // number of resident inputs. Device memory is the real limit.
++            if (activation_inputs.size() > std::numeric_limits<uint32_t>::max()) {
++                LOG_ERROR("Krea resident input slot width (uint32_t) exhausted");
 +                return false;
 +            }
 +            KreaActivationTopology topology;
@@ -958,6 +1015,15 @@ index fe0404a..99fdb78 100644
 +                }
 +            }
 +
++            // The orthonormality check above is quadratic in the row count and
++            // has no cap; it terminates because the bank is finite.
++            // Memory is the real limit on a resident input: a refusal is named
++            // and leaves nothing resident.
++            const auto allocation_refused = [&]() {
++                LOG_ERROR("Logit Loom allocation refused: Krea resident input, %llu bytes",
++                          static_cast<unsigned long long>(spec.elements * sizeof(float)));
++                return false;
++            };
 +            auto resident = std::make_unique<KreaActivationResidentTensor>();
 +            ggml_init_params params;
 +            params.mem_size = ggml_tensor_overhead() * 2;
@@ -965,16 +1031,19 @@ index fe0404a..99fdb78 100644
 +            params.no_alloc = true;
 +            resident->context = ggml_init(params);
 +            if (resident->context == nullptr) {
-+                return false;
++                return allocation_refused();
 +            }
 +            resident->tensor = ggml_new_tensor_2d(resident->context,
 +                                                   GGML_TYPE_F32,
 +                                                   site->width,
 +                                                   spec.rows);
++            if (resident->tensor == nullptr) {
++                return allocation_refused();
++            }
 +            resident->buffer = ggml_backend_alloc_ctx_tensors(resident->context,
 +                                                               runtime_backend);
 +            if (resident->buffer == nullptr || resident->tensor->buffer == nullptr) {
-+                return false;
++                return allocation_refused();
 +            }
 +            ggml_backend_buffer_set_usage(resident->buffer,
 +                                          GGML_BACKEND_BUFFER_USAGE_COMPUTE);
@@ -1040,7 +1109,7 @@ index fe0404a..99fdb78 100644
          void get_param_tensors(std::map<std::string, ggml_tensor*>& tensors, const std::string& prefix) override {
              model.get_param_tensors(tensors, prefix);
          }
-@@ -778,7 +1500,11 @@ namespace Krea2 {
+@@ -778,7 +1569,11 @@ namespace Krea2 {
                                   const sd::Tensor<float>& context_tensor,
                                   const std::vector<sd::Tensor<float>>& ref_latents_tensor = {},
                                   const RefImageParams& ref_image_params                   = REF_IMAGE_PRESETS.at("krea2_ostris_edit"),
@@ -1053,7 +1122,7 @@ index fe0404a..99fdb78 100644
              ggml_cgraph* gf        = new_graph_custom(KREA2_GRAPH_SIZE);
              ggml_tensor* x         = make_input(x_tensor);
              ggml_tensor* timesteps = make_input(timesteps_tensor);
-@@ -805,7 +1531,21 @@ namespace Krea2 {
+@@ -805,7 +1600,21 @@ namespace Krea2 {
              auto pe     = ggml_new_tensor_4d(compute_ctx, GGML_TYPE_F32, 2, 2, config.axes_dim_sum / 2, pos_len);
              set_backend_tensor_data(pe, pe_vec.data());
  
@@ -1076,7 +1145,7 @@ index fe0404a..99fdb78 100644
              ggml_tensor* out = model.forward(&runner_ctx,
                                               x,
                                               timesteps,
-@@ -813,7 +1553,11 @@ namespace Krea2 {
+@@ -813,7 +1622,11 @@ namespace Krea2 {
                                               pe,
                                               ref_latents,
                                               ref_image_params.force_ref_timestep_zero,
@@ -1089,7 +1158,7 @@ index fe0404a..99fdb78 100644
              ggml_build_forward_expand(gf, out);
              return gf;
          }
-@@ -824,16 +1568,36 @@ namespace Krea2 {
+@@ -824,16 +1637,36 @@ namespace Krea2 {
                                    const sd::Tensor<float>& context,
                                    const std::vector<sd::Tensor<float>>& ref_latents = {},
                                    const RefImageParams& ref_image_params            = REF_IMAGE_PRESETS.at("krea2_ostris_edit"),
@@ -1129,7 +1198,7 @@ index fe0404a..99fdb78 100644
          }
  
          sd::Tensor<float> compute(int n_threads,
-@@ -851,7 +1615,78 @@ namespace Krea2 {
+@@ -851,7 +1684,78 @@ namespace Krea2 {
                             diffusion_params.ref_image_params,
                             extra != nullptr && extra->controls != nullptr
                                 ? *extra->controls
@@ -1213,13 +1282,14 @@ diff --git src/model/diffusion/model.hpp src/model/diffusion/model.hpp
 index 841b778..c899ec5 100644
 --- src/model/diffusion/model.hpp
 +++ src/model/diffusion/model.hpp
-@@ -1,9 +1,13 @@
+@@ -1,9 +1,14 @@
  #ifndef __SD_MODEL_DIFFUSION_MODEL_HPP__
  #define __SD_MODEL_DIFFUSION_MODEL_HPP__
  
 +#include <algorithm>
 +#include <cstddef>
 +#include <cstdint>
++#include <limits>
  #include <string>
  #include <utility>
  #include <variant>
@@ -1227,7 +1297,7 @@ index 841b778..c899ec5 100644
  
  #include "core/ggml_runner.h"
  #include "core/tensor_ggml.hpp"
-@@ -70,8 +74,165 @@ struct ModelBlockControl {
+@@ -70,8 +75,212 @@ struct ModelBlockControl {
      ModelBlockApplicationCounter* application = nullptr;
  };
  
@@ -1321,6 +1391,50 @@ index 841b778..c899ec5 100644
 +    uint64_t unchanged      = 0;
 +};
 +
++inline uint64_t krea_activation_saturating_add(uint64_t left, uint64_t right) {
++    return left > std::numeric_limits<uint64_t>::max() - right
++               ? std::numeric_limits<uint64_t>::max()
++               : left + right;
++}
++
++inline uint64_t krea_activation_saturating_mul(uint64_t left, uint64_t right) {
++    return right != 0 && left > std::numeric_limits<uint64_t>::max() / right
++               ? std::numeric_limits<uint64_t>::max()
++               : left * right;
++}
++
++// Upper bounds on the ggml tensors that one visit of a site adds to the compute
++// context, counted from the calls in KreaActivationGraph (select, transform,
++// splice, queue_event); each of those ggml calls creates exactly one tensor.
++// Every tensor is also at most one graph node, so this bounds the nodes too.
++// A selection costs a view and a continuation per range plus one concatenation
++// for every range after the first; a splice costs a view and a set per range.
++inline uint64_t krea_activation_selection_tensors(const KreaActivationSelection& selection) {
++    return selection.all ? 2
++                         : krea_activation_saturating_mul(3, selection.ranges.size());
++}
++
++inline uint64_t krea_activation_splice_tensors(const KreaActivationSelection& selection) {
++    return selection.all ? 2
++                         : krea_activation_saturating_mul(2, selection.ranges.size());
++}
++
++// A capture adds its selection and one continuation for its event.
++inline uint64_t krea_activation_capture_tensors(const KreaActivationCaptureControl& capture) {
++    return krea_activation_saturating_add(
++        krea_activation_selection_tensors(capture.selection), 1);
++}
++
++// An operation adds its selection, a transform of at most 7 tensors (one-sided
++// removal: matrix product, clamp, transpose, continuation, matrix product,
++// scale, subtraction), its splice, and two continuations for its events.
++inline uint64_t krea_activation_operation_tensors(const KreaActivationOperationControl& operation) {
++    return krea_activation_saturating_add(
++        krea_activation_saturating_add(
++            krea_activation_selection_tensors(operation.selection), 7 + 2),
++        krea_activation_splice_tensors(operation.selection));
++}
++
 +enum KreaActivationEventKind {
 +    KREA_ACTIVATION_CAPTURE_EVENT            = 1,
 +    KREA_ACTIVATION_APPLICATION_BEFORE_EVENT = 2,
@@ -1363,6 +1477,9 @@ index 841b778..c899ec5 100644
 +struct KreaActivationTopology {
 +    uint32_t conditioner_layers = 0;
 +    uint32_t transformer_blocks = 0;
++    // Tensors the model's compute graph can hold: a fixed capacity of the
++    // upstream graph, not a chosen limit.
++    uint64_t graph_capacity     = 0;
 +    std::vector<KreaActivationSiteTopology> sites;
 +};
 +
@@ -1393,7 +1510,7 @@ index 841b778..c899ec5 100644
  };
  
  struct FluxDiffusionExtra {
-@@ -228,6 +389,32 @@ public:
+@@ -228,6 +437,32 @@ public:
          return 0;
      }
  
@@ -1519,7 +1636,7 @@ index bc76900..dc2051b 100644
          return SD_LOOM_STATUS_OK;
      } catch (...) {
          return SD_LOOM_STATUS_NATIVE_ERROR;
-@@ -2842,6 +2849,651 @@ int32_t sd_loom_program_generate_image_v5(
+@@ -2842,6 +2849,677 @@ int32_t sd_loom_program_generate_image_v5(
      }
  }
  
@@ -1720,8 +1837,7 @@ index bc76900..dc2051b 100644
 +        return true;
 +    }
 +    if (source.selection != SD_LOOM_KREA_TOKEN_RANGES_V6 ||
-+        source.ranges == nullptr || source.range_count == 0 ||
-+        source.range_count > 256) {
++        source.ranges == nullptr || source.range_count == 0) {
 +        return false;
 +    }
 +    destination->ranges.reserve(source.range_count);
@@ -1903,13 +2019,11 @@ index bc76900..dc2051b 100644
 +        params->image.abi_version != SD_LOOM_MODEL_BLOCK_APPLICATION_ABI_VERSION ||
 +        params->image.image.abi_version != SD_LOOM_PROGRAM_ABI_VERSION ||
 +        params->image.image.sigma_count < 2 ||
-+        params->image.image.sigma_count > 4097 ||
-+        params->capture_count > 128 || params->operation_count > 256 ||
++        // The sigma count is passed to the native library as an int.
++        params->image.image.sigma_count >
++            static_cast<size_t>(std::numeric_limits<int>::max()) ||
 +        (params->capture_count == 0 && params->operation_count == 0) ||
-+        params->maximum_host_bytes > 64ull * 1024 * 1024 ||
-+        params->maximum_device_bytes > 64ull * 1024 * 1024 ||
 +        params->maximum_applications == 0 ||
-+        params->maximum_applications > 1000000 ||
 +        (params->capture_count > 0 && params->captures == nullptr) ||
 +        (params->operation_count > 0 && params->operations == nullptr) ||
 +        capture_capacity != params->capture_count ||
@@ -1924,10 +2038,16 @@ index bc76900..dc2051b 100644
 +    }
 +
 +    uint32_t step_count = static_cast<uint32_t>(params->image.image.sigma_count - 1);
-+    size_t transition_words = params->image.model_block_operator_count == 0
-+                                  ? 0
-+                                  : params->image.model_block_operator_count *
-+                                        ((static_cast<size_t>(step_count) + 63) / 64);
++    size_t transition_words_per_operator = (static_cast<size_t>(step_count) + 63) / 64;
++    if (params->image.model_block_operator_count >
++        std::numeric_limits<size_t>::max() / transition_words_per_operator) {
++        LOG_ERROR("Krea transition mask size overflows size_t: %llu operators of %llu words",
++                  static_cast<unsigned long long>(params->image.model_block_operator_count),
++                  static_cast<unsigned long long>(transition_words_per_operator));
++        return SD_LOOM_STATUS_INVALID_ARGUMENT;
++    }
++    size_t transition_words =
++        params->image.model_block_operator_count * transition_words_per_operator;
 +    if (transition_mask_capacity != transition_words ||
 +        (transition_words > 0 && transition_masks == nullptr)) {
 +        return SD_LOOM_STATUS_INVALID_ARGUMENT;
@@ -1959,9 +2079,6 @@ index bc76900..dc2051b 100644
 +                source.retention < SD_LOOM_KREA_CAPTURE_DIGEST_V6 ||
 +                source.retention > SD_LOOM_KREA_CAPTURE_DEVICE_SNAPSHOT_V6 ||
 +                source.maximum_elements == 0 ||
-+                source.maximum_elements > 16ull * 1024 * 1024 ||
-+                source.maximum_host_bytes > 64ull * 1024 * 1024 ||
-+                source.maximum_device_bytes > 64ull * 1024 * 1024 ||
 +                !sd_loom_krea_selection_v6(source.tokens,
 +                                           site->domain_mask,
 +                                           &capture.selection,
@@ -2005,10 +2122,11 @@ index bc76900..dc2051b 100644
 +                source.operation < SD_LOOM_KREA_DONOR_TRANSPLANT_V6 ||
 +                source.operation > SD_LOOM_KREA_ONE_SIDED_REMOVAL_V6 ||
 +                !std::isfinite(source.strength) ||
-+                ((source.operation == SD_LOOM_KREA_SCALED_VECTOR_ADD_V6 ||
-+                  source.operation == SD_LOOM_KREA_SCALED_VECTOR_SUBTRACT_V6)
-+                     ? source.strength < -64.f || source.strength > 64.f
-+                     : source.strength < 0.f || source.strength > 1.f) ||
++                // A vector strength is any finite number; the other operators
++                // take a fraction, which is their definition, not a size.
++                ((source.operation != SD_LOOM_KREA_SCALED_VECTOR_ADD_V6 &&
++                  source.operation != SD_LOOM_KREA_SCALED_VECTOR_SUBTRACT_V6) &&
++                 (source.strength < 0.f || source.strength > 1.f)) ||
 +                !sd_loom_krea_selection_v6(source.tokens,
 +                                           site->domain_mask,
 +                                           &operation.selection,
@@ -2087,6 +2205,31 @@ index bc76900..dc2051b 100644
 +            }
 +            request.operations.push_back(std::move(operation));
 +            prior_operation = source.operation_index;
++        }
++
++        // The upstream graph has a fixed capacity and ggml aborts the process
++        // when it is exceeded. Refuse a request whose own tensors cannot fit:
++        // five per conditioner layer plus two re-assemble the text context for
++        // every activation request, then each capture and operation adds the
++        // upper bound counted in model.hpp (all branches summed, though one
++        // graph holds one branch). The model's own tensors are not known here;
++        // they are checked against the same capacity as the graph is built.
++        uint64_t graph_tensors = krea_activation_saturating_add(
++            krea_activation_saturating_mul(5, topology.conditioner_layers), 2);
++        for (const auto& capture : request.captures) {
++            graph_tensors = krea_activation_saturating_add(
++                graph_tensors, krea_activation_capture_tensors(capture));
++        }
++        for (const auto& operation : request.operations) {
++            graph_tensors = krea_activation_saturating_add(
++                graph_tensors, krea_activation_operation_tensors(operation));
++        }
++        if (graph_tensors > topology.graph_capacity) {
++            LOG_ERROR("Krea graph capacity: the request needs up to %llu tensors but the "
++                      "upstream graph holds %llu (KREA2_GRAPH_SIZE nodes)",
++                      static_cast<unsigned long long>(graph_tensors),
++                      static_cast<unsigned long long>(topology.graph_capacity));
++            return SD_LOOM_STATUS_INVALID_ARGUMENT;
 +        }
 +
 +        sd_loom_krea_callback_state_v6_t callback_state{

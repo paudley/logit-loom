@@ -84,18 +84,14 @@ include breaking API changes.
     status; the imported value copies and the arena reservation already fail
     inside the existing handlers, which log the exception by function. The C
     ABI header and every status code are unchanged.
-  - Not changed in this release, each because it belongs to a separate feature
-    family or crate that this change did not touch: `MAX_EXECUTION_BUFFERS`,
-    `MAX_WHOLE_GENERATION_*` and `MAX_MEDIA_TYPE_BYTES` in the executor crate,
-    and `MAX_STEP_OBSERVERS`. Reservations sized by a schedule or value the
+  - Not changed in this change: reservations sized by a schedule or value the
     caller already holds (for example the per-step vectors and the checkpoint
     state copies) remain infallible. The model-block overlap check is
     quadratic in operators and linear in steps and has no cap; it terminates
-    because step lists are finite. The Krea activation limits (capture, operation,
-    input, token-range and byte limits, `MAX_KREA_*`), the projected-component
-    limits (`MAX_PROJECTED_COMPONENT_*`), and the text-generation limits in
-    the core crate remain, with their native counterparts in the Krea
-    activation patch (including its 4097-sigma check).
+    because step lists are finite. The Krea activation, executor, and
+    step-observer limits are removed by the entry below; the
+    projected-component limits (`MAX_PROJECTED_COMPONENT_*`) and the
+    text-generation limits in the core crate remain.
 
 - The chosen limits on resident image programs are removed:
   `MAX_IMAGE_PROGRAM_STAGES`, `MAX_IMAGE_PROGRAM_VALUES`,
@@ -114,6 +110,118 @@ include breaking API changes.
   infallible. Until the native companion is
   rebuilt, it keeps its own checks and a native refusal is what a caller sees
   for sizes it rejects.
+
+- The chosen limits of the Krea activation feature, the executor crate, and
+  the step observers are removed, in the native `krea-activation-v6` patch
+  and its embedded copy, in the Rust contracts that mirrored them, and in the
+  executor and observer code. The native companion must be rebuilt. The same
+  rule applies per number. Per number:
+  - Chosen, removed (native): 16 Mi elements in one resident input; 256 rows
+    in a vector bank (the orthonormality check is quadratic in the rows and
+    has no cap; it terminates because the bank is finite); 256 token ranges
+    in one selection; 128 captures and 256 operations in one request; 64 MiB
+    of host bytes and of device bytes in the request aggregate and in each
+    capture; 16 Mi elements in each capture; 1,000,000 applications; and the
+    plus or minus 64 bound on a scaled-vector strength (finite is kept, and
+    so is the `0..1` fraction of the other operators, which is their
+    definition rather than a size). The declared host and device budgets
+    stay as the caller's own numbers and are enforced.
+  - Format property, kept and named: the resident input slot is a `uint32_t`
+    (the 128-input limit became a refusal beyond `UINT32_MAX`, logged by
+    name); the sigma count is an `int` (the 4097-sigma check became
+    `INT_MAX`); a transition-mask size that overflows `size_t` is now refused
+    with a logged name, because the removed caps had been masking that
+    unchecked multiplication.
+  - Allocation: a resident input that device memory cannot hold is refused
+    with `Logit Loom allocation refused: Krea resident input, N bytes` and the
+    existing invalid-argument status, leaving nothing resident. The Rust side
+    allocates the native topology sites, the capture and application result
+    arrays, and the decoded input values fallibly and returns
+    `Error::Allocation`.
+  - Graph capacity, a new named physical bound: the upstream Krea graph holds
+    a fixed `KREA2_GRAPH_SIZE` (65536) nodes and leaves and ggml aborts the
+    process when it is exceeded. Removing the caps exposed that, so the entry
+    refuses a request whose own tensors (counted from the ggml calls the
+    patch makes, with overflow-checked arithmetic) cannot fit, and every site
+    visit refuses to build more tensors than the graph has room for, each with
+    a logged `Krea graph capacity: ...` message. The Rust adapter computes the
+    same count from the plan and refuses before any native call
+    (`Krea graph capacity: ...`). Not verified: the counts are
+    read from the patch and ggml sources and were not measured against a
+    running model; they are upper bounds that also count tensors that never
+    reach the graph, so a request can be refused that would have fitted; the
+    model's own tensor count is measured as the graph is built, not
+    estimated; and the separate `MAX_GRAPH_SIZE` tensor pool of the compute
+    context is larger than the graph capacity and is not checked on its own.
+  - Chosen, removed (Rust): `MAX_KREA_ACTIVATION_SITES`,
+    `MAX_KREA_TOKEN_RANGES`, `MAX_KREA_ACTIVATION_CAPTURES`,
+    `MAX_KREA_ACTIVATION_INPUTS`, `MAX_KREA_ACTIVATION_OPERATIONS`,
+    `MAX_KREA_VECTOR_RANK`, `MAX_KREA_ACTIVATION_ELEMENTS`,
+    `MAX_KREA_ACTIVATION_VALUE_BYTES` and `MAX_KREA_ACTIVATION_APPLICATIONS`,
+    and the 128-byte limit on an absent-mechanics profile label. These
+    constants are no longer exported (a breaking change for code that names
+    them) and the validation error text changed. The `u16` indices (site,
+    capture, input, operation, vector rank) stay as the named format bound:
+    a longer collection cannot be strictly increasing. The element limit on a
+    finite event callback is replaced by the physical rule that a slice must
+    fit `isize::MAX` bytes.
+  - Behavior change, and where each refusal now happens. Before, plan
+    validation derived a row count for an `All` selection from the 16 Mi
+    element limit and refused every `All` capture whose declared element or
+    device-byte bound was below that derived count or above the limit, and
+    refused a range end above `16 Mi / width`. Now, at plan time (before any
+    native call) a plan is refused, by a named error, for: a range selection
+    whose declared element or device-byte bound is below its exact row count,
+    element and byte counts that overflow 64 bits, a token count that
+    overflows the `u32` token index, a collection that is not strictly
+    increasing in `u16` indices, aggregate retained bytes above the declared
+    plan budgets, and a plan whose graph tensor estimate exceeds the upstream
+    graph capacity (`Krea graph capacity: ...`, the same count as the native
+    entry; an `All` selection counts as a fixed number of tensors whatever its
+    row count). The native entry also refuses a graph estimate over the
+    capacity, with the named log `Krea graph capacity: ...`, and a range
+    selection above its capture's `maximum_elements`, which returns the
+    invalid-argument status without a log. What can only be decided when the request runs, because the
+    live row counts exist only then:
+    - A range end beyond the live token domain: the graph builder cannot
+      select it and the request fails with the native-error status. The
+      companion's error log names the capture or operation and the site
+      ("could not select its requested token range") but not the live length.
+    - A donor input whose row count differs from an `All` selection: the Rust
+      check is skipped because the count is unknown, and the transform fails
+      the request with the native-error status. The log names the operation
+      and site ("transform construction failed") but not the row mismatch.
+    - The per-capture `maximum_elements`, `maximum_host_bytes` and
+      `maximum_device_bytes` of an `All` capture are not read by the native
+      side at run time. They are checked in the Rust plan only against the
+      plan aggregates (their sum must not exceed the plan's host and device
+      budgets). What enforces the real sizes at run time is the plan's
+      aggregate `maximum_host_bytes` (checked per event before each copy) and
+      `maximum_device_bytes` (checked per site against resident inputs plus
+      snapshots); an `All` capture can therefore exceed its own per-capture
+      bounds without a refusal as long as the aggregates hold.
+    - The model's own tensors leaving room in the graph (see above). The
+      per-visit check counts only tensors created up to each visited site;
+      tensors the model creates after the last visited site are not covered.
+    Resident inputs the removed limits used to refuse (more than 128 inputs,
+    rank above 256, more than 16 Mi elements, budgets above 64 MiB) are now
+    refused only when device memory cannot hold them: the import fails with
+    `Logit Loom allocation refused: Krea resident input, N bytes` and the
+    invalid-argument status, leaving nothing resident; a count beyond
+    `UINT32_MAX` inputs is refused by its own named log.
+  - Executor and observers, chosen, removed: `MAX_EXECUTION_BUFFERS` (64,
+    unused), `MAX_MEDIA_TYPE_BYTES` (128; non-empty and NUL-free remain, the
+    latter because a C string cannot carry a NUL), `MAX_WHOLE_GENERATION_INPUT_BYTES`
+    and `MAX_WHOLE_GENERATION_OUTPUT_BYTES` (16 Mi; the request input must
+    still match its declared length and the output must fit the caller's
+    nonzero bound), `MAX_WHOLE_GENERATION_EVIDENCE` (16) and
+    `MAX_WHOLE_GENERATION_EVIDENCE_BYTES` (1 Mi), and the 32-observer limit
+    of a step-observer set (at least one remains required). The public
+    constants are no longer exported (a breaking change for code that names
+    them) and the error text changed.
+  - Not changed: `MAX_PROJECTED_COMPONENT_*` (host-side file transform whose
+    removal needs fallible allocation and a typed error in a crate that has
+    none; a separate change) and the core text-generation limits.
 
 - `MAX_PROMPT_BYTES` and the 4 MiB byte limit on the image prompt and the
   negative prompt are removed. A prompt is refused only when it is empty

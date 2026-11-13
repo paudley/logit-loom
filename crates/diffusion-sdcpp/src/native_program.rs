@@ -2391,9 +2391,16 @@ impl<R: ResidentArtifactPathResolver> SdcppResidentProgram<'_, R> {
             model_block_operator_count: prepared.model_block_operators.len(),
         };
         if let Some((activation, activation_callback_pointer)) = krea_activation {
-            let mut captures = vec![KreaCaptureResultV6::default(); activation.captures.len()];
-            let mut activation_applications =
-                vec![KreaApplicationResultV6::default(); activation.operations.len()];
+            let mut captures = try_filled(
+                KreaCaptureResultV6::default(),
+                activation.captures.len(),
+                "Krea capture results",
+            )?;
+            let mut activation_applications = try_filled(
+                KreaApplicationResultV6::default(),
+                activation.operations.len(),
+                "Krea application results",
+            )?;
             let params = ProgramImageParamsV6 {
                 abi_version: crate::KREA_ACTIVATION_ABI_VERSION,
                 image: params,
@@ -3287,6 +3294,20 @@ pub(crate) fn try_zeroed_bytes(bytes: u64, what: &'static str) -> Result<Vec<u8>
 /// as a typed error.
 pub(crate) fn try_zeroed_len(length: usize, what: &'static str) -> Result<Vec<u8>> {
     try_zeroed_bytes(u64::try_from(length).unwrap_or(u64::MAX), what)
+}
+
+/// Allocates `length` copies of `value`, reporting allocator refusal as a typed
+/// error.
+pub(crate) fn try_filled<T: Clone>(value: T, length: usize, what: &'static str) -> Result<Vec<T>> {
+    let mut buffer = Vec::new();
+    buffer
+        .try_reserve_exact(length)
+        .map_err(|_| Error::Allocation {
+            what,
+            bytes: (length as u64).saturating_mul(size_of::<T>() as u64),
+        })?;
+    buffer.resize(length, value);
+    Ok(buffer)
 }
 
 /// Copies a slice of any element type, reporting allocator refusal as a typed

@@ -5,16 +5,7 @@
 use logit_loom_core::{CoreError, Digest, GenerationPlan};
 use serde::{Deserialize, Serialize};
 
-use crate::{BufferSpec, CancellationProbe, MAX_MEDIA_TYPE_BYTES};
-
-/// Maximum exact input bytes owned by one whole-generation request.
-pub const MAX_WHOLE_GENERATION_INPUT_BYTES: usize = 16 * 1024 * 1024;
-/// Maximum output bytes accepted from one whole-generation backend.
-pub const MAX_WHOLE_GENERATION_OUTPUT_BYTES: usize = 16 * 1024 * 1024;
-/// Maximum opaque evidence objects attached to one terminal result.
-pub const MAX_WHOLE_GENERATION_EVIDENCE: usize = 16;
-/// Maximum bytes in one opaque backend evidence object.
-pub const MAX_WHOLE_GENERATION_EVIDENCE_BYTES: usize = 1024 * 1024;
+use crate::{BufferSpec, CancellationProbe};
 
 /// Failure category for a whole-request backend.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -202,10 +193,10 @@ impl WholeGenerationRequest {
         identity_domain: &'static str,
     ) -> Result<Self, CoreError> {
         input_specification.validate()?;
-        if input_bytes.is_empty() || input_bytes.len() > MAX_WHOLE_GENERATION_INPUT_BYTES {
+        if input_bytes.is_empty() {
             return Err(CoreError::invalid(
                 "whole generation input",
-                format!("must contain 1..={MAX_WHOLE_GENERATION_INPUT_BYTES} exact bytes"),
+                "must contain at least one byte",
             ));
         }
         let input_length = u64::try_from(input_bytes.len())
@@ -216,10 +207,10 @@ impl WholeGenerationRequest {
                 "length does not match the buffer specification",
             ));
         }
-        if maximum_output_bytes == 0 || maximum_output_bytes > MAX_WHOLE_GENERATION_OUTPUT_BYTES {
+        if maximum_output_bytes == 0 {
             return Err(CoreError::invalid(
                 "whole generation output bound",
-                format!("must be in 1..={MAX_WHOLE_GENERATION_OUTPUT_BYTES}"),
+                "must be positive",
             ));
         }
         let input_content = Digest::of_bytes("whole-generation-input-content-v1", &input_bytes);
@@ -302,10 +293,10 @@ impl WholeGenerationEvidence {
     pub fn new(media_type: impl Into<String>, bytes: Vec<u8>) -> Result<Self, CoreError> {
         let media_type = media_type.into();
         validate_media_type("whole generation evidence media type", &media_type)?;
-        if bytes.is_empty() || bytes.len() > MAX_WHOLE_GENERATION_EVIDENCE_BYTES {
+        if bytes.is_empty() {
             return Err(CoreError::invalid(
                 "whole generation evidence",
-                format!("must contain 1..={MAX_WHOLE_GENERATION_EVIDENCE_BYTES} bytes"),
+                "must contain at least one byte",
             ));
         }
         let identity = Digest::of_bytes("whole-generation-evidence-v1", &bytes);
@@ -365,12 +356,6 @@ impl WholeGenerationOutput {
             return Err(CoreError::invalid(
                 "whole generation output",
                 "is empty or exceeds the request output bound",
-            ));
-        }
-        if evidence.len() > MAX_WHOLE_GENERATION_EVIDENCE {
-            return Err(CoreError::invalid(
-                "whole generation evidence",
-                format!("exceeds {MAX_WHOLE_GENERATION_EVIDENCE} objects"),
             ));
         }
         let output_identity = Digest::of_bytes("whole-generation-output-v1", &bytes);
@@ -536,12 +521,9 @@ pub trait WholeGenerationBackend {
 }
 
 fn validate_media_type(field: &'static str, media_type: &str) -> Result<(), CoreError> {
-    if media_type.is_empty() || media_type.len() > MAX_MEDIA_TYPE_BYTES || media_type.contains('\0')
-    {
-        return Err(CoreError::invalid(
-            field,
-            format!("must be non-empty, NUL-free, and at most {MAX_MEDIA_TYPE_BYTES} bytes"),
-        ));
+    // A NUL cannot be carried into a C string; no length is chosen.
+    if media_type.is_empty() || media_type.contains('\0') {
+        return Err(CoreError::invalid(field, "must be non-empty and NUL-free"));
     }
     Ok(())
 }
@@ -678,7 +660,7 @@ mod tests {
     }
 
     #[test]
-    fn request_rejects_mismatched_and_unbounded_storage() {
+    fn request_rejects_mismatched_input_length() {
         let spec = BufferSpec::new(
             Digest::of_bytes("caller-input", b"x"),
             2,
@@ -687,17 +669,6 @@ mod tests {
         .unwrap();
         assert!(
             WholeGenerationRequest::new(spec, b"x".to_vec(), exact_plan(&request(b"x")), 1,)
-                .is_err()
-        );
-        let oversized = vec![0_u8; MAX_WHOLE_GENERATION_INPUT_BYTES + 1];
-        let oversized_spec = BufferSpec::new(
-            Digest::of_bytes("caller-input", &oversized),
-            u64::try_from(oversized.len()).unwrap(),
-            "application/octet-stream",
-        )
-        .unwrap();
-        assert!(
-            WholeGenerationRequest::new(oversized_spec, oversized, exact_plan(&request(b"x")), 1,)
                 .is_err()
         );
     }
