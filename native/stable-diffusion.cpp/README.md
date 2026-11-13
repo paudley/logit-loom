@@ -284,7 +284,8 @@ property of the format, and each is named where it is enforced:
   for, each with a logged `Krea graph capacity: ...` message. The count is an
   upper bound and counts tensors that never reach the graph, so it can refuse
   a request that would have fitted; the model's own tensors are measured as the
-  graph is built, not estimated;
+  graph is built, not estimated, and tensors created after the last visited
+  site are not covered;
 - the activation entry takes the sigma count as an `int`, and refuses a
   transition-mask size that overflows `size_t`;
 - a value's rank is at most the eight entries of the fixed `shape` array in the

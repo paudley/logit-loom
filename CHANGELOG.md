@@ -178,9 +178,10 @@ include breaking API changes.
     plan budgets, and a plan whose graph tensor estimate exceeds the upstream
     graph capacity (`Krea graph capacity: ...`, the same count as the native
     entry; an `All` selection counts as a fixed number of tensors whatever its
-    row count). The native entry also refuses, with a named log, a range
-    selection above its capture's `maximum_elements` and a graph estimate over
-    the capacity. What can only be decided when the request runs, because the
+    row count). The native entry also refuses a graph estimate over the
+    capacity, with the named log `Krea graph capacity: ...`, and a range
+    selection above its capture's `maximum_elements`, which returns the
+    invalid-argument status without a log. What can only be decided when the request runs, because the
     live row counts exist only then:
     - A range end beyond the live token domain: the graph builder cannot
       select it and the request fails with the native-error status. The
@@ -199,7 +200,9 @@ include breaking API changes.
       `maximum_device_bytes` (checked per site against resident inputs plus
       snapshots); an `All` capture can therefore exceed its own per-capture
       bounds without a refusal as long as the aggregates hold.
-    - The model's own tensors leaving room in the graph (see above).
+    - The model's own tensors leaving room in the graph (see above). The
+      per-visit check counts only tensors created up to each visited site;
+      tensors the model creates after the last visited site are not covered.
     Resident inputs the removed limits used to refuse (more than 128 inputs,
     rank above 256, more than 16 Mi elements, budgets above 64 MiB) are now
     refused only when device memory cannot hold them: the import fails with

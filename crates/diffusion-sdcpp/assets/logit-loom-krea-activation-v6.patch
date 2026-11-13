@@ -267,7 +267,7 @@ index fe0404a..99fdb78 100644
  #include <utility>
  #include <vector>
  
-@@ -604,6 +608,465 @@ namespace Krea2 {
+@@ -604,6 +608,467 @@ namespace Krea2 {
          }
      };
  
@@ -487,7 +487,9 @@ index fe0404a..99fdb78 100644
 +        // the graph cannot overflow while the context holds at most
 +        // KREA2_GRAPH_SIZE tensors. This refuses, with a named error, any
 +        // visit that could take the count past that (a conservative bound:
-+        // tensors that never reach the graph are counted too).
++        // tensors that never reach the graph are counted too). Tensors the
++        // model creates after the last visited site are not counted, so that
++        // tail is not covered.
 +        bool graph_has_room(uint32_t site, KreaActivationBoundaryKind site_boundary) const {
 +            uint64_t needed = 0;
 +            for (const auto& capture : request_->captures) {
@@ -733,7 +735,7 @@ index fe0404a..99fdb78 100644
      class Krea2Model : public GGMLBlock {
      protected:
          Krea2Config config;
-@@ -632,7 +1095,8 @@ namespace Krea2 {
+@@ -632,7 +1097,8 @@ namespace Krea2 {
                               ggml_tensor* pe,
                               std::vector<ggml_tensor*> ref_latents = {},
                               bool zero_timestep_refs               = false,
@@ -743,7 +745,7 @@ index fe0404a..99fdb78 100644
              int64_t W = x->ne[0];
              int64_t H = x->ne[1];
              int64_t N = x->ne[3];
-@@ -671,8 +1135,81 @@ namespace Krea2 {
+@@ -671,8 +1137,81 @@ namespace Krea2 {
                  tvec_0          = tproj->forward(ctx, t_0);
              }
  
@@ -827,7 +829,7 @@ index fe0404a..99fdb78 100644
              int64_t txt_len = txt->ne[1];
  
              auto hidden_states = ggml_concat(ctx->ggml_ctx, txt, img, 1);
-@@ -697,6 +1234,28 @@ namespace Krea2 {
+@@ -697,6 +1236,28 @@ namespace Krea2 {
                  }
                  if (control != block_controls.end() &&
                      control->residual_scale == 0.f) {
@@ -856,7 +858,7 @@ index fe0404a..99fdb78 100644
                      sd::ggml_graph_cut::mark_graph_cut(hidden_states, "krea2.blocks." + std::to_string(i), "hidden_states");
                      continue;
                  }
-@@ -712,6 +1271,29 @@ namespace Krea2 {
+@@ -712,6 +1273,29 @@ namespace Krea2 {
                                                          residual,
                                                          control->residual_scale));
                  }
@@ -886,7 +888,7 @@ index fe0404a..99fdb78 100644
                  sd::ggml_graph_cut::mark_graph_cut(hidden_states, "krea2.blocks." + std::to_string(i), "hidden_states");
              }
  
-@@ -750,6 +1332,9 @@ namespace Krea2 {
+@@ -750,6 +1334,9 @@ namespace Krea2 {
          Krea2Config config;
          Krea2Model model;
          std::vector<float> pe_vec;
@@ -896,7 +898,7 @@ index fe0404a..99fdb78 100644
  
          Krea2Runner(ggml_backend_t backend,
                      const String2TensorStorage& tensor_storage_map      = {},
-@@ -769,6 +1354,210 @@ namespace Krea2 {
+@@ -769,6 +1356,210 @@ namespace Krea2 {
              return config.layers;
          }
  
@@ -1107,7 +1109,7 @@ index fe0404a..99fdb78 100644
          void get_param_tensors(std::map<std::string, ggml_tensor*>& tensors, const std::string& prefix) override {
              model.get_param_tensors(tensors, prefix);
          }
-@@ -778,7 +1567,11 @@ namespace Krea2 {
+@@ -778,7 +1569,11 @@ namespace Krea2 {
                                   const sd::Tensor<float>& context_tensor,
                                   const std::vector<sd::Tensor<float>>& ref_latents_tensor = {},
                                   const RefImageParams& ref_image_params                   = REF_IMAGE_PRESETS.at("krea2_ostris_edit"),
@@ -1120,7 +1122,7 @@ index fe0404a..99fdb78 100644
              ggml_cgraph* gf        = new_graph_custom(KREA2_GRAPH_SIZE);
              ggml_tensor* x         = make_input(x_tensor);
              ggml_tensor* timesteps = make_input(timesteps_tensor);
-@@ -805,7 +1598,21 @@ namespace Krea2 {
+@@ -805,7 +1600,21 @@ namespace Krea2 {
              auto pe     = ggml_new_tensor_4d(compute_ctx, GGML_TYPE_F32, 2, 2, config.axes_dim_sum / 2, pos_len);
              set_backend_tensor_data(pe, pe_vec.data());
  
@@ -1143,7 +1145,7 @@ index fe0404a..99fdb78 100644
              ggml_tensor* out = model.forward(&runner_ctx,
                                               x,
                                               timesteps,
-@@ -813,7 +1620,11 @@ namespace Krea2 {
+@@ -813,7 +1622,11 @@ namespace Krea2 {
                                               pe,
                                               ref_latents,
                                               ref_image_params.force_ref_timestep_zero,
@@ -1156,7 +1158,7 @@ index fe0404a..99fdb78 100644
              ggml_build_forward_expand(gf, out);
              return gf;
          }
-@@ -824,16 +1635,36 @@ namespace Krea2 {
+@@ -824,16 +1637,36 @@ namespace Krea2 {
                                    const sd::Tensor<float>& context,
                                    const std::vector<sd::Tensor<float>>& ref_latents = {},
                                    const RefImageParams& ref_image_params            = REF_IMAGE_PRESETS.at("krea2_ostris_edit"),
@@ -1196,7 +1198,7 @@ index fe0404a..99fdb78 100644
          }
  
          sd::Tensor<float> compute(int n_threads,
-@@ -851,7 +1682,78 @@ namespace Krea2 {
+@@ -851,7 +1684,78 @@ namespace Krea2 {
                             diffusion_params.ref_image_params,
                             extra != nullptr && extra->controls != nullptr
                                 ? *extra->controls
