@@ -43,7 +43,13 @@ configuration switch. Before allocation or native execution it validates:
 - deterministic RGB8 join inputs and checkpoint conversion compatibility;
 - unique non-aliasing output allocations, one final program-receipt route, and
   non-routable mutable checkpoint state; and
-- liveness-derived releases under the public 2 GiB arena ceiling.
+- liveness-derived releases and a peak declared live size that must be
+  representable in 64 bits. There is no chosen ceiling on a declared value,
+  the live arena, or the number of values, inputs, and outputs: counts are
+  limited only by the u16 identifier width, and the host allocator refuses a
+  size it cannot satisfy with a typed allocation error. Until the native
+  companion is rebuilt, it keeps its own checks and a native refusal is what a
+  caller sees for sizes it rejects.
 
 `ImageProgramReceiptV1` binds the exact plan, backend, runtime epoch, completed
 stage prefix, produced value identities, output prefixes, terminal boundary,

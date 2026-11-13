@@ -54,6 +54,15 @@ pub enum Error {
     /// A contained step-program callback failed.
     #[error("diffusion step program failed: {0}")]
     Callback(String),
+    /// The host allocator refused a request sized by a native or caller-declared
+    /// length. No size is capped by this crate; the allocator is the authority.
+    #[error("the host allocator refused {bytes} bytes for {what}")]
+    Allocation {
+        /// What was being allocated.
+        what: &'static str,
+        /// Requested size in bytes.
+        bytes: u64,
+    },
     /// A caller-owned image sink rejected or failed to retain output bytes.
     #[error("diffusion image output failed: {0}")]
     Output(String),
@@ -73,6 +82,7 @@ impl logit_loom_executor::ClassifiedExecutionError for Error {
             | Self::Artifact(_)
             | Self::Diffusion(_)
             | Self::Io { .. }
+            | Self::Allocation { .. }
             | Self::Output(_) => FailureDisposition::Rejected,
         }
     }
