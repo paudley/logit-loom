@@ -44,10 +44,6 @@ use crate::{
 };
 
 const HASH_BUFFER_BYTES: usize = 1024 * 1024;
-const MAX_PATH_BYTES: usize = 4_096;
-const MAX_CONDITION_TENSORS: u32 = 256;
-const MAX_CONDITION_BYTES: u64 = 1024 * 1024 * 1024;
-const MAX_CONDITION_LABEL_BYTES: usize = 256;
 const INITIAL_SESSION_EPOCH: u64 = 1;
 
 /// Verifies and inspects one exact companion shared library without loading a
@@ -1467,7 +1463,8 @@ impl LocalExecutor for Sdcpp {
         if cancellation.is_cancelled() {
             return Err(Error::Cancelled);
         }
-        let mut destination = vec![0_u8; expected_rgb_bytes(plan)?];
+        let mut destination =
+            crate::native_program::try_zeroed_len(expected_rgb_bytes(plan)?, "RGB8 destination")?;
         let mut control = CancellationBoundary::new(cancellation);
         let generated =
             self.generate_controlled_into(plan, &mut control, destination.as_mut_slice())?;
@@ -1757,22 +1754,12 @@ impl<'a> CallbackState<'a> {
             .condition_tensors
             .checked_add(1)
             .ok_or_else(|| Error::Incompatible("condition tensor count overflowed".to_owned()))?;
-        if self.condition_tensors > MAX_CONDITION_TENSORS {
-            return Err(Error::Incompatible(format!(
-                "condition tensor count exceeds {MAX_CONDITION_TENSORS}"
-            )));
-        }
         let bytes_u64 = u64::try_from(raw.bytes)
             .map_err(|_| Error::Incompatible("condition bytes exceed u64".to_owned()))?;
         self.condition_bytes = self
             .condition_bytes
             .checked_add(bytes_u64)
             .ok_or_else(|| Error::Incompatible("condition byte count overflowed".to_owned()))?;
-        if self.condition_bytes > MAX_CONDITION_BYTES {
-            return Err(Error::Incompatible(format!(
-                "condition bytes exceed {MAX_CONDITION_BYTES}"
-            )));
-        }
         let label = unsafe { bounded_native_label(raw.label)? };
         let element_bytes = match raw.dtype {
             ffi::TENSOR_F32 | ffi::TENSOR_I32 => 4_usize,
@@ -1969,7 +1956,8 @@ impl<'a> CallbackState<'a> {
                     .map(|value| value.to_bits())
                     .collect::<Vec<_>>();
                 let native_digest = state_digest(native_state);
-                let mut working = native_state.to_vec();
+                let mut working =
+                    crate::native_program::try_copy_slice(native_state, "step state copy")?;
                 contained("step intervention", || {
                     program.intervene(&context, &mut working)
                 })?;
@@ -2132,22 +2120,25 @@ fn copy_native_tensor(pointer: *mut OwnedTensorV2) -> Result<(Vec<f32>, Vec<i64>
         ));
     }
     // SAFETY: Image ABI v2 owns exactly these readable arrays until the guard
-    // is dropped. Rank and element count were bounded before slice creation.
+    // is dropped. The rank was bounded before slice creation (at most eight
+    // dimensions, so this copy is of at most 64 bytes and cannot be a large
+    // allocation).
     let shape = unsafe { slice::from_raw_parts(tensor.shape, tensor.rank) }.to_vec();
     let expected = shape.iter().try_fold(1_usize, |elements, dimension| {
         usize::try_from(*dimension)
             .ok()
             .and_then(|dimension| elements.checked_mul(dimension))
     });
-    let within_public_bound = u64::try_from(tensor.element_count)
-        .is_ok_and(|elements| elements <= logit_loom_diffusion::MAX_TENSOR_ELEMENTS);
-    if expected != Some(tensor.element_count) || !within_public_bound {
+    if expected != Some(tensor.element_count) {
         return Err(Error::Incompatible(
             "native VAE tensor shape or element count is invalid".to_owned(),
         ));
     }
     // SAFETY: Same allocation contract as the shape slice.
-    let values = unsafe { slice::from_raw_parts(tensor.data, tensor.element_count) }.to_vec();
+    let values = crate::native_program::try_copy_slice(
+        unsafe { slice::from_raw_parts(tensor.data, tensor.element_count) },
+        "native VAE tensor copy",
+    )?;
     if values.iter().any(|value| !value.is_finite()) {
         return Err(Error::Incompatible(
             "native VAE tensor contains a non-finite value".to_owned(),
@@ -2331,10 +2322,12 @@ pub(crate) fn path_c_string(path: &Path) -> Result<CString> {
     let value = path
         .to_str()
         .ok_or_else(|| Error::Invalid("native paths must be valid UTF-8".to_owned()))?;
-    if value.is_empty() || value.len() > MAX_PATH_BYTES {
-        return Err(Error::Invalid(format!(
-            "native path must contain 1..={MAX_PATH_BYTES} bytes"
-        )));
+    // No path length is chosen here; the operating system refuses a path it
+    // cannot open.
+    if value.is_empty() {
+        return Err(Error::Invalid(
+            "native path must contain at least one byte".to_owned(),
+        ));
     }
     CString::new(value).map_err(|_| Error::Invalid("native path must not contain NUL".to_owned()))
 }
@@ -2384,9 +2377,9 @@ unsafe fn bounded_native_label(pointer: *const i8) -> Result<String> {
     // SAFETY: The exact ABI promises a callback-lifetime NUL-terminated label.
     let label = unsafe { CStr::from_ptr(pointer) };
     let bytes = label.to_bytes();
-    if bytes.is_empty() || bytes.len() > MAX_CONDITION_LABEL_BYTES {
+    if bytes.is_empty() {
         return Err(Error::Incompatible(
-            "condition tensor label exceeds its bound".to_owned(),
+            "condition tensor label is empty".to_owned(),
         ));
     }
     label
@@ -2508,7 +2501,10 @@ fn copy_native_image(
     }
     // SAFETY: The exact ABI owns `width * height * channel` readable bytes
     // until the native image guard is dropped.
-    let output = unsafe { slice::from_raw_parts(image.data, bytes) }.to_vec();
+    let output = crate::native_program::try_copy_slice(
+        unsafe { slice::from_raw_parts(image.data, bytes) },
+        "native image copy",
+    )?;
     Ok((output, image.width, image.height, image.channel))
 }
 

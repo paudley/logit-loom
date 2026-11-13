@@ -8,17 +8,16 @@ use logit_loom_core::{CoreError, Digest};
 use serde::{Deserialize, Serialize};
 
 /// Maximum tensor rank accepted at the public boundary.
+///
+/// This is a property of the native format, not a chosen size: the companion
+/// describes a tensor's shape in a fixed array of eight dimensions.
 pub const MAX_TENSOR_DIMENSIONS: usize = 8;
-/// Maximum contiguous `f32` elements copied transactionally.
-pub const MAX_TENSOR_ELEMENTS: u64 = 16 * 1024 * 1024;
 /// Maximum scheduler steps in one plan.
-pub const MAX_DIFFUSION_STEPS: usize = 4_096;
-/// Maximum identified model components in one plan.
-pub const MAX_COMPONENTS: usize = 32;
-/// Maximum UTF-8 bytes in one device label.
-pub const MAX_DEVICE_LABEL_BYTES: usize = 256;
-/// Maximum stages in one intervention pipeline.
-pub const MAX_INTERVENTION_STAGES: usize = 32;
+///
+/// This is a property of the native format, not a chosen size: the companion
+/// takes the sigma count as a signed 32-bit integer, so a schedule has at most
+/// `i32::MAX - 1` steps. Memory is the real limit on a schedule's length.
+pub const MAX_DIFFUSION_STEPS: usize = i32::MAX as usize - 1;
 
 /// Tensor scalar representation at the intervention boundary.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -95,19 +94,16 @@ impl TensorSpec {
             ));
         }
         let elements = self.elements()?;
-        if elements > MAX_TENSOR_ELEMENTS {
+        if elements.checked_mul(4).is_none() {
             return Err(CoreError::invalid(
                 "diffusion tensor shape",
-                format!("exceeds the {MAX_TENSOR_ELEMENTS}-element bound"),
+                "byte length of the f32 elements overflowed 64 bits",
             ));
         }
-        if self.device.is_empty()
-            || self.device.len() > MAX_DEVICE_LABEL_BYTES
-            || self.device.contains('\0')
-        {
+        if self.device.is_empty() || self.device.contains('\0') {
             return Err(CoreError::invalid(
                 "diffusion tensor device",
-                "must be a nonempty bounded label without NUL",
+                "must be a nonempty label without NUL",
             ));
         }
         Ok(())
@@ -265,15 +261,14 @@ impl DiffusionPlan {
     ///
     /// Returns the first invalid plan invariant.
     pub fn validate(&self) -> Result<(), CoreError> {
-        if self.components.is_empty() || self.components.len() > MAX_COMPONENTS {
+        if self.components.is_empty() {
             return Err(CoreError::invalid(
                 "diffusion components",
-                format!("requires 1..={MAX_COMPONENTS} entries"),
+                "requires at least one entry",
             ));
         }
         for name in self.components.keys() {
             if name.is_empty()
-                || name.len() > 64
                 || !name.bytes().all(|byte| {
                     byte.is_ascii_lowercase()
                         || byte.is_ascii_digit()
@@ -282,7 +277,7 @@ impl DiffusionPlan {
             {
                 return Err(CoreError::invalid(
                     "diffusion component name",
-                    "must be a bounded lowercase identifier",
+                    "must be a non-empty lowercase identifier",
                 ));
             }
         }
@@ -415,12 +410,12 @@ impl PipelineSpec {
     ///
     /// # Errors
     ///
-    /// Returns an error unless one to 32 compatible stages are present.
+    /// Returns an error unless at least one compatible stage is present.
     pub fn validate(&self) -> Result<(), CoreError> {
-        if !(1..=MAX_INTERVENTION_STAGES).contains(&self.stages.len()) {
+        if self.stages.is_empty() {
             return Err(CoreError::invalid(
                 "diffusion pipeline stages",
-                format!("requires 1..={MAX_INTERVENTION_STAGES} entries"),
+                "requires at least one entry",
             ));
         }
         let tensor = &self.stages[0].tensor;

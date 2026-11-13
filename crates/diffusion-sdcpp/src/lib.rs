@@ -20,10 +20,9 @@ pub use contract::{
     BoundaryControl, BoundaryReceipt, CompanionReceipt, ContinueControl,
     ControlledGenerationOutput, ControlledGenerationReceipt, DiffusionCheckpoint,
     GenerationMeasurements, GenerationOutput, GenerationReceipt, ImageExecutionBindings,
-    ImageOutputSink, ImageRequest, ImageRequestReceipt, LatentGeometry, MAX_BACKEND_LABEL_BYTES,
-    MAX_CHECKPOINT_ENVELOPE_BYTES, MAX_CHECKPOINT_RECEIPT_BYTES, MAX_CHECKPOINT_STATE_BYTES,
-    MAX_IMAGE_DIMENSION, NativeRuntimeReceipt, NoopProgram, Profile, ProfileArtifacts,
-    ProfileReceipt, SdcppOptions, StepProgram, StepReceipt,
+    ImageOutputSink, ImageRequest, ImageRequestReceipt, LatentGeometry, MAX_IMAGE_DIMENSION,
+    NativeRuntimeReceipt, NoopProgram, Profile, ProfileArtifacts, ProfileReceipt, SdcppOptions,
+    StepProgram, StepReceipt,
 };
 pub use error::{Error, Result};
 pub use execution::{
@@ -35,9 +34,8 @@ pub use execution::{
 pub use image::{
     AdvancedGenerationOutput, AdvancedGenerationReceipt, AdvancedImageRequest,
     AdvancedImageRequestReceipt, AdvancedProgramGenerationOutput, AdvancedProgramGenerationReceipt,
-    ImagePixels, LoraBinding, LoraBindingReceipt, MAX_REFERENCE_IMAGES, MAX_REQUEST_LORAS,
-    MAX_VAE_TENSOR_RANK, PixelReceipt, VaeImageOutput, VaeOperationReceipt, VaeTensor,
-    VaeTensorOutput,
+    ImagePixels, LoraBinding, LoraBindingReceipt, MAX_VAE_TENSOR_RANK, PixelReceipt,
+    VaeImageOutput, VaeOperationReceipt, VaeTensor, VaeTensorOutput,
 };
 pub use krea_activation::{KreaActivationExecutionV1, KreaActivationInputBuffer};
 pub use native_program::{

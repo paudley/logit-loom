@@ -17,10 +17,10 @@ use logit_loom_executor::{
 };
 use serde::{Deserialize, Serialize};
 
+use crate::native_program::try_zeroed_len;
 use crate::{
     AdvancedImageRequest, AdvancedProgramGenerationReceipt, DiffusionCheckpoint, Error,
-    ImageOutputSink, ImagePixels, ImageRequest, LoraBinding, MAX_CHECKPOINT_ENVELOPE_BYTES, Result,
-    Sdcpp, StepProgram,
+    ImageOutputSink, ImagePixels, ImageRequest, LoraBinding, Result, Sdcpp, StepProgram,
 };
 
 /// Worker-local signal that distinguishes checkpoint suspension from terminal
@@ -130,13 +130,12 @@ impl ChannelBiasControlV1 {
     ///
     /// # Errors
     ///
-    /// Returns an error unless the delta is finite and within a positive
-    /// declared maximum no greater than 16.
+    /// Returns an error unless the delta is finite and within a positive,
+    /// finite declared maximum (no magnitude is chosen here).
     pub fn new(axis: u32, channel: u64, delta: f32, maximum_absolute_delta: f32) -> Result<Self> {
         if !delta.is_finite()
             || !maximum_absolute_delta.is_finite()
             || maximum_absolute_delta <= 0.0
-            || maximum_absolute_delta > 16.0
             || delta.abs() > maximum_absolute_delta
         {
             return Err(Error::Invalid(
@@ -245,13 +244,12 @@ impl ModelBlockResidualScaleControlV1 {
     ///
     /// # Errors
     ///
-    /// Returns an error unless the scale is finite and within a positive
-    /// declared maximum no greater than 16.
+    /// Returns an error unless the scale is finite and within a positive,
+    /// finite declared maximum (no magnitude is chosen here).
     pub fn new(scale: f32, maximum_absolute_scale: f32) -> Result<Self> {
         if !scale.is_finite()
             || !maximum_absolute_scale.is_finite()
             || maximum_absolute_scale <= 0.0
-            || maximum_absolute_scale > 16.0
             || scale.abs() > maximum_absolute_scale
         {
             return Err(Error::Invalid(
@@ -485,7 +483,7 @@ impl<R: ArtifactPathResolver> ImagePlanExecutor<R> {
             bindings.backend.clone(),
         )?;
         let image_len = rgb_len(plan.primary.width, plan.primary.height)?;
-        let mut primary_bytes = vec![0_u8; image_len];
+        let mut primary_bytes = try_zeroed_len(image_len, "primary RGB8 image")?;
         let mut sink = PlanImageSink(&mut primary_bytes);
         let generated = match scheduler_restore.as_ref() {
             Some(checkpoint) => self.runtime.generate_advanced_program_from_checkpoint_to(
@@ -649,7 +647,7 @@ impl<R: ArtifactPathResolver> ImagePlanExecutor<R> {
         let request = lower_request(&plan.primary, inputs, &mut self.artifact_paths)?;
         let mut program = PlanProgram::new(plan, cancellation, restore, bindings.backend.clone())?;
         let image_len = rgb_len(plan.primary.width, plan.primary.height)?;
-        let mut primary_bytes = vec![0_u8; image_len];
+        let mut primary_bytes = try_zeroed_len(image_len, "primary RGB8 image")?;
         let mut sink = PlanImageSink(&mut primary_bytes);
         let generated =
             self.runtime
@@ -1410,13 +1408,6 @@ fn validate_bound_inputs(plan: &ImageExecutionPlan, inputs: &[InputBuffer<'_>]) 
         ));
     }
     for (binding, input) in plan.inputs.iter().zip(inputs) {
-        if binding.role == ImageBufferRole::Checkpoint
-            && input.bytes().len() > MAX_CHECKPOINT_ENVELOPE_BYTES
-        {
-            return Err(Error::Invalid(
-                "checkpoint input exceeds the adapter envelope bound".to_owned(),
-            ));
-        }
         if input.specification() != &binding.buffer {
             return Err(Error::Invalid(
                 "whole-image input specification differs from its declared binding".to_owned(),
@@ -1436,15 +1427,6 @@ fn validate_bound_outputs(plan: &ImageExecutionPlanV3, outputs: &[OutputBuffer<'
         ));
     }
     for (route, output) in plan.outputs.iter().zip(outputs) {
-        if matches!(route.source, ImageOutputSource::Checkpoint)
-            && output.specification().byte_length
-                > u64::try_from(MAX_CHECKPOINT_ENVELOPE_BYTES)
-                    .map_err(|_| Error::Invalid("checkpoint bound exceeds u64".to_owned()))?
-        {
-            return Err(Error::Invalid(
-                "checkpoint output exceeds the adapter envelope bound".to_owned(),
-            ));
-        }
         if output.specification() != &route.buffer || output.written() != 0 {
             return Err(Error::Invalid(
                 "whole-image output allocation differs or is already initialized".to_owned(),
@@ -1631,7 +1613,7 @@ fn execute_composites(
                 let base = resolve_image(plan, inputs, primary, &values, base)?;
                 let overlay = resolve_image(plan, inputs, primary, &values, overlay)?;
                 let mask = input_for_slot(&plan.primary, inputs, mask_slot)?.bytes();
-                let mut output = vec![0_u8; primary.len()];
+                let mut output = try_zeroed_len(primary.len(), "composite RGB8 image")?;
                 let mut receipt = mask_blend_rgb8(base, overlay, mask, &mut output)
                     .map_err(logit_loom_diffusion::Error::from)?;
                 receipt.stage = stage.stage;
@@ -2022,7 +2004,11 @@ mod tests {
 
     #[test]
     fn model_block_residual_control_rejects_uninstalled_or_unbounded_inputs() {
-        assert!(ModelBlockResidualScaleControlV1::new(17.0, 17.0).is_err());
+        // No magnitude is chosen: a large declared bound is accepted, a scale
+        // outside its declared bound or a non-finite value is not.
+        assert!(ModelBlockResidualScaleControlV1::new(17.0, 17.0).is_ok());
+        assert!(ModelBlockResidualScaleControlV1::new(2.0, 1.0).is_err());
+        assert!(ModelBlockResidualScaleControlV1::new(f32::NAN, 1.0).is_err());
         assert!(ModelBlockResidualScaleControlV1::from_control_bytes(&[0; 7]).is_err());
 
         let control = ModelBlockResidualScaleControlV1::new(0.5, 1.0).unwrap();

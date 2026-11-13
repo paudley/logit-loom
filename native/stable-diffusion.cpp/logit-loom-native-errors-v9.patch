@@ -256,16 +256,15 @@ index fe26137..2e2ce34 100644
          return SD_LOOM_STATUS_NATIVE_ERROR;
      }
  
-@@ -1280,17 +1302,20 @@ int32_t sd_loom_vae_encode_v2(sd_ctx_t* sd_ctx,
+@@ -1280,16 +1302,19 @@ int32_t sd_loom_vae_encode_v2(sd_ctx_t* sd_ctx,
          auto pixels = sd_image_to_tensor(sd_loom_native_image_v2(*image));
          auto latent = sd_ctx->sd->encode_first_stage(pixels);
-         if (latent.empty() || latent.shape().empty() || latent.shape().size() > 8) {
+         if (latent.empty() || latent.shape().empty()) {
 +            LOG_ERROR("Logit Loom native error branch in %s", __func__);
              return SD_LOOM_STATUS_NATIVE_ERROR;
          }
          auto latent_elements = latent.numel();
          if (latent_elements <= 0 ||
-             static_cast<uint64_t>(latent_elements) > 16 * 1024 * 1024 ||
              static_cast<uint64_t>(latent_elements) > SIZE_MAX / sizeof(float)) {
 +            LOG_ERROR("Logit Loom native error branch in %s", __func__);
              return SD_LOOM_STATUS_NATIVE_ERROR;
@@ -303,7 +302,7 @@ index fe26137..2e2ce34 100644
 @@ -1360,20 +1394,31 @@ int32_t sd_loom_vae_decode_v2(sd_ctx_t* sd_ctx,
          sd::Tensor<float> latent(std::move(shape), std::move(data));
          auto decoded = sd_ctx->sd->decode_first_stage(latent);
-         if (decoded.empty()) {
+         if (decoded.empty() || !sd_loom_decoded_extent_ok_v2(decoded)) {
 +            LOG_ERROR("Logit Loom native error branch in %s", __func__);
              return SD_LOOM_STATUS_NATIVE_ERROR;
          }
@@ -572,7 +571,7 @@ index fe26137..2e2ce34 100644
 @@ -2175,6 +2328,7 @@ static int32_t sd_loom_add_step_state_v3(sd_loom_program_step_state_v3_t* state,
          step->shape == nullptr ||
          step->rank == 0 ||
-         step->rank > 8) {
+         step->rank > sd_loom_value_rank_limit_v3) {
 +        LOG_ERROR("Logit Loom native error branch in %s", __func__);
          return SD_LOOM_STATUS_NATIVE_ERROR;
      }

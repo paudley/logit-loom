@@ -10,8 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     DiffusionSchedule, ImageBufferRole, ImageCleanupPolicy, ImageOperation, ImageOutputFormat,
-    MAX_DEVICE_LABEL_BYTES, MAX_IMAGE_DIMENSION, MAX_IMAGE_LORAS, MAX_IMAGE_OBSERVATIONS,
-    MAX_IMAGE_OPERATORS, ObservationKind, ObservationRequest, OperatorInvocation, ScaleSchedule,
+    MAX_IMAGE_DIMENSION, ObservationKind, ObservationRequest, OperatorInvocation, ScaleSchedule,
     SeedSelection, StepSelector, TensorDType, TensorSpec,
 };
 
@@ -148,6 +147,12 @@ impl ImageProgramValueSpecV1 {
                 ..
             } => {
                 validate_dimensions(*width, *height)?;
+                if !crate::image_extent_fits_native_int(*width, *height, 4) {
+                    return Err(CoreError::invalid(
+                        "image program dimensions",
+                        crate::IMAGE_EXTENT_PRODUCT_REFUSAL,
+                    ));
+                }
                 validate_variable_bytes(*maximum_bytes)
             }
             Self::Rgb8 { width, height } => image_bytes(*width, *height, 3).map(drop),
@@ -336,14 +341,10 @@ impl ImageProgramNativeStageV1 {
 
     fn validate_for(&self, values: &[ImageProgramValueV1]) -> Result<(), CoreError> {
         self.validate_scalars()?;
-        if self.inputs.len() > crate::MAX_IMAGE_BUFFERS
-            || self.loras.len() > MAX_IMAGE_LORAS
-            || self.operators.len() > MAX_IMAGE_OPERATORS
-            || self.observations.len() > MAX_IMAGE_OBSERVATIONS
-        {
+        if u32::try_from(self.loras.len()).is_err() {
             return Err(CoreError::invalid(
                 "image program native stage",
-                "a public collection bound was exceeded",
+                "LoRA entries exceed the native 32-bit count",
             ));
         }
         let mut roles = Vec::new();
@@ -1480,9 +1481,7 @@ pub enum ImageProgramValuePlacementV1 {
 
 impl ImageProgramValuePlacementV1 {
     fn validate(&self) -> Result<(), CoreError> {
-        let valid_device = |device: &str| {
-            !device.is_empty() && device.len() <= MAX_DEVICE_LABEL_BYTES && !device.contains('\0')
-        };
+        let valid_device = |device: &str| !device.is_empty() && !device.contains('\0');
         match self {
             Self::Host => Ok(()),
             Self::Device { device } if valid_device(device) => Ok(()),
@@ -1687,7 +1686,7 @@ fn validate_dimensions(width: u32, height: u32) -> Result<(), CoreError> {
     if width == 0 || height == 0 || width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION {
         return Err(CoreError::invalid(
             "image program dimensions",
-            format!("must be within 1..={MAX_IMAGE_DIMENSION}"),
+            format!("must be within 1..={MAX_IMAGE_DIMENSION} (the native signed 32-bit extent)"),
         ));
     }
     Ok(())
@@ -1695,6 +1694,12 @@ fn validate_dimensions(width: u32, height: u32) -> Result<(), CoreError> {
 
 fn image_bytes(width: u32, height: u32, channels: u64) -> Result<u64, CoreError> {
     validate_dimensions(width, height)?;
+    if !crate::image_extent_fits_native_int(width, height, channels) {
+        return Err(CoreError::invalid(
+            "image program dimensions",
+            crate::IMAGE_EXTENT_PRODUCT_REFUSAL,
+        ));
+    }
     u64::from(width)
         .checked_mul(u64::from(height))
         .and_then(|pixels| pixels.checked_mul(channels))

@@ -213,7 +213,7 @@ index d74b220..dea68ec 100644
  #include "core/ggml_extend.h"
  #include "core/util.h"
  #include "pipeline/diffusion_engine.h"
-@@ -1354,6 +1361,1259 @@ int32_t sd_loom_clear_session_v2(sd_ctx_t* sd_ctx) {
+@@ -1354,6 +1361,1305 @@ int32_t sd_loom_clear_session_v2(sd_ctx_t* sd_ctx) {
      }
  }
  
@@ -294,6 +294,12 @@ index d74b220..dea68ec 100644
 +    return sd_loom_value_mut_v3(const_cast<sd_loom_program_v3_t*>(program), handle);
 +}
 +
++// The shape of a value is described to callers in the fixed `int64_t shape[8]`
++// array of sd_loom_value_descriptor_v3_t, whose layout is the C ABI: a value has
++// at most that many dimensions (a format property of the descriptor).
++static constexpr size_t sd_loom_value_rank_limit_v3 =
++    sizeof(sd_loom_value_descriptor_v3_t::shape) / sizeof(int64_t);
++
 +static int32_t sd_loom_add_value_v3(sd_loom_program_v3_t* program,
 +                                    sd_loom_value_v3_t value,
 +                                    sd_loom_value_handle_v3_t* value_out) {
@@ -303,7 +309,8 @@ index d74b220..dea68ec 100644
 +    if (!sd_loom_program_live_v3(program) ||
 +        value_out == nullptr ||
 +        program->values.size() >= program->maximum_values ||
-+        program->values.size() >= UINT32_MAX) {
++        program->values.size() >= UINT32_MAX ||
++        value.shape.size() > sd_loom_value_rank_limit_v3) {
 +        return SD_LOOM_STATUS_INVALID_ARGUMENT;
 +    }
 +    uint64_t bytes = value.resident_bytes();
@@ -325,14 +332,17 @@ index d74b220..dea68ec 100644
 +    return SD_LOOM_STATUS_OK;
 +}
 +
++// A tensor view is bounded only by what its shape fixes: a rank no larger than
++// the descriptor's, positive extents, and a product of the extents, computed
++// without overflow, equal to the element count. No element count is chosen here;
++// memory is the real limit.
 +static bool sd_loom_valid_tensor_view_v3(const sd_loom_tensor_view_v2_t& tensor) {
 +    if (tensor.abi_version != SD_LOOM_IMAGE_ABI_VERSION ||
 +        tensor.data == nullptr ||
 +        tensor.shape == nullptr ||
 +        tensor.element_count == 0 ||
-+        tensor.element_count > 16 * 1024 * 1024 ||
 +        tensor.rank == 0 ||
-+        tensor.rank > 8) {
++        tensor.rank > sd_loom_value_rank_limit_v3) {
 +        return false;
 +    }
 +    size_t expected = 1;
@@ -372,6 +382,12 @@ index d74b220..dea68ec 100644
 +    };
 +}
 +
++// The arena is bounded only by what the caller declares for itself and by format
++// properties: a value slot is a `uint32_t` whose maximum is the empty handle, so
++// at most UINT32_MAX - 1 values exist, and byte totals are checked for 64-bit
++// overflow. No value count or byte total is chosen here; if the host cannot
++// reserve the declared slots, the native exception is logged by name and returned
++// as a native error.
 +int32_t sd_loom_program_begin_v3(sd_ctx_t* sd_ctx,
 +                                 size_t maximum_values,
 +                                 uint64_t maximum_bytes,
@@ -383,9 +399,8 @@ index d74b220..dea68ec 100644
 +        sd_ctx->sd == nullptr ||
 +        program_out == nullptr ||
 +        maximum_values == 0 ||
-+        maximum_values > 128 ||
++        maximum_values >= UINT32_MAX ||
 +        maximum_bytes == 0 ||
-+        maximum_bytes > 2ULL * 1024 * 1024 * 1024 ||
 +        sd_ctx->sd->loom_program_active ||
 +        sd_ctx->sd->loom_condition_callback != nullptr ||
 +        sd_ctx->sd->loom_step_callback != nullptr ||
@@ -416,11 +431,14 @@ index d74b220..dea68ec 100644
 +    }
 +}
 +
++// An imported value is bounded only by the caller's own buffer and the arena. A
++// copy the host cannot allocate fails inside the try block below and is returned
++// as a native error with the exception logged by name.
 +int32_t sd_loom_program_import_bytes_v3(sd_loom_program_v3_t* program,
 +                                        const uint8_t* bytes,
 +                                        size_t byte_count,
 +                                        sd_loom_value_handle_v3_t* value_out) {
-+    if (bytes == nullptr || byte_count == 0 || byte_count > 1024ULL * 1024 * 1024) {
++    if (bytes == nullptr || byte_count == 0) {
 +        return SD_LOOM_STATUS_INVALID_ARGUMENT;
 +    }
 +    try {
@@ -477,7 +495,9 @@ index d74b220..dea68ec 100644
 +                                       const char* path,
 +                                       bool is_high_noise,
 +                                       sd_loom_value_handle_v3_t* value_out) {
-+    if (!sd_loom_bounded_string_v2(path, 4096, false)) {
++    // A path is as long as the caller's string; the operating system refuses one it
++    // cannot open, so no path length is chosen here.
++    if (!sd_loom_bounded_string_v2(path, SIZE_MAX, false)) {
 +        return SD_LOOM_STATUS_INVALID_ARGUMENT;
 +    }
 +    try {
@@ -577,23 +597,38 @@ index d74b220..dea68ec 100644
 +    if (bytes_out == nullptr ||
 +        width == 0 ||
 +        height == 0 ||
-+        width > 4096 ||
-+        height > 4096 ||
-+        (channels != 3 && channels != 4)) {
++        width > static_cast<uint32_t>(std::numeric_limits<int>::max()) ||
++        height > static_cast<uint32_t>(std::numeric_limits<int>::max()) ||
++        (channels != 3 && channels != 4) ||
++        !sd_loom_extent_fits_int(width, height, channels)) {
 +        return false;
 +    }
++    // The decoded byte length width * height * channels is refused if it overflows
++    // 64 bits (arithmetic overflow). The PNG encoder, stb_image_write, computes
++    // its row stride, filtered length and encoded length as `int`, so a PNG whose
++    // upper bound exceeds INT_MAX cannot be encoded (a property of that encoder).
 +    uint64_t row_bytes = static_cast<uint64_t>(width) * channels;
++    if (row_bytes > UINT64_MAX / height) {
++        return false;
++    }
 +    uint64_t decoded_bytes = row_bytes * height;
 +    if (!png) {
 +        *bytes_out = decoded_bytes;
 +        return true;
++    }
++    if (row_bytes + 1 > UINT64_MAX / height) {
++        return false;
 +    }
 +    uint64_t filtered_bytes = (row_bytes + 1) * height;
 +    uint64_t blocks = (filtered_bytes + 32766) / 32767;
 +    if (blocks > (UINT64_MAX - filtered_bytes - 63) / 5) {
 +        return false;
 +    }
-+    *bytes_out = filtered_bytes + 63 + blocks * 5;
++    uint64_t encoded_bound = filtered_bytes + 63 + blocks * 5;
++    if (encoded_bound > static_cast<uint64_t>(std::numeric_limits<int>::max())) {
++        return false;
++    }
++    *bytes_out = encoded_bound;
 +    return true;
 +}
 +
@@ -627,7 +662,13 @@ index d74b220..dea68ec 100644
 +        return SD_LOOM_STATUS_NATIVE_ERROR;
 +    }
 +    try {
-+        std::vector<uint8_t> decoded(pixels * output_channels);
++        std::vector<uint8_t> decoded;
++        if (!sd_loom_try_allocate("decoded output image",
++                                  pixels * output_channels,
++                                  1,
++                                  [&] { decoded.resize(pixels * output_channels); })) {
++            return SD_LOOM_STATUS_NATIVE_ERROR;
++        }
 +        for (size_t pixel = 0; pixel < pixels; ++pixel) {
 +            decoded[pixel * output_channels] = image->data[pixel * image->channel];
 +            decoded[pixel * output_channels + 1] =
@@ -733,8 +774,6 @@ index d74b220..dea68ec 100644
 +        tensor->kind != SD_LOOM_VALUE_TENSOR_V3 ||
 +        width == 0 ||
 +        height == 0 ||
-+        width > 4096 ||
-+        height > 4096 ||
 +        !sd_loom_program_output_format_v3(output_format, &output_channels, &png) ||
 +        !sd_loom_output_upper_bound_v3(width,
 +                                       height,
@@ -834,6 +873,8 @@ index d74b220..dea68ec 100644
 +    return true;
 +}
 +
++// A text value is as long as the caller's byte value; its length is the text
++// encoder's admission to decide, not a chosen byte count.
 +static bool sd_loom_text_value_v3(const sd_loom_program_v3_t* program,
 +                                  sd_loom_value_handle_v3_t handle,
 +                                  bool allow_empty,
@@ -848,7 +889,6 @@ index d74b220..dea68ec 100644
 +    const auto* value = sd_loom_value_v3(program, handle);
 +    if (value == nullptr ||
 +        value->kind != SD_LOOM_VALUE_BYTES_V3 ||
-+        value->bytes.size() > 64 * 1024 ||
 +        (!allow_empty && value->bytes.empty()) ||
 +        !sd_loom_valid_utf8_v3(value->bytes) ||
 +        std::find(value->bytes.begin(), value->bytes.end(), uint8_t{0}) != value->bytes.end()) {
@@ -875,6 +915,10 @@ index d74b220..dea68ec 100644
 +               : nullptr;
 +}
 +
++// A schedule has no chosen point count: its steps must be strictly increasing and
++// below the step count, so the loop below stops at the first point that is not,
++// and a valid schedule has at most one point per step. A scale only has to be
++// finite; no magnitude is chosen here.
 +static bool sd_loom_valid_lora_schedule_v3(
 +    const sd_loom_program_v3_t* program,
 +    const sd_loom_lora_schedule_v3_t& schedule,
@@ -884,7 +928,6 @@ index d74b220..dea68ec 100644
 +        lora->kind != SD_LOOM_VALUE_LORA_V3 ||
 +        schedule.points == nullptr ||
 +        schedule.point_count == 0 ||
-+        schedule.point_count > 4096 ||
 +        schedule.points[0].step != 0) {
 +        return false;
 +    }
@@ -892,8 +935,6 @@ index d74b220..dea68ec 100644
 +        const auto& current = schedule.points[point];
 +        if (current.step >= step_count ||
 +            !std::isfinite(current.scale) ||
-+            current.scale < -64.f ||
-+            current.scale > 64.f ||
 +            (point > 0 && schedule.points[point - 1].step >= current.step)) {
 +            return false;
 +        }
@@ -901,11 +942,12 @@ index d74b220..dea68ec 100644
 +    return true;
 +}
 +
++// Snapshot steps are strictly increasing and below the step count, so the loop
++// below stops at the first step that is not; no snapshot count is chosen here.
 +static bool sd_loom_valid_snapshot_steps_v3(
 +    const sd_loom_program_image_params_v3_t* params,
 +    uint32_t step_count) {
-+    if (params->snapshot_count > 16 ||
-+        (params->snapshot_count > 0 && params->snapshot_after_steps == nullptr)) {
++    if (params->snapshot_count > 0 && params->snapshot_after_steps == nullptr) {
 +        return false;
 +    }
 +    for (size_t snapshot = 0; snapshot < params->snapshot_count; ++snapshot) {
@@ -986,18 +1028,25 @@ index d74b220..dea68ec 100644
 +        value_out == nullptr ||
 +        step->state == nullptr ||
 +        step->state_len == 0 ||
-+        step->state_len > 16 * 1024 * 1024 ||
 +        step->shape == nullptr ||
 +        step->rank == 0 ||
-+        step->rank > 8) {
++        step->rank > sd_loom_value_rank_limit_v3) {
 +        return SD_LOOM_STATUS_NATIVE_ERROR;
 +    }
 +    sd_loom_value_v3_t value;
 +    value.kind = checkpoint
 +                     ? SD_LOOM_VALUE_CHECKPOINT_STATE_V3
 +                     : SD_LOOM_VALUE_TENSOR_V3;
-+    value.tensor.assign(step->state, step->state + step->state_len);
-+    value.shape.assign(step->shape, step->shape + step->rank);
++    if (!sd_loom_try_allocate("step state value",
++                              step->state_len,
++                              sizeof(float),
++                              [&] {
++                                  value.tensor.assign(step->state,
++                                                      step->state + step->state_len);
++                                  value.shape.assign(step->shape, step->shape + step->rank);
++                              })) {
++        return SD_LOOM_STATUS_NATIVE_ERROR;
++    }
 +    return sd_loom_add_value_v3(state->program, std::move(value), value_out);
 +}
 +
@@ -1159,8 +1208,6 @@ index d74b220..dea68ec 100644
 +        params->abi_version != SD_LOOM_PROGRAM_ABI_VERSION ||
 +        params->width <= 0 ||
 +        params->height <= 0 ||
-+        params->width > 4096 ||
-+        params->height > 4096 ||
 +        !sd_loom_program_output_format_v3(params->output_format,
 +                                          &output_channels,
 +                                          &png) ||
@@ -1175,13 +1222,12 @@ index d74b220..dea68ec 100644
 +        params->seed < 0 ||
 +        !std::isfinite(params->cfg_scale) ||
 +        params->cfg_scale < 0.f ||
-+        params->cfg_scale > 64.f ||
 +        !std::isfinite(params->strength) ||
 +        params->strength <= 0.f ||
 +        params->strength > 1.f ||
 +        !sd_loom_valid_schedule_v2(params->sigmas, params->sigma_count) ||
-+        params->reference_image_count > 16 ||
-+        params->lora_count > 32 ||
++        params->reference_image_count > static_cast<size_t>(std::numeric_limits<int>::max()) ||
++        params->lora_count > std::numeric_limits<uint32_t>::max() ||
 +        (params->reference_image_count > 0 && params->reference_images == nullptr) ||
 +        (params->lora_count > 0 && params->loras == nullptr) ||
 +        params->snapshot_count != snapshot_capacity ||

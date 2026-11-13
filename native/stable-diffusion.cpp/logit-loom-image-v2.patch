@@ -118,7 +118,7 @@ index 265e7cc..d74b220 100644
  
      switch (params->profile) {
          case SD_LOOM_PROFILE_MINIT2I_B16:
-@@ -916,6 +920,440 @@ int32_t sd_loom_generate_image_v1(sd_ctx_t* sd_ctx,
+@@ -916,6 +920,510 @@ int32_t sd_loom_generate_image_v1(sd_ctx_t* sd_ctx,
      return status;
  }
  
@@ -130,6 +130,29 @@ index 265e7cc..d74b220 100644
 +           image.channels == 0;
 +}
 +
++// The decoded image of a VAE decode is converted by upstream with `int` products
++// of its extents, so it is refused, named, before the conversion when it would
++// overflow them (or has an unexpected rank).
++static bool sd_loom_decoded_extent_ok_v2(const sd::Tensor<float>& decoded) {
++    const auto& shape = decoded.shape();
++    if (shape.size() != 4 && shape.size() != 5) {
++        LOG_ERROR("Logit Loom decoded image has rank %zu; expected 4 or 5", shape.size());
++        return false;
++    }
++    int64_t channels = shape[shape.size() == 5 ? 3 : 2];
++    if (shape[0] <= 0 || shape[1] <= 0 || channels <= 0 ||
++        !sd_loom_extent_fits_int(static_cast<uint64_t>(shape[0]),
++                                    static_cast<uint64_t>(shape[1]),
++                                    static_cast<uint64_t>(channels))) {
++        return false;
++    }
++    return true;
++}
++
++// An image view is bounded only by format properties: a positive extent no wider
++// than `int` (upstream's tensor extents are `int`), the channel count of its
++// layout, and a byte length that is exactly width * height * channels without
++// arithmetic overflow. No image size is chosen here; memory is the real limit.
 +static bool sd_loom_valid_image_v2(const sd_loom_image_view_v2_t& image,
 +                                   bool mask,
 +                                   int expected_width,
@@ -137,11 +160,14 @@ index 265e7cc..d74b220 100644
 +    if (image.data == nullptr ||
 +        image.width == 0 ||
 +        image.height == 0 ||
-+        image.width > 4096 ||
-+        image.height > 4096 ||
++        image.width > static_cast<uint32_t>(std::numeric_limits<int>::max()) ||
++        image.height > static_cast<uint32_t>(std::numeric_limits<int>::max()) ||
 +        (mask ? image.channels != 1 : (image.channels != 3 && image.channels != 4)) ||
 +        (expected_width > 0 && image.width != static_cast<uint32_t>(expected_width)) ||
 +        (expected_height > 0 && image.height != static_cast<uint32_t>(expected_height))) {
++        return false;
++    }
++    if (!sd_loom_extent_fits_int(image.width, image.height, image.channels)) {
 +        return false;
 +    }
 +    size_t pixels = static_cast<size_t>(image.width) * static_cast<size_t>(image.height);
@@ -161,7 +187,9 @@ index 265e7cc..d74b220 100644
 +}
 +
 +static bool sd_loom_valid_schedule_v2(const float* sigmas, size_t sigma_count) {
-+    if (sigmas == nullptr || sigma_count < 2 || sigma_count > 4097) {
++    // The sigma count is passed to upstream as an `int` (format property).
++    if (sigmas == nullptr || sigma_count < 2 ||
++        sigma_count > static_cast<size_t>(std::numeric_limits<int>::max())) {
 +        return false;
 +    }
 +    for (size_t i = 0; i < sigma_count; ++i) {
@@ -187,6 +215,26 @@ index 265e7cc..d74b220 100644
 +        ++length;
 +    }
 +    return length <= maximum && (allow_empty || length > 0);
++}
++
++// A request-sized allocation the host cannot satisfy is refused with a named
++// native error; no size is capped by this library, the allocator is the
++// authority. `count` and `unit` are the element count and element size in bytes.
++template <typename Allocation>
++static bool sd_loom_try_allocate(const char* what,
++                                 uint64_t count,
++                                 uint64_t unit,
++                                 Allocation&& allocation) {
++    try {
++        allocation();
++        return true;
++    } catch (const std::bad_alloc&) {
++        LOG_ERROR("Logit Loom allocation refused: %s, %llu elements of %llu bytes",
++                  what,
++                  static_cast<unsigned long long>(count),
++                  static_cast<unsigned long long>(unit));
++        return false;
++    }
 +}
 +
 +// Upstream keeps one RuntimeLora entry per (LoRA, module) pair; a requested
@@ -246,6 +294,11 @@ index 265e7cc..d74b220 100644
 +    if (image_out != nullptr) {
 +        *image_out = nullptr;
 +    }
++    // Format properties only: width and height are positive `int`s (upstream's
++    // image parameters) whose product with the channel count (4 at most) fits
++    // `int`, because upstream computes pixel and byte counts as `int`; the
++    // reference count is an `int` there and the LoRA count a `uint32_t`. No image
++    // size, guidance scale, reference count or LoRA count is chosen here.
 +    if (sd_ctx == nullptr ||
 +        sd_ctx->sd == nullptr ||
 +        params == nullptr ||
@@ -257,18 +310,18 @@ index 265e7cc..d74b220 100644
 +        !sd_loom_bounded_string_v2(params->negative_prompt, SIZE_MAX, true) ||
 +        params->width <= 0 ||
 +        params->height <= 0 ||
-+        params->width > 4096 ||
-+        params->height > 4096 ||
++        !sd_loom_extent_fits_int(static_cast<uint64_t>(params->width),
++                                    static_cast<uint64_t>(params->height),
++                                    4) ||
 +        params->seed < 0 ||
 +        !std::isfinite(params->cfg_scale) ||
 +        params->cfg_scale < 0.f ||
-+        params->cfg_scale > 64.f ||
 +        !std::isfinite(params->strength) ||
 +        params->strength <= 0.f ||
 +        params->strength > 1.f ||
 +        !sd_loom_valid_schedule_v2(params->sigmas, params->sigma_count) ||
-+        params->reference_image_count > 16 ||
-+        params->lora_count > 32 ||
++        params->reference_image_count > static_cast<size_t>(std::numeric_limits<int>::max()) ||
++        params->lora_count > std::numeric_limits<uint32_t>::max() ||
 +        (params->reference_image_count > 0 && params->reference_images == nullptr) ||
 +        (params->lora_count > 0 && params->loras == nullptr) ||
 +        sd_ctx->sd->loom_condition_callback != nullptr ||
@@ -311,13 +364,15 @@ index 265e7cc..d74b220 100644
 +    }
 +
 +    std::vector<sd_lora_t> native_loras;
-+    native_loras.reserve(params->lora_count);
++    if (!sd_loom_try_allocate("LoRA entries", params->lora_count, sizeof(sd_lora_t), [&] {
++            native_loras.reserve(params->lora_count);
++        })) {
++        return SD_LOOM_STATUS_NATIVE_ERROR;
++    }
 +    for (size_t i = 0; i < params->lora_count; ++i) {
 +        const auto& lora = params->loras[i];
-+        if (!sd_loom_bounded_string_v2(lora.path, 4096, false) ||
-+            !std::isfinite(lora.multiplier) ||
-+            lora.multiplier < -64.f ||
-+            lora.multiplier > 64.f) {
++        if (!sd_loom_bounded_string_v2(lora.path, SIZE_MAX, false) ||
++            !std::isfinite(lora.multiplier)) {
 +            return SD_LOOM_STATUS_INVALID_ARGUMENT;
 +        }
 +        native_loras.push_back({lora.is_high_noise, lora.multiplier, lora.path});
@@ -345,7 +400,14 @@ index 265e7cc..d74b220 100644
 +        native_params.mask_image = sd_loom_native_image_v2(params->mask_image);
 +    }
 +    std::vector<sd_image_t> native_references;
-+    native_references.reserve(params->reference_image_count);
++    if (!sd_loom_try_allocate("reference images",
++                              params->reference_image_count,
++                              sizeof(sd_image_t),
++                              [&] {
++                                  native_references.reserve(params->reference_image_count);
++                              })) {
++        return SD_LOOM_STATUS_NATIVE_ERROR;
++    }
 +    for (size_t i = 0; i < params->reference_image_count; ++i) {
 +        native_references.push_back(sd_loom_native_image_v2(params->reference_images[i]));
 +    }
@@ -439,12 +501,11 @@ index 265e7cc..d74b220 100644
 +        }
 +        auto pixels = sd_image_to_tensor(sd_loom_native_image_v2(*image));
 +        auto latent = sd_ctx->sd->encode_first_stage(pixels);
-+        if (latent.empty() || latent.shape().empty() || latent.shape().size() > 8) {
++        if (latent.empty() || latent.shape().empty()) {
 +            return SD_LOOM_STATUS_NATIVE_ERROR;
 +        }
 +        auto latent_elements = latent.numel();
 +        if (latent_elements <= 0 ||
-+            static_cast<uint64_t>(latent_elements) > 16 * 1024 * 1024 ||
 +            static_cast<uint64_t>(latent_elements) > SIZE_MAX / sizeof(float)) {
 +            return SD_LOOM_STATUS_NATIVE_ERROR;
 +        }
@@ -485,7 +546,6 @@ index 265e7cc..d74b220 100644
 +        tensor->data == nullptr ||
 +        tensor->shape == nullptr ||
 +        tensor->element_count == 0 ||
-+        tensor->element_count > 16 * 1024 * 1024 ||
 +        tensor->rank == 0 ||
 +        tensor->rank > 8 ||
 +        sd_ctx->sd->first_stage_model == nullptr ||
@@ -505,8 +565,18 @@ index 265e7cc..d74b220 100644
 +    if (expected != tensor->element_count) {
 +        return SD_LOOM_STATUS_INVALID_ARGUMENT;
 +    }
-+    std::vector<int64_t> shape(tensor->shape, tensor->shape + tensor->rank);
-+    std::vector<float> data(tensor->data, tensor->data + tensor->element_count);
++    std::vector<int64_t> shape;
++    std::vector<float> data;
++    if (!sd_loom_try_allocate("VAE decode input tensor",
++                              tensor->element_count,
++                              sizeof(float),
++                              [&] {
++                                  shape.assign(tensor->shape, tensor->shape + tensor->rank);
++                                  data.assign(tensor->data,
++                                              tensor->data + tensor->element_count);
++                              })) {
++        return SD_LOOM_STATUS_NATIVE_ERROR;
++    }
 +    if (std::any_of(data.begin(), data.end(), [](float value) {
 +            return !std::isfinite(value);
 +        })) {
@@ -519,7 +589,7 @@ index 265e7cc..d74b220 100644
 +        }
 +        sd::Tensor<float> latent(std::move(shape), std::move(data));
 +        auto decoded = sd_ctx->sd->decode_first_stage(latent);
-+        if (decoded.empty()) {
++        if (decoded.empty() || !sd_loom_decoded_extent_ok_v2(decoded)) {
 +            return SD_LOOM_STATUS_NATIVE_ERROR;
 +        }
 +        auto* result = static_cast<sd_image_t*>(calloc(1, sizeof(sd_image_t)));

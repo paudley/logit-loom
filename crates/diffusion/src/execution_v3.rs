@@ -12,7 +12,7 @@ use crate::{
     ImageBufferLayout, ImageBufferRole, ImageCheckpointPlan, ImageCleanupDisposition,
     ImageCleanupPolicy, ImageCompositeOperation, ImageCompositeReceipt, ImageCompositeStage,
     ImageExecutionPlan, ImageOutputFormat, ImageOutputRoute, ImageOutputSource, ImageTerminal,
-    ImageValueSource, MAX_IMAGE_COMPOSITE_STAGES, MAX_IMAGE_GRAPH_SCRATCH_BYTES,
+    ImageValueSource,
 };
 
 /// Version-three whole-image execution contract.
@@ -52,13 +52,10 @@ impl ImageExecutionPlanV3 {
                 "must be a diffusion operation producing RGB8 bytes",
             ));
         }
-        if self.composites.len() > MAX_IMAGE_COMPOSITE_STAGES
-            || self.outputs.is_empty()
-            || self.outputs.len() > crate::MAX_IMAGE_BUFFERS
-        {
+        if self.outputs.is_empty() {
             return Err(CoreError::invalid(
                 "image execution v2 collections",
-                "composite or output route count is outside its public bound",
+                "at least one output route is required",
             ));
         }
         let canvas_bytes = u64::from(self.primary.width)
@@ -69,13 +66,10 @@ impl ImageExecutionPlanV3 {
             .ok()
             .and_then(|stages| stages.checked_add(1))
             .ok_or_else(|| CoreError::invalid("image graph scratch", "stage count overflowed"))?;
-        if canvas_bytes
-            .checked_mul(retained_images)
-            .is_none_or(|bytes| bytes > MAX_IMAGE_GRAPH_SCRATCH_BYTES)
-        {
+        if canvas_bytes.checked_mul(retained_images).is_none() {
             return Err(CoreError::invalid(
                 "image graph scratch",
-                format!("exceeds {MAX_IMAGE_GRAPH_SCRATCH_BYTES} bytes"),
+                "retained image bytes overflowed 64 bits",
             ));
         }
         self.validate_checkpoint()?;

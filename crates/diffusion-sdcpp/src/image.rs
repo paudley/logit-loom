@@ -12,11 +12,10 @@ use crate::{
     ProfileReceipt, Result,
 };
 
-/// Maximum reference images in one native request.
-pub const MAX_REFERENCE_IMAGES: usize = 16;
-/// Maximum fixed-scale `LoRA` entries in one native request.
-pub const MAX_REQUEST_LORAS: usize = 32;
 /// Maximum rank accepted for an explicit VAE tensor.
+///
+/// This is a property of the native format, not a chosen size: the companion
+/// describes a tensor's shape in a fixed array of eight dimensions.
 pub const MAX_VAE_TENSOR_RANK: usize = 8;
 
 /// Tightly packed borrowed image bytes.
@@ -117,6 +116,15 @@ impl<'a> ImagePixels<'a> {
                 "image pixel dimensions must be within 1..={}",
                 crate::MAX_IMAGE_DIMENSION
             )));
+        }
+        if !logit_loom_diffusion::image_extent_fits_native_int(
+            self.width,
+            self.height,
+            u64::from(self.channels),
+        ) {
+            return Err(Error::Invalid(
+                logit_loom_diffusion::IMAGE_EXTENT_PRODUCT_REFUSAL.to_owned(),
+            ));
         }
         let expected = usize::try_from(self.width)
             .ok()
@@ -410,9 +418,12 @@ impl<'a> AdvancedImageRequest<'a> {
                 "image strength must be finite and within 0..=1".to_owned(),
             ));
         }
-        if self.references.len() > MAX_REFERENCE_IMAGES || self.loras.len() > MAX_REQUEST_LORAS {
+        // No collection size is chosen here. The native request counts references
+        // in a signed 32-bit integer and `LoRA` entries in an unsigned one.
+        if i32::try_from(self.references.len()).is_err() || u32::try_from(self.loras.len()).is_err()
+        {
             return Err(Error::Invalid(
-                "image reference or LoRA collection exceeds the ABI bound".to_owned(),
+                "image reference or LoRA collection exceeds the native 32-bit count".to_owned(),
             ));
         }
         let dimensions_match = |pixels: ImagePixels<'_>| {
@@ -645,13 +656,10 @@ impl VaeTensor {
             || self.shape.len() > MAX_VAE_TENSOR_RANK
             || self.shape.iter().any(|dimension| *dimension <= 0)
             || self.values.is_empty()
-            || u64::try_from(self.values.len()).map_or(true, |elements| {
-                elements > logit_loom_diffusion::MAX_TENSOR_ELEMENTS
-            })
             || self.values.iter().any(|value| !value.is_finite())
         {
             return Err(Error::Invalid(
-                "VAE tensor must have bounded positive shape, element count, and finite values"
+                "VAE tensor must have a positive shape of at most eight dimensions, a matching element count, and finite values"
                     .to_owned(),
             ));
         }

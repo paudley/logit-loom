@@ -301,7 +301,7 @@ diff --git src/stable-diffusion.cpp src/stable-diffusion.cpp
 index dea68ec..9c9a6c1 100644
 --- src/stable-diffusion.cpp
 +++ src/stable-diffusion.cpp
-@@ -2482,6 +2482,150 @@ int32_t sd_loom_program_generate_image_v3(
+@@ -2482,6 +2482,152 @@ int32_t sd_loom_program_generate_image_v3(
      }
  }
  
@@ -362,13 +362,17 @@ index dea68ec..9c9a6c1 100644
 +            snapshot_values[snapshot] = sd_loom_empty_handle_v3();
 +        }
 +    }
++    // Format properties only: the sigma count is an `int` upstream and the step
++    // count a uint32_t. The operator count and a residual scale's magnitude are not
++    // capped here (a scale must be finite; block indices are bounded by the loaded
++    // model's block count).
 +    if (!sd_loom_program_live_v3(program) ||
 +        params == nullptr ||
 +        params->abi_version != SD_LOOM_MODEL_BLOCK_ABI_VERSION ||
 +        params->image.abi_version != SD_LOOM_PROGRAM_ABI_VERSION ||
 +        params->image.sigma_count < 2 ||
-+        params->image.sigma_count > 4097 ||
-+        params->model_block_operator_count > 64 ||
++        params->image.sigma_count >
++            static_cast<size_t>(std::numeric_limits<int>::max()) ||
 +        (params->model_block_operator_count > 0 &&
 +         params->model_block_operators == nullptr) ||
 +        !program->context->sd->loom_model_block_controls.empty()) {
@@ -392,8 +396,6 @@ index dea68ec..9c9a6c1 100644
 +                operator_params.site != SD_LOOM_MODEL_BLOCK_RESIDUAL_V4 ||
 +                operator_params.block >= static_cast<uint64_t>(model_block_count) ||
 +                !std::isfinite(operator_params.residual_scale) ||
-+                operator_params.residual_scale < -16.f ||
-+                operator_params.residual_scale > 16.f ||
 +                !sd_loom_valid_model_block_steps_v4(operator_params, step_count)) {
 +                return SD_LOOM_STATUS_INVALID_ARGUMENT;
 +            }

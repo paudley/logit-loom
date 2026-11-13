@@ -321,7 +321,7 @@ impl ChannelBias {
     /// Creates a channel-local additive stage.
     ///
     /// `maximum_absolute_delta` is part of the stage identity and must be
-    /// positive, finite, and at most `16.0`. The absolute delta must not exceed
+    /// positive and finite; no magnitude is chosen here. The absolute delta must not exceed
     /// that declared bound.
     ///
     /// # Errors
@@ -350,12 +350,11 @@ impl ChannelBias {
         if !delta.is_finite()
             || !maximum_absolute_delta.is_finite()
             || maximum_absolute_delta <= 0.0
-            || maximum_absolute_delta > 16.0
             || delta.abs() > maximum_absolute_delta
         {
             return Err(CoreError::invalid(
                 "channel bias delta",
-                "must be finite and within a positive declared bound no greater than 16",
+                "must be finite and within a positive, finite declared bound",
             )
             .into());
         }

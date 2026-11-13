@@ -94,11 +94,6 @@ pub(crate) const KREA_CAPTURE_EVENT_V6: i32 = 1;
 pub(crate) const KREA_APPLICATION_BEFORE_EVENT_V6: i32 = 2;
 pub(crate) const KREA_APPLICATION_AFTER_EVENT_V6: i32 = 3;
 
-const MAX_DEVICE_REPORT_BYTES: usize = 64 * 1024;
-const MAX_DEVICE_LINES: usize = 64;
-const MAX_DEVICE_LINE_BYTES: usize = 512;
-const MAX_NATIVE_IDENTITY_BYTES: usize = 256;
-
 #[repr(C)]
 pub(crate) struct ContextParams {
     pub abi_version: u32,
@@ -821,7 +816,7 @@ impl NativeApi {
         let upstream_commit =
             unsafe { load_symbol::<UpstreamCommit>(&library, b"sd_loom_upstream_commit\0")? };
         // SAFETY: The matching ABI promises a static NUL-terminated string.
-        let commit = unsafe { bounded_c_string(upstream_commit(), MAX_NATIVE_IDENTITY_BYTES)? };
+        let commit = unsafe { native_identity_string(upstream_commit())? };
         if commit != UPSTREAM_COMMIT {
             return Err(Error::Incompatible(format!(
                 "upstream commit is {commit:?}; expected {UPSTREAM_COMMIT}"
@@ -899,15 +894,24 @@ impl NativeApi {
     pub(crate) fn devices(&self) -> Result<Vec<String>> {
         // SAFETY: Null/zero is the documented size query.
         let required = unsafe { (self.functions.list_devices)(ptr::null_mut(), 0) };
-        if required == 0 || required > MAX_DEVICE_REPORT_BYTES {
-            return Err(Error::Incompatible(format!(
-                "native device report requires {required} bytes"
-            )));
+        if required == 0 {
+            return Err(Error::Incompatible(
+                "native device report is empty".to_owned(),
+            ));
         }
         let capacity = required.checked_add(1).ok_or_else(|| {
             Error::Incompatible("native device report size overflowed".to_owned())
         })?;
-        let mut bytes = vec![0_u8; capacity];
+        // The native report sizes this buffer, so the host allocator is the
+        // authority on how large it may be.
+        let mut bytes = Vec::new();
+        bytes
+            .try_reserve_exact(capacity)
+            .map_err(|_| Error::Allocation {
+                what: "native device report",
+                bytes: u64::try_from(capacity).unwrap_or(u64::MAX),
+            })?;
+        bytes.resize(capacity, 0);
         // SAFETY: The buffer has `required + 1` writable bytes.
         let reported = unsafe {
             (self.functions.list_devices)(bytes.as_mut_ptr().cast::<c_char>(), bytes.len())
@@ -1569,24 +1573,15 @@ fn parse_devices(report: &str) -> Result<Vec<String>> {
             "native runtime reports no devices".to_owned(),
         ));
     }
-    if devices.len() > MAX_DEVICE_LINES {
-        return Err(Error::Incompatible(format!(
-            "native device report exceeds {MAX_DEVICE_LINES} lines"
-        )));
-    }
     for device in &devices {
         let Some((name, description)) = device.split_once('\t') else {
             return Err(Error::Incompatible(
                 "native device report line has no tab separator".to_owned(),
             ));
         };
-        if name.is_empty()
-            || description.is_empty()
-            || device.len() > MAX_DEVICE_LINE_BYTES
-            || device.contains('\0')
-        {
+        if name.is_empty() || description.is_empty() || device.contains('\0') {
             return Err(Error::Incompatible(
-                "native device report line is empty, oversized, or contains NUL".to_owned(),
+                "native device report line is empty or contains NUL".to_owned(),
             ));
         }
     }
@@ -1604,19 +1599,19 @@ unsafe fn load_symbol<T: Copy>(library: &Library, symbol: &[u8]) -> Result<T> {
     Ok(*loaded)
 }
 
-unsafe fn bounded_c_string(pointer: *const c_char, maximum: usize) -> Result<String> {
+unsafe fn native_identity_string(pointer: *const c_char) -> Result<String> {
     if pointer.is_null() {
         return Err(Error::Incompatible(
             "native identity string is null".to_owned(),
         ));
     }
     // SAFETY: The matching companion ABI promises a static NUL-terminated
-    // string. The post-read length bound rejects malformed identities.
+    // string. No length is chosen: the caller compares the whole identity.
     let value = unsafe { CStr::from_ptr(pointer) };
     let bytes = value.to_bytes();
-    if bytes.is_empty() || bytes.len() > maximum {
+    if bytes.is_empty() {
         return Err(Error::Incompatible(
-            "native identity string exceeds its bound".to_owned(),
+            "native identity string is empty".to_owned(),
         ));
     }
     value

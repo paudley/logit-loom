@@ -5,7 +5,7 @@
 use logit_loom_core::{CoreError, Digest};
 use serde::{Deserialize, Serialize};
 
-use crate::{Error, MAX_DIFFUSION_STEPS, Result};
+use crate::{Error, Result};
 
 /// Default transition count published for Krea 2 Turbo.
 pub const KREA_2_TURBO_DEFAULT_STEPS: u32 = 8;
@@ -33,21 +33,19 @@ impl KreaDiscreteFlowScheduleV1 {
     /// Returns an error for zero or excessive steps, or for a non-finite or
     /// non-positive flow shift.
     pub fn new(steps: u32, flow_shift: f32) -> Result<Self> {
-        if steps == 0
-            || usize::try_from(steps).map_or(true, |value| value > MAX_DIFFUSION_STEPS)
-            || !flow_shift.is_finite()
-            || flow_shift <= 0.0
-        {
+        if steps == 0 || !flow_shift.is_finite() || flow_shift <= 0.0 {
             return Err(Error::Contract(CoreError::invalid(
                 "Krea discrete-flow schedule",
-                "steps must be within the diffusion bound and flow shift must be finite and positive",
+                "steps must be at least one and flow shift must be finite and positive",
             )));
         }
 
+        // The step count is a 16-bit integer in this schedule's identity and its
+        // exact `f32` arithmetic: a format property, not a chosen bound.
         let bounded_steps = u16::try_from(steps).map_err(|_| {
             Error::Contract(CoreError::invalid(
                 "Krea discrete-flow schedule",
-                "validated steps do not fit the bounded schedule representation",
+                "steps exceed the 16-bit schedule step width",
             ))
         })?;
         let capacity = usize::from(bounded_steps).saturating_add(1);

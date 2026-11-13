@@ -22,6 +22,81 @@ include breaking API changes.
 
 ### Removed
 
+- The chosen limits on image, tensor, checkpoint and resident-program sizes
+  are removed in the stable-diffusion.cpp companion patches and in the Rust
+  contracts that mirrored them, so the native companion must be rebuilt. A
+  bound stays only when it is physical or a property of the format, and is
+  then named as that in the code and the refusal; a number somebody picked
+  goes, and memory is the real limit, with fallible allocation and a named
+  refusal. Per number:
+  - Chosen, removed: image width and height above 4096 (every native check and
+    the Rust checks); `MAX_IMAGE_BUFFERS` (64), `MAX_IMAGE_LORAS` (32),
+    `MAX_IMAGE_OPERATORS` (64), `MAX_IMAGE_OBSERVATIONS` (64) and the matching
+    receipt bounds; `MAX_REFERENCE_IMAGES` (16) and `MAX_REQUEST_LORAS` (32)
+    and the native reference (16) and `LoRA` (32) counts;
+    `MAX_TENSOR_ELEMENTS` (16 Mi elements) and the native element limits on
+    imported tensors, VAE encode results, VAE decode input, step state, and
+    resume state; the native arena limits of 128 values and 2 GiB and the
+    1 GiB limit on one imported byte value; the 64 KiB limit on a text value;
+    the 4096-byte `LoRA` path limits (native and `MAX_PATH_BYTES`); the native
+    limits of 4096 `LoRA` schedule points, 16 snapshots, a guidance scale of
+    64 and `LoRA` scales and multipliers of plus or minus 64; the 64
+    model-block operators and the plus or minus 16 residual scale;
+    `MAX_DIFFUSION_STEPS` (4096) as a chosen count (the native 4097-sigma
+    limit); `MAX_COMPONENTS` (32), `MAX_INTERVENTION_STAGES` (32),
+    `MAX_DEVICE_LABEL_BYTES` (256), the 64-byte component name length, the
+    16.0 bounds on a channel-bias delta and a residual scale,
+    `MAX_SELECTOR_LABEL_BYTES` (128),
+    `MAX_OPERATOR_CONTROL_BYTES` (4096), `MAX_BACKEND_LABEL_BYTES` (128),
+    `MAX_IMAGE_COMPOSITE_STAGES` (32), `MAX_IMAGE_GRAPH_SCRATCH_BYTES`
+    (512 MiB), `MAX_CHECKPOINT_RECEIPT_BYTES` (64 KiB),
+    `MAX_CHECKPOINT_STATE_BYTES`, `MAX_CHECKPOINT_ENVELOPE_BYTES`, the
+    256 conditioning tensors, 1 GiB of conditioning bytes and 256-byte
+    conditioning label of a generation, and the device-report and identity
+    string limits of the loader. All of these constants are no longer exported
+    (a breaking change for code that names them) and the validation error text
+    changed.
+  - Format property, kept and named: image width and height at most
+    `i32::MAX` (the companion takes them as `int`; `MAX_IMAGE_DIMENSION` keeps
+    its name and now has that value); sigma count at most `i32::MAX`
+    (`MAX_DIFFUSION_STEPS` keeps its name and now has that value, `i32::MAX - 1`
+    steps); reference count at most `i32::MAX` and `LoRA` count at most
+    `u32::MAX`; the product `width * height * channels` of every image
+    extent at most `i32::MAX` (upstream computes pixel and byte counts as
+    `int`; `image_extent_fits_native_int` and `IMAGE_EXTENT_PRODUCT_REFUSAL` are
+    new public items, and the native refusal is logged by name); at most
+    `u32::MAX - 1` resident values (the slot width); tensor
+    rank at most eight (`MAX_TENSOR_DIMENSIONS`, `MAX_VAE_TENSOR_RANK`: the
+    fixed shape array of the value descriptor); a resident PNG whose upper
+    bound exceeds `i32::MAX` is refused (the bundled encoder uses `int`
+    lengths); generated schedules and `linear_euler` have at most `u16::MAX`
+    steps (their step width); the checkpoint envelope receipt length is a
+    `u32`; every byte and pixel count is checked for 64-bit and `size_t`
+    overflow.
+  - Allocation: the checkpoint envelope, the device report, the primary and
+    composite RGB8 buffers, the native image and VAE tensor copies, the step
+    state copy and the model-block transition buffers are now allocated
+    fallibly and an allocator refusal is returned as
+    `Error::Allocation`. In the companion, the request-local `LoRA` and
+    reference arrays, the VAE decode input, the decoded output image and the
+    step-state copy are allocated inside a handler that logs
+    `Logit Loom allocation refused: ...` and returns the existing native-error
+    status; the imported value copies and the arena reservation already fail
+    inside the existing handlers, which log the exception by function. The C
+    ABI header and every status code are unchanged.
+  - Not changed in this release, each because it belongs to a separate feature
+    family or crate that this change did not touch: `MAX_EXECUTION_BUFFERS`,
+    `MAX_WHOLE_GENERATION_*` and `MAX_MEDIA_TYPE_BYTES` in the executor crate,
+    and `MAX_STEP_OBSERVERS`. Reservations sized by a schedule or value the
+    caller already holds (for example the per-step vectors and the checkpoint
+    state copies) remain infallible. The model-block overlap check is
+    quadratic in operators and linear in steps and has no cap; it terminates
+    because step lists are finite. The Krea activation limits (capture, operation,
+    input, token-range and byte limits, `MAX_KREA_*`), the projected-component
+    limits (`MAX_PROJECTED_COMPONENT_*`), and the text-generation limits in
+    the core crate remain, with their native counterparts in the Krea
+    activation patch (including its 4097-sigma check).
+
 - The chosen limits on resident image programs are removed:
   `MAX_IMAGE_PROGRAM_STAGES`, `MAX_IMAGE_PROGRAM_VALUES`,
   `MAX_IMAGE_PROGRAM_INPUTS`, `MAX_IMAGE_PROGRAM_OUTPUTS`,
