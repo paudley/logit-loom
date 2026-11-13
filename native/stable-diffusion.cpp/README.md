@@ -76,7 +76,15 @@ content identities.
 
 ## Build
 
-Use source and build directories outside this checkout:
+Use source and build directories outside this checkout, and by default outside
+any Git work tree: the script refuses a directory inside one, because `git
+apply` and CMake's revision queries would find the enclosing repository, and
+the build must read only the vendored files. A git-ignored directory inside the
+calling project's own work tree is accepted with `--git-ceiling`, which stops
+Git's repository discovery at the source directory's parent for `git apply` and
+for CMake. In both modes the configure step must record an unknown revision
+(`stable-diffusion.cpp version unknown`, `stable-diffusion.cpp commit unknown`
+and `ggml commit:  unknown`) or the script fails.
 
 ```sh
 scripts/prepare-sdcpp.sh \
