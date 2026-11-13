@@ -2,6 +2,21 @@
 
 # Repository guidance for agents
 
+## Guiding principles
+
+When requests conflict, these decide:
+
+- **GREENFIELD:** we always correct the mistakes of the past. Others' mistakes
+  are our lessons, not our limits.
+- **SOTA:** always choose the state of the art over the bones of the past.
+- **OPTIMAL:** choose the Pareto frontier of the quality, speed, efficiency and
+  other axes.
+- **MAXIMAL:** support the broadest functionality possible after the other
+  choices are made.
+
+These principles decide between conflicting requests. They do not replace this
+repository's standing rules or a direct instruction from the owner.
+
 ## Purpose
 
 Logit Loom is a public Rust toolkit for low-level token-stream mechanics. It
