@@ -447,17 +447,14 @@ impl ImageRequest {
                 "Euler step count must be at least one".to_owned(),
             ));
         }
-        let mut sigmas = Vec::with_capacity(
-            usize::try_from(steps)
-                .map_err(|_| Error::Invalid("step count exceeds usize".to_owned()))?
-                .saturating_add(1),
-        );
         // The step count is a 16-bit integer in this schedule's identity and its
-        // exact `f32` arithmetic: a format property, not a chosen bound.
-        let divisor = f32::from(
-            u16::try_from(steps)
-                .map_err(|_| Error::Invalid("Euler step count exceeds u16".to_owned()))?,
-        );
+        // exact `f32` arithmetic: a format property, not a chosen bound. It is
+        // checked before anything is reserved, so an extreme count is refused
+        // without allocating.
+        let steps_u16 = u16::try_from(steps)
+            .map_err(|_| Error::Invalid("Euler step count exceeds u16".to_owned()))?;
+        let divisor = f32::from(steps_u16);
+        let mut sigmas = Vec::with_capacity(usize::from(steps_u16) + 1);
         for step in 0..=steps {
             let numerator = f32::from(
                 u16::try_from(steps - step)
