@@ -222,242 +222,6 @@ impl ContextCompatibility {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn session_options_reject_native_position_overflow() {
-        let options = SessionOptions {
-            context_size: NonZeroU32::new(u32::MAX).unwrap(),
-            ..SessionOptions::default()
-        };
-        assert!(options.validate().is_err());
-    }
-
-    #[test]
-    fn session_options_enforce_batch_and_thread_bounds() {
-        let defaults = SessionOptions::default();
-        assert!(defaults.validate().is_ok());
-        assert!(
-            SessionOptions {
-                micro_batch_size: defaults.batch_size + 1,
-                ..defaults
-            }
-            .validate()
-            .is_err()
-        );
-        assert!(
-            SessionOptions {
-                threads: 0,
-                ..defaults
-            }
-            .validate()
-            .is_err()
-        );
-    }
-
-    #[test]
-    fn session_options_reject_a_quantized_cache_without_flash_attention() {
-        let defaults = SessionOptions::default();
-        for kv_cache_type in [KvCacheType::Q8_0, KvCacheType::Q4_0] {
-            assert!(
-                SessionOptions {
-                    kv_cache_type,
-                    flash_attention: FlashAttention::Disabled,
-                    ..defaults
-                }
-                .validate()
-                .is_err()
-            );
-            for flash_attention in [FlashAttention::Auto, FlashAttention::Enabled] {
-                assert!(
-                    SessionOptions {
-                        kv_cache_type,
-                        flash_attention,
-                        ..defaults
-                    }
-                    .validate()
-                    .is_ok()
-                );
-            }
-        }
-        assert!(
-            SessionOptions {
-                flash_attention: FlashAttention::Disabled,
-                ..defaults
-            }
-            .validate()
-            .is_ok()
-        );
-    }
-
-    #[test]
-    fn checkpoint_compatibility_binds_session_options() {
-        let defaults = SessionOptions::default();
-        let compatibility = ContextCompatibility {
-            runtime: Digest::of_bytes("test-runtime", b"one"),
-            options: defaults,
-            context: ContextKind::Ordinary,
-            recurrent_state_slots: 0,
-        };
-        let identity = compatibility.digest();
-        assert_eq!(identity, compatibility.clone().digest());
-        let variants = [
-            ContextCompatibility {
-                runtime: Digest::of_bytes("test-runtime", b"two"),
-                ..compatibility.clone()
-            },
-            ContextCompatibility {
-                options: SessionOptions {
-                    context_size: NonZeroU32::new(defaults.context_size.get() + 1).unwrap(),
-                    ..defaults
-                },
-                ..compatibility.clone()
-            },
-            ContextCompatibility {
-                options: SessionOptions {
-                    threads: defaults.threads + 1,
-                    ..defaults
-                },
-                ..compatibility.clone()
-            },
-            ContextCompatibility {
-                options: SessionOptions {
-                    kv_cache_type: KvCacheType::Q8_0,
-                    ..defaults
-                },
-                ..compatibility.clone()
-            },
-            ContextCompatibility {
-                options: SessionOptions {
-                    flash_attention: FlashAttention::Enabled,
-                    ..defaults
-                },
-                ..compatibility.clone()
-            },
-            ContextCompatibility {
-                context: ContextKind::Mtp,
-                recurrent_state_slots: 4,
-                ..compatibility.clone()
-            },
-            ContextCompatibility {
-                recurrent_state_slots: 1,
-                ..compatibility.clone()
-            },
-        ];
-        for variant in &variants {
-            assert_ne!(identity, variant.digest(), "{variant:?}");
-        }
-        let mut digests: Vec<Digest> = variants.iter().map(ContextCompatibility::digest).collect();
-        digests.sort();
-        digests.dedup();
-        assert_eq!(digests.len(), variants.len());
-    }
-
-    #[test]
-    fn ordinary_checkpoint_sessions_reserve_only_the_required_recurrent_snapshot() {
-        assert_eq!(ordinary_checkpoint_recurrent_state_slots(false, false), 0);
-        assert_eq!(ordinary_checkpoint_recurrent_state_slots(false, true), 0);
-        assert_eq!(ordinary_checkpoint_recurrent_state_slots(true, false), 0);
-        assert_eq!(ordinary_checkpoint_recurrent_state_slots(true, true), 1);
-    }
-
-    #[test]
-    fn generation_output_preserves_arbitrary_bytes() {
-        let output = GenerationOutput {
-            bytes: vec![0xff],
-            tokens: vec![TokenId::new(1).unwrap()],
-            receipt: GenerationReceipt {
-                plan: Digest::of_bytes("test-plan", b"bytes"),
-                initial_position: 0,
-                admitted_tokens: 1,
-                admitted_bytes: 1,
-                final_position: 1,
-                finish: GenerationFinish::TokenLimit,
-                transform_receipt: None,
-                observer_receipts: Vec::new(),
-            },
-        };
-        assert!(output.text().is_err());
-        assert_eq!(output.bytes, [0xff]);
-    }
-
-    #[test]
-    fn checkpoint_parts_validate_before_native_restore() {
-        let bytes = vec![1, 2, 3];
-        let tokens = vec![TokenId::new(4).unwrap()];
-        let receipt = CheckpointReceipt {
-            model: Digest::of_bytes("test-model", b"one"),
-            backend: Digest::of_bytes("test-backend", b"one"),
-            state: Digest::of_bytes(STATE_BYTES_DOMAIN, &bytes),
-            state_bytes: 3,
-            token_history: Digest::of_serializable(TOKEN_HISTORY_DOMAIN, &tokens).unwrap(),
-            position: 1,
-        };
-        let snapshot =
-            StateSnapshot::from_parts(bytes.clone(), tokens.clone(), receipt.clone()).unwrap();
-        assert_eq!(snapshot.bytes(), bytes);
-        assert_eq!(snapshot.tokens(), tokens);
-        assert_eq!(snapshot.receipt(), &receipt);
-        assert_eq!(snapshot.into_parts(), (bytes, tokens, receipt));
-    }
-
-    #[test]
-    fn checkpoint_parts_reject_tampered_accounting() {
-        let bytes = vec![1, 2, 3];
-        let tokens = vec![TokenId::new(4).unwrap()];
-        let mut receipt = CheckpointReceipt {
-            model: Digest::of_bytes("test-model", b"one"),
-            backend: Digest::of_bytes("test-backend", b"one"),
-            state: Digest::of_bytes(STATE_BYTES_DOMAIN, &bytes),
-            state_bytes: 4,
-            token_history: Digest::of_serializable(TOKEN_HISTORY_DOMAIN, &tokens).unwrap(),
-            position: 1,
-        };
-        assert!(StateSnapshot::from_parts(bytes.clone(), tokens.clone(), receipt.clone()).is_err());
-
-        receipt.state_bytes = 3;
-        receipt.position = 2;
-        assert!(StateSnapshot::from_parts(bytes, tokens, receipt).is_err());
-    }
-
-    #[test]
-    fn overlapping_stops_choose_the_lowest_declared_index() {
-        let stops = vec![b"bc".to_vec(), b"abc".to_vec(), b"c".to_vec()];
-        assert_eq!(matching_stop(&stops, b"zabc"), Some(0));
-        assert_eq!(matching_stop(&stops, b"zab"), None);
-    }
-
-    #[test]
-    fn ordinary_checkpoint_stop_tail_preserves_cross_operation_matches() {
-        let plan = GenerationPlan {
-            sampling: logit_loom::SamplingPlan::default(),
-            max_tokens: 4,
-            biases: Vec::new(),
-            grammar: None,
-            stops: vec![b"abcd".to_vec()],
-        };
-        let mut window = b"ab".to_vec();
-        extend_stop_window(&plan, &mut window, b"cd");
-        assert_eq!(matching_stop(&plan.stops, &window), Some(0));
-        assert_eq!(checkpoint_stop_tail(&plan, b"zabc"), b"abc");
-        assert!(validate_stop_tail(&plan, b"abc").is_ok());
-        assert!(validate_stop_tail(&plan, b"abcd").is_err());
-    }
-
-    #[test]
-    fn checkpoint_logit_refresh_targets_only_the_last_position() {
-        assert_eq!(checkpoint_logit_refresh_range(0).unwrap(), None);
-        assert_eq!(checkpoint_logit_refresh_range(1).unwrap(), Some((0, 1)));
-        assert_eq!(
-            checkpoint_logit_refresh_range(i32::MAX as u64).unwrap(),
-            Some((i32::MAX as u32 - 1, i32::MAX as u32))
-        );
-        assert!(checkpoint_logit_refresh_range(u64::MAX).is_err());
-    }
-}
-
 /// Result of one plain or controlled prefill call.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PrefillOutput {
@@ -1632,5 +1396,241 @@ const fn ordinary_checkpoint_recurrent_state_slots(
         1
     } else {
         0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn session_options_reject_native_position_overflow() {
+        let options = SessionOptions {
+            context_size: NonZeroU32::new(u32::MAX).unwrap(),
+            ..SessionOptions::default()
+        };
+        assert!(options.validate().is_err());
+    }
+
+    #[test]
+    fn session_options_enforce_batch_and_thread_bounds() {
+        let defaults = SessionOptions::default();
+        assert!(defaults.validate().is_ok());
+        assert!(
+            SessionOptions {
+                micro_batch_size: defaults.batch_size + 1,
+                ..defaults
+            }
+            .validate()
+            .is_err()
+        );
+        assert!(
+            SessionOptions {
+                threads: 0,
+                ..defaults
+            }
+            .validate()
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn session_options_reject_a_quantized_cache_without_flash_attention() {
+        let defaults = SessionOptions::default();
+        for kv_cache_type in [KvCacheType::Q8_0, KvCacheType::Q4_0] {
+            assert!(
+                SessionOptions {
+                    kv_cache_type,
+                    flash_attention: FlashAttention::Disabled,
+                    ..defaults
+                }
+                .validate()
+                .is_err()
+            );
+            for flash_attention in [FlashAttention::Auto, FlashAttention::Enabled] {
+                assert!(
+                    SessionOptions {
+                        kv_cache_type,
+                        flash_attention,
+                        ..defaults
+                    }
+                    .validate()
+                    .is_ok()
+                );
+            }
+        }
+        assert!(
+            SessionOptions {
+                flash_attention: FlashAttention::Disabled,
+                ..defaults
+            }
+            .validate()
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn checkpoint_compatibility_binds_session_options() {
+        let defaults = SessionOptions::default();
+        let compatibility = ContextCompatibility {
+            runtime: Digest::of_bytes("test-runtime", b"one"),
+            options: defaults,
+            context: ContextKind::Ordinary,
+            recurrent_state_slots: 0,
+        };
+        let identity = compatibility.digest();
+        assert_eq!(identity, compatibility.clone().digest());
+        let variants = [
+            ContextCompatibility {
+                runtime: Digest::of_bytes("test-runtime", b"two"),
+                ..compatibility.clone()
+            },
+            ContextCompatibility {
+                options: SessionOptions {
+                    context_size: NonZeroU32::new(defaults.context_size.get() + 1).unwrap(),
+                    ..defaults
+                },
+                ..compatibility.clone()
+            },
+            ContextCompatibility {
+                options: SessionOptions {
+                    threads: defaults.threads + 1,
+                    ..defaults
+                },
+                ..compatibility.clone()
+            },
+            ContextCompatibility {
+                options: SessionOptions {
+                    kv_cache_type: KvCacheType::Q8_0,
+                    ..defaults
+                },
+                ..compatibility.clone()
+            },
+            ContextCompatibility {
+                options: SessionOptions {
+                    flash_attention: FlashAttention::Enabled,
+                    ..defaults
+                },
+                ..compatibility.clone()
+            },
+            ContextCompatibility {
+                context: ContextKind::Mtp,
+                recurrent_state_slots: 4,
+                ..compatibility.clone()
+            },
+            ContextCompatibility {
+                recurrent_state_slots: 1,
+                ..compatibility.clone()
+            },
+        ];
+        for variant in &variants {
+            assert_ne!(identity, variant.digest(), "{variant:?}");
+        }
+        let mut digests: Vec<Digest> = variants.iter().map(ContextCompatibility::digest).collect();
+        digests.sort();
+        digests.dedup();
+        assert_eq!(digests.len(), variants.len());
+    }
+
+    #[test]
+    fn ordinary_checkpoint_sessions_reserve_only_the_required_recurrent_snapshot() {
+        assert_eq!(ordinary_checkpoint_recurrent_state_slots(false, false), 0);
+        assert_eq!(ordinary_checkpoint_recurrent_state_slots(false, true), 0);
+        assert_eq!(ordinary_checkpoint_recurrent_state_slots(true, false), 0);
+        assert_eq!(ordinary_checkpoint_recurrent_state_slots(true, true), 1);
+    }
+
+    #[test]
+    fn generation_output_preserves_arbitrary_bytes() {
+        let output = GenerationOutput {
+            bytes: vec![0xff],
+            tokens: vec![TokenId::new(1).unwrap()],
+            receipt: GenerationReceipt {
+                plan: Digest::of_bytes("test-plan", b"bytes"),
+                initial_position: 0,
+                admitted_tokens: 1,
+                admitted_bytes: 1,
+                final_position: 1,
+                finish: GenerationFinish::TokenLimit,
+                transform_receipt: None,
+                observer_receipts: Vec::new(),
+            },
+        };
+        assert!(output.text().is_err());
+        assert_eq!(output.bytes, [0xff]);
+    }
+
+    #[test]
+    fn checkpoint_parts_validate_before_native_restore() {
+        let bytes = vec![1, 2, 3];
+        let tokens = vec![TokenId::new(4).unwrap()];
+        let receipt = CheckpointReceipt {
+            model: Digest::of_bytes("test-model", b"one"),
+            backend: Digest::of_bytes("test-backend", b"one"),
+            state: Digest::of_bytes(STATE_BYTES_DOMAIN, &bytes),
+            state_bytes: 3,
+            token_history: Digest::of_serializable(TOKEN_HISTORY_DOMAIN, &tokens).unwrap(),
+            position: 1,
+        };
+        let snapshot =
+            StateSnapshot::from_parts(bytes.clone(), tokens.clone(), receipt.clone()).unwrap();
+        assert_eq!(snapshot.bytes(), bytes);
+        assert_eq!(snapshot.tokens(), tokens);
+        assert_eq!(snapshot.receipt(), &receipt);
+        assert_eq!(snapshot.into_parts(), (bytes, tokens, receipt));
+    }
+
+    #[test]
+    fn checkpoint_parts_reject_tampered_accounting() {
+        let bytes = vec![1, 2, 3];
+        let tokens = vec![TokenId::new(4).unwrap()];
+        let mut receipt = CheckpointReceipt {
+            model: Digest::of_bytes("test-model", b"one"),
+            backend: Digest::of_bytes("test-backend", b"one"),
+            state: Digest::of_bytes(STATE_BYTES_DOMAIN, &bytes),
+            state_bytes: 4,
+            token_history: Digest::of_serializable(TOKEN_HISTORY_DOMAIN, &tokens).unwrap(),
+            position: 1,
+        };
+        assert!(StateSnapshot::from_parts(bytes.clone(), tokens.clone(), receipt.clone()).is_err());
+
+        receipt.state_bytes = 3;
+        receipt.position = 2;
+        assert!(StateSnapshot::from_parts(bytes, tokens, receipt).is_err());
+    }
+
+    #[test]
+    fn overlapping_stops_choose_the_lowest_declared_index() {
+        let stops = vec![b"bc".to_vec(), b"abc".to_vec(), b"c".to_vec()];
+        assert_eq!(matching_stop(&stops, b"zabc"), Some(0));
+        assert_eq!(matching_stop(&stops, b"zab"), None);
+    }
+
+    #[test]
+    fn ordinary_checkpoint_stop_tail_preserves_cross_operation_matches() {
+        let plan = GenerationPlan {
+            sampling: logit_loom::SamplingPlan::default(),
+            max_tokens: 4,
+            biases: Vec::new(),
+            grammar: None,
+            stops: vec![b"abcd".to_vec()],
+        };
+        let mut window = b"ab".to_vec();
+        extend_stop_window(&plan, &mut window, b"cd");
+        assert_eq!(matching_stop(&plan.stops, &window), Some(0));
+        assert_eq!(checkpoint_stop_tail(&plan, b"zabc"), b"abc");
+        assert!(validate_stop_tail(&plan, b"abc").is_ok());
+        assert!(validate_stop_tail(&plan, b"abcd").is_err());
+    }
+
+    #[test]
+    fn checkpoint_logit_refresh_targets_only_the_last_position() {
+        assert_eq!(checkpoint_logit_refresh_range(0).unwrap(), None);
+        assert_eq!(checkpoint_logit_refresh_range(1).unwrap(), Some((0, 1)));
+        assert_eq!(
+            checkpoint_logit_refresh_range(i32::MAX as u64).unwrap(),
+            Some((i32::MAX as u32 - 1, i32::MAX as u32))
+        );
+        assert!(checkpoint_logit_refresh_range(u64::MAX).is_err());
     }
 }
